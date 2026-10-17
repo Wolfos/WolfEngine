@@ -131,6 +131,16 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 		ArgumentNullException.ThrowIfNull(deletedEntities);
 
 		var entitiesById = new Dictionary<Guid, Entity>(deletedEntities.Count);
+		// Parents outside the restored batch remain in the scene. Index them once so
+		// restoring a subtree can reconnect its root without scanning the scene per entity.
+		foreach (var (entity, entityId) in scene.EntityIds)
+		{
+			if (entityId != Guid.Empty && scene.World.IsAlive(entity))
+			{
+				entitiesById[entityId] = entity;
+			}
+		}
+
 		var restoredEntities = new List<(Entity Entity, SavedEntity Saved)>(deletedEntities.Count);
 
 		// Create and register every entity before restoring any component, so entity
@@ -143,9 +153,8 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 				continue;
 			}
 
-			if (TryFindEntity(scene, snapshot.Entity.EntityId, out var existing))
+			if (entitiesById.ContainsKey(snapshot.Entity.EntityId))
 			{
-				entitiesById[snapshot.Entity.EntityId] = existing;
 				continue;
 			}
 
@@ -312,7 +321,7 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 		return false;
 	}
 
-	private static Guid? TryGetParentEntityId(EditorScene scene, Entity entity)
+	private Guid? TryGetParentEntityId(EditorScene scene, Entity entity)
 	{
 		if (scene.World.HasComponent<Parent>(entity) == false)
 		{
@@ -320,8 +329,8 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 		}
 
 		var parent = scene.World.GetComponent<Parent>(entity).Value;
-		return scene.EntityIds.TryGetValue(parent, out var parentId) && parentId != Guid.Empty
-			? parentId
+		return scene.World.IsAlive(parent)
+			? EnsurePersistentEntityId(scene, parent)
 			: null;
 	}
 

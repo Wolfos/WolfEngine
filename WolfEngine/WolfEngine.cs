@@ -22,6 +22,8 @@ public static class WolfEngine
 	public static void ConfigureServices(IServiceCollection services)
 	{
 		services.AddSingleton<ILogService, LogService>();
+		services.AddSingleton<Gameplay.SceneLoadRequests>();
+		services.AddSingleton<Gameplay.ISceneLoadService>(sp => sp.GetRequiredService<Gameplay.SceneLoadRequests>());
 		services.AddSingleton<EngineShaderCatalog>();
 		services.AddSingleton<IImageLoader, StbImageLoader>();
 		services.AddSingleton<ITextureFactory, TextureFactory>();
@@ -30,7 +32,9 @@ public static class WolfEngine
 		services.AddSingleton<IAssetMetadataStore, AssetMetadataStore>();
 		services.AddSingleton<IRuntimeArtifactTargetProvider, RuntimeArtifactTargetProvider>();
 		services.AddSingleton<IArenaAllocator, ArenaAllocator>();
+		services.AddSingleton<PointerInputQueue>();
 		services.AddSingleton<IInputSystem, InputSystem>();
+		services.AddSingleton<IPointerInputRouter>(NullPointerInputRouter.Instance);
 		services.AddSingleton<ImGuiUiSystem>();
 		services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 		services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());
@@ -61,6 +65,16 @@ public static class WolfEngine
 		if (OperatingSystem.IsMacOS())
 		{
 			services.AddSingleton<IMacOSInputHandler, MacOsInputHandler>();
+			services.AddSingleton<IMetalSurface, SdlMetalSurface>();
+			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
+			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
+			services.AddSingleton<IRenderer, WolfRendererMetal>();
+			services.AddSingleton<IRenderPipeline, RenderPipeline>();
+		}
+		else if (OperatingSystem.IsIOS())
+		{
+			// The app owns the view and the main loop, so it registers its layer with AddHostMetalSurface and drives
+			// frames through IRenderPipeline.Start and RenderFrame.
 			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
 			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();

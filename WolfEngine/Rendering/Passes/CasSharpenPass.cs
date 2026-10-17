@@ -22,7 +22,7 @@ public sealed class CasSharpenPass
 
 	public CasSharpenPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
 		IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(context);

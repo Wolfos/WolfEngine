@@ -10,6 +10,8 @@ public sealed class EditorAutomationOptions
 	public required string ScenePath { get; init; }
 	public required string CapturePath { get; init; }
 	public required int Frames { get; init; }
+	public int ProfileFrames { get; init; }
+	public string? ProfileOutputPath { get; init; }
 	public Int2 Resolution { get; init; } = new(DefaultWidth, DefaultHeight);
 
 	public static bool TryParse(string[] args, out EditorAutomationOptions? options, out string error)
@@ -25,13 +27,15 @@ public sealed class EditorAutomationOptions
 		string? scene = null;
 		string? capture = null;
 		int? frames = null;
+		var profileFrames = 0;
+		string? profileOutput = null;
 		var width = DefaultWidth;
 		var height = DefaultHeight;
 		for (var index = 0; index < args.Length; index++)
 		{
 			var argument = args[index];
 			if (argument == "--quit") continue;
-			if (argument is not ("--project" or "--scene" or "--frames" or "--capture" or "--width" or "--height"))
+			if (argument is not ("--project" or "--scene" or "--frames" or "--capture" or "--width" or "--height" or "--profile-frames" or "--profile-output"))
 			{
 				error = $"Unknown option '{argument}'.";
 				return false;
@@ -51,6 +55,8 @@ public sealed class EditorAutomationOptions
 				case "--frames" when int.TryParse(value, out var parsedFrames): frames = parsedFrames; break;
 				case "--width" when int.TryParse(value, out var parsedWidth): width = parsedWidth; break;
 				case "--height" when int.TryParse(value, out var parsedHeight): height = parsedHeight; break;
+				case "--profile-frames" when int.TryParse(value, out var parsedProfileFrames): profileFrames = parsedProfileFrames; break;
+				case "--profile-output": profileOutput = value; break;
 				default:
 					error = $"Option '{argument}' requires a positive integer.";
 					return false;
@@ -62,6 +68,11 @@ public sealed class EditorAutomationOptions
 			error = "Automation requires --scene, --frames, and --capture; frame count and dimensions must be positive.";
 			return false;
 		}
+		if ((profileFrames > 0) != !string.IsNullOrWhiteSpace(profileOutput))
+		{
+			error = "--profile-frames and --profile-output must be provided together; profile frame count must be positive.";
+			return false;
+		}
 
 		var projectPath = Path.GetFullPath(string.IsNullOrWhiteSpace(project) ? Directory.GetCurrentDirectory() : project);
 		options = new EditorAutomationOptions
@@ -70,6 +81,8 @@ public sealed class EditorAutomationOptions
 			ScenePath = scene,
 			CapturePath = capture,
 			Frames = frames.Value,
+			ProfileFrames = profileFrames,
+			ProfileOutputPath = profileOutput,
 			Resolution = new Int2(width, height)
 		};
 		return true;

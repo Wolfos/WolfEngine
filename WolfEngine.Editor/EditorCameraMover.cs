@@ -1,6 +1,7 @@
 ﻿using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Input;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor;
@@ -8,6 +9,7 @@ namespace WolfEngine.Editor;
 [EditorOnly]
 public struct EditorCameraMover : IEntityComponent
 {
+	public RenderViewId View;
 	public float MoveSpeed;
 	public float LookSensitivity;
 	public float Yaw;
@@ -19,6 +21,8 @@ public class EditorCameraSystem: IUpdate
 {
 	private readonly IInputSystem _inputSystem;
 	private readonly EditorViewportStateBus _viewportStateBus;
+	private readonly object _inputSync = new();
+	private readonly Dictionary<RenderViewId, CameraPose> _cameraPoses = new();
 	private bool _moveForwardHeld;
 	private bool _moveBackHeld;
 	private bool _moveLeftHeld;
@@ -28,10 +32,12 @@ public class EditorCameraSystem: IUpdate
 	private bool _speedBoost;
 	private bool _isLooking;
 	private Vector2 _lookDelta;
-	private bool _hadViewportControl;
-	private Vector3 _position;
-	private Vector3 _forward = Vector3.UnitZ;
-	private bool _hasCameraPose;
+	private RenderViewId _activeInputView = RenderViewId.None;
+	private Vector2 _frameLookDelta;
+	private Vector3 _frameMoveInput;
+	private bool _frameSpeedBoost;
+
+	private readonly record struct CameraPose(World World, Entity Entity, Vector3 Position, Vector3 Forward);
 
 	public EditorCameraSystem(IInputSystem inputSystem, EditorViewportStateBus viewportStateBus)
 	{
@@ -69,60 +75,72 @@ public class EditorCameraSystem: IUpdate
 		};
 	}
 
-	private void OnMoveForward(InputActionCallback<bool> callback) => _moveForwardHeld = callback.Value;
-	private void OnMoveLeft(InputActionCallback<bool> callback) => _moveLeftHeld = callback.Value;
-	private void OnMoveRight(InputActionCallback<bool> callback) => _moveRightHeld = callback.Value;
-	private void OnMoveBack(InputActionCallback<bool> callback) => _moveBackHeld = callback.Value;
-	private void OnMoveUp(InputActionCallback<bool> callback) => _moveUpHeld = callback.Value;
-	private void OnMoveDown(InputActionCallback<bool> callback) => _moveDownHeld = callback.Value;
-	private void OnSpeedUp(InputActionCallback<bool> callback) => _speedBoost = callback.Value;
-	private void OnLookButton(InputActionCallback<bool> callback) => _isLooking = callback.Value;
+	private void OnMoveForward(InputActionCallback<bool> callback) { lock (_inputSync) _moveForwardHeld = callback.Value; }
+	private void OnMoveLeft(InputActionCallback<bool> callback) { lock (_inputSync) _moveLeftHeld = callback.Value; }
+	private void OnMoveRight(InputActionCallback<bool> callback) { lock (_inputSync) _moveRightHeld = callback.Value; }
+	private void OnMoveBack(InputActionCallback<bool> callback) { lock (_inputSync) _moveBackHeld = callback.Value; }
+	private void OnMoveUp(InputActionCallback<bool> callback) { lock (_inputSync) _moveUpHeld = callback.Value; }
+	private void OnMoveDown(InputActionCallback<bool> callback) { lock (_inputSync) _moveDownHeld = callback.Value; }
+	private void OnSpeedUp(InputActionCallback<bool> callback) { lock (_inputSync) _speedBoost = callback.Value; }
+	private void OnLookButton(InputActionCallback<bool> callback) { lock (_inputSync) _isLooking = callback.Value; }
 
 	private void OnLookDelta(InputActionCallback<Vector2> callback)
 	{
-		if (_isLooking == false)
+		lock (_inputSync)
 		{
-			return;
+			if (_isLooking)
+			{
+				_lookDelta += callback.Value;
+			}
+		}
+	}
+
+	/// <summary>Routes this frame's input once before the world manager visits any editor worlds.</summary>
+	public void BeginFrame()
+	{
+		bool looking;
+		lock (_inputSync) looking = _isLooking;
+
+		var inputView = RenderViewId.None;
+		if (looking && !_viewportStateBus.IsGizmoDragging())
+		{
+			foreach (var view in _viewportStateBus.GetViews())
+			{
+				var state = _viewportStateBus.GetUiState(view);
+				if (state.Visible && state.RightMousePressStartedHere)
+				{
+					inputView = view;
+					if (state.Focused) break;
+				}
+			}
 		}
 
-		_lookDelta += callback.Value;
+		lock (_inputSync)
+		{
+			_frameLookDelta = inputView.IsValid ? _lookDelta : Vector2.Zero;
+			_lookDelta = Vector2.Zero;
+			_frameMoveInput = inputView.IsValid ? GetMoveInput() : Vector3.Zero;
+			_frameSpeedBoost = inputView.IsValid && _speedBoost;
+			_activeInputView = inputView;
+		}
 	}
 
 	public void Update(float deltaTime, World world)
 	{
-		var viewportState = _viewportStateBus.GetUiState();
-		var viewportControlActive =
-			viewportState.Visible &&
-			viewportState.RightMousePressStartedHere &&
-			_isLooking &&
-			_viewportStateBus.IsGizmoDragging() == false;
-		if (viewportControlActive == false)
-		{
-			if (_hadViewportControl)
-			{
-				ClearMovementState();
-				_lookDelta = Vector2.Zero;
-			}
-
-			_hadViewportControl = false;
-		}
-		else
-		{
-			_hadViewportControl = true;
-		}
-
 		foreach (var entry in world.View<LocalTransform, EditorCameraMover>())
 		{
 			ref var transform = ref entry.First;
 			ref var mover = ref entry.Second;
+			var view = mover.View.IsValid ? mover.View : RenderViewId.Primary;
+			var viewportControlActive = view == _activeInputView;
 
 			EnsureDefaults(ref mover);
 			EnsureOrientationFromTransform(ref mover, transform);
 
-			if (viewportControlActive && _lookDelta != Vector2.Zero)
+			if (viewportControlActive && _frameLookDelta != Vector2.Zero)
 			{
-				mover.Yaw += _lookDelta.X * mover.LookSensitivity;
-				mover.Pitch += _lookDelta.Y * mover.LookSensitivity;
+				mover.Yaw += _frameLookDelta.X * mover.LookSensitivity;
+				mover.Pitch += _frameLookDelta.Y * mover.LookSensitivity;
 				mover.Pitch = Math.Clamp(mover.Pitch, -1.55f, 1.55f);
 			}
 
@@ -133,24 +151,50 @@ public class EditorCameraSystem: IUpdate
 			var right = Vector3.Transform(Vector3.UnitX, rotation);
 			var up = Vector3.Transform(Vector3.UnitY, rotation);
 
-			var moveInput = viewportControlActive ? GetMoveInput() : Vector3.Zero;
+			var moveInput = viewportControlActive ? _frameMoveInput : Vector3.Zero;
 			var move = right * moveInput.X + up * moveInput.Y + forward * moveInput.Z;
-			var speed = mover.MoveSpeed * (_speedBoost ? 2.0f : 1.0f);
+			var speed = mover.MoveSpeed * (_frameSpeedBoost ? 2.0f : 1.0f);
 			
 			world.Translate(entry.Entity, move * speed * deltaTime, true);
-			_position = transform.LocalPosition;
-			_forward = forward;
-			_hasCameraPose = true;
+			_cameraPoses[view] = new CameraPose(world, entry.Entity, transform.LocalPosition, forward);
 		}
-
-		_lookDelta = Vector2.Zero;
 	}
 
-	public bool TryGetCameraPose(out Vector3 position, out Vector3 forward)
+	public bool TryGetCameraPose(out Vector3 position, out Vector3 forward) =>
+		TryGetCameraPose(RenderViewId.Primary, out position, out forward);
+
+	public bool TryGetCameraPose(RenderViewId view, out Vector3 position, out Vector3 forward)
 	{
-		position = _position;
-		forward = _forward;
-		return _hasCameraPose;
+		if (_cameraPoses.TryGetValue(view, out var pose) && pose.World.IsAlive(pose.Entity))
+		{
+			position = pose.Position;
+			forward = pose.Forward;
+			return true;
+		}
+		position = default;
+		forward = Vector3.UnitZ;
+		return false;
+	}
+
+	public bool TrySetCameraPose(RenderViewId view, Vector3 position, Vector3 target)
+	{
+		var direction = target - position;
+		if (!float.IsFinite(position.X) || !float.IsFinite(position.Y) || !float.IsFinite(position.Z) ||
+		    !float.IsFinite(direction.X) || !float.IsFinite(direction.Y) || !float.IsFinite(direction.Z) ||
+		    direction.LengthSquared() < 1e-8f)
+			throw new ArgumentException("Camera position and target must be finite and distinct.");
+		if (!_cameraPoses.TryGetValue(view, out var pose) || !pose.World.IsAlive(pose.Entity)) return false;
+		var forward = Vector3.Normalize(direction);
+		var up = MathF.Abs(Vector3.Dot(forward, Vector3.UnitY)) > 0.999f ? Vector3.UnitZ : Vector3.UnitY;
+		var right = Vector3.Normalize(Vector3.Cross(up, forward));
+		up = Vector3.Cross(forward, right);
+		var rotation = new Matrix4x4(right.X, right.Y, right.Z, 0, up.X, up.Y, up.Z, 0,
+			forward.X, forward.Y, forward.Z, 0, 0, 0, 0, 1);
+		pose.World.SetLocalPosition(pose.Entity, position);
+		pose.World.SetLocalRotation(pose.Entity, Quaternion.CreateFromRotationMatrix(rotation));
+		pose.World.GetComponent<EditorCameraMover>(pose.Entity).Initialized = false;
+		_cameraPoses[view] = new CameraPose(pose.World, pose.Entity, position, forward);
+		return true;
 	}
 
 	public WorldTag GetTag() => WorldTag.Editor;
@@ -161,17 +205,6 @@ public class EditorCameraSystem: IUpdate
 			(_moveRightHeld ? 1.0f : 0.0f) - (_moveLeftHeld ? 1.0f : 0.0f),
 			(_moveUpHeld ? 1.0f : 0.0f) - (_moveDownHeld ? 1.0f : 0.0f),
 			(_moveForwardHeld ? 1.0f : 0.0f) - (_moveBackHeld ? 1.0f : 0.0f));
-	}
-
-	private void ClearMovementState()
-	{
-		_moveForwardHeld = false;
-		_moveBackHeld = false;
-		_moveLeftHeld = false;
-		_moveRightHeld = false;
-		_moveUpHeld = false;
-		_moveDownHeld = false;
-		_speedBoost = false;
 	}
 
 	private static void EnsureDefaults(ref EditorCameraMover mover)
@@ -199,7 +232,7 @@ public class EditorCameraSystem: IUpdate
 		{
 			forward = Vector3.Normalize(forward);
 			mover.Yaw = MathF.Atan2(forward.X, forward.Z);
-			mover.Pitch = MathF.Asin(Math.Clamp(forward.Y, -1.0f, 1.0f));
+			mover.Pitch = -MathF.Asin(Math.Clamp(forward.Y, -1.0f, 1.0f));
 		}
 
 		mover.Initialized = true;

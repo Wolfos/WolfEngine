@@ -4,11 +4,15 @@ import "../Common/draw_data.slang";
 #define WOLF_MAX_MESH_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
 #define WOLF_MAX_CULL_VIEW_COUNT 3
-#define WOLF_FRUSTUM_PLANE_COUNT 6
+// Mirrors FrustumCulling.MaxPlaneCount; camera views use six, shadow volumes may use more.
+#define WOLF_CULL_PLANE_COUNT 24
 
+// Mirrors GpuDrawFlags in GpuDrawData.cs.
 static const uint DRAW_FLAG_ACTIVE = 1;
 static const uint DRAW_FLAG_BUCKET_SHIFT = 1;
-static const uint DRAW_FLAG_BUCKET_MASK = 0x7FFFFFFF;
+static const uint DRAW_FLAG_BUCKET_MASK = 0x1F;
+static const uint DRAW_FLAG_OWNER_VIEW_SHIFT = 6;
+static const uint DRAW_FLAG_OWNER_VIEW_MASK = 0x7F;
 
 #ifdef WOLF_GPU_DRAW_DIAGNOSTICS
 static const uint HARDEN_COUNTER_STALE_REJECT = 0;
@@ -19,7 +23,8 @@ static const uint HARDEN_COUNTER_MATERIAL_FALLBACK_DRAW = 5;
 
 cbuffer CullParams : register(b12)
 {
-    float4 planes[WOLF_MAX_CULL_VIEW_COUNT * WOLF_FRUSTUM_PLANE_COUNT];
+    float4 planes[WOLF_MAX_CULL_VIEW_COUNT * WOLF_CULL_PLANE_COUNT];
+    uint planeCounts[WOLF_MAX_CULL_VIEW_COUNT];
     float4 cameraPositionAndMaxDrawCount;
     uint viewCount;
     uint bucketCount;
@@ -28,7 +33,8 @@ cbuffer CullParams : register(b12)
     uint outputDrawArgsStride;
     uint outputLaneStride;
     uint participatingLaneMask;
-    uint pad0;
+    // Slot of the render view being culled. Every view's draws share one command table.
+    uint ownerViewIndex;
 };
 
 RWStructuredBuffer<GpuDrawCommand> g_DrawCommands : register(u0);
@@ -49,8 +55,8 @@ RWStructuredBuffer<uint> g_Diagnostics : register(u10);
 
 bool IsSphereVisible(uint viewIndex, float3 center, float radius)
 {
-    uint planeBase = viewIndex * WOLF_FRUSTUM_PLANE_COUNT;
-    for (uint i = 0; i < WOLF_FRUSTUM_PLANE_COUNT; i++)
+    uint planeBase = viewIndex * WOLF_CULL_PLANE_COUNT;
+    for (uint i = 0; i < planeCounts[viewIndex]; i++)
     {
         float4 plane = planes[planeBase + i];
         float dist = dot(plane.xyz, center) + plane.w;
@@ -94,6 +100,13 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     GpuDrawCommand cmd = g_DrawCommands[drawId];
     if ((cmd.flags & DRAW_FLAG_ACTIVE) == 0)
+    {
+        return;
+    }
+
+    // Another view's draw: leave its args zeroed for this view. Checked before generation validation so this
+    // view never marks another view's command stale.
+    if (((cmd.flags >> DRAW_FLAG_OWNER_VIEW_SHIFT) & DRAW_FLAG_OWNER_VIEW_MASK) != ownerViewIndex)
     {
         return;
     }

@@ -22,7 +22,9 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\WolfEngine.SourceGenerators\WolfEngine.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
+        <ProjectReference Include="..\WolfEngine.Runtime\WolfEngine.Runtime.csproj" />
         <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
         <ProjectReference Include="..\WolfEngine.Editor.Tooling\WolfEngine.Editor.Tooling.csproj" />
     </ItemGroup>

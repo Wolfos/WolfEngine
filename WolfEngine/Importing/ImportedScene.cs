@@ -37,7 +37,8 @@ public record struct ImportedMaterial(
 	int? OcclusionTextureIndex,
 	int? EmissiveTextureIndex,
 	AlphaMode AlphaMode,
-	float AlphaCutoff
+	float AlphaCutoff,
+	bool DoubleSided
 );
 
 public record struct ImportedTexture(
@@ -57,7 +58,9 @@ public record ImportedNode(
 	string Name,
 	Matrix4x4 LocalTransform,
 	List<ImportedNodeMesh> Meshes,
-	int ParentIndex
+	int ParentIndex,
+	string? BoneParentName = null,
+	Matrix4x4? SkinBindToRig = null
 );
 
 public record struct ImportedNodeMesh(

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -16,11 +16,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <EmbeddedResource Include="Pointer.css" />
     <Using Include="NUnit.Framework" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\WolfEngine.UI\WolfEngine.UI.csproj" />
+    <ProjectReference Include="..\WolfEngine.Editor.Tooling\WolfEngine.Editor.Tooling.csproj" />
+    <None Include="../WolfEngine/Assets/Fonts/Inter-VariableFont_opsz,wght.ttf" Link="Fixtures/Inter.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -33,6 +33,7 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 	private bool _fallbackInitializing;
 	private BindlessFallbackHandles _fallbackHandles;
 	private uint _fallbackVolumeTextureIndex;
+	private uint _fallbackRwVolumeTextureIndex;
 
 	private ComPtr<ID3D12Resource> _countsBuffer;
 	private uint* _countsMapped;
@@ -378,7 +379,7 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 		var volumeDesc = textureDesc with
 		{
 			Dimension = ResourceDimension.Texture3D,
-			Flags = ResourceFlags.None
+			Flags = ResourceFlags.AllowUnorderedAccess
 		};
 		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
 			&heapProps,
@@ -387,9 +388,11 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 			ResourceStates.Common,
 			null,
 			out _fallbackVolumeTexture));
-		var volumeSrv = AllocateShaderResourceView(
-			new FallbackTextureResource(_fallbackVolumeTexture.Handle, TextureDimension.Texture3D));
+		var fallbackVolume = new FallbackTextureResource(_fallbackVolumeTexture.Handle, TextureDimension.Texture3D);
+		var volumeSrv = AllocateShaderResourceView(fallbackVolume);
+		var volumeUav = AllocateUnorderedAccessView(fallbackVolume);
 		_fallbackVolumeTextureIndex = (uint)volumeSrv.Index;
+		_fallbackRwVolumeTextureIndex = (uint)volumeUav.Index;
 	}
 
 	private void CreateFallbackConstantBuffer()
@@ -486,6 +489,7 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 		_countsMapped[1] = (uint)_uavCount;
 		_countsMapped[2] = (uint)_samplerCount;
 		_countsMapped[3] = _fallbackVolumeTextureIndex;
+		_countsMapped[4] = _fallbackRwVolumeTextureIndex;
 	}
 
 	private static int AllocateIndex(Stack<int> freeList, ref int count, int maxCount, string kind)
@@ -599,11 +603,6 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 
 	private static UnorderedAccessViewDesc CreateTextureUavDescription(ID3D12BackendTexture texture)
 	{
-		if (texture.Descriptor.Dimension != TextureDimension.Texture2D)
-		{
-			throw new InvalidOperationException("Unordered access views are only supported for 2D textures.");
-		}
-
 		var format = texture.Descriptor.Format switch
 		{
 			TextureFormat.Bgra8Unorm => texture.Descriptor.IsSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
@@ -621,6 +620,22 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 			TextureFormat.Bc7Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
 			_ => Format.FormatUnknown
 		};
+		if (texture.Descriptor.Dimension == TextureDimension.Texture3D)
+		{
+			var volumeDesc = new UnorderedAccessViewDesc
+			{
+				ViewDimension = UavDimension.Texture3D,
+				Format = format
+			};
+			volumeDesc.Anonymous.Texture3D = new Tex3DUav
+			{
+				MipSlice = 0,
+				FirstWSlice = 0,
+				WSize = (uint)texture.Descriptor.Depth
+			};
+			return volumeDesc;
+		}
+
 		var desc = new UnorderedAccessViewDesc
 		{
 			ViewDimension = UavDimension.Texture2D,
@@ -671,7 +686,7 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 		public string? Name => "__BindlessFallbackTexture";
 
 		public TextureDescriptor Descriptor => _dimension == TextureDimension.Texture3D
-			? new TextureDescriptor(1, 1, TextureFormat.Rgba8Unorm, TextureUsage.ShaderResource,
+			? new TextureDescriptor(1, 1, TextureFormat.Rgba8Unorm, TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				dimension: TextureDimension.Texture3D)
 			: new TextureDescriptor(1, 1, TextureFormat.Rgba8Unorm,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess);

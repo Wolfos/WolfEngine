@@ -2,6 +2,7 @@ import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
 import "../Common/draw_data.slang";
 import "ddgi_visibility.slang";
+import "ddgi_sample.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -33,6 +34,7 @@ cbuffer BindlessHandles : register(b0)
     uint probeStateWriteHandle;
     uint probeActivityReadHandle;
     uint probeActivityWriteHandle;
+    uint probeActivityMarksHandle;
     uint probeRelocationDecisionHandle;
     uint environmentHandle;
     uint samplerHandle;
@@ -113,12 +115,6 @@ float3 DdgiProbePosition(uint probeIndex)
     uint y = yz % probeCountY;
     uint z = yz / probeCountY;
     return origin + float3(float(x), float(y), float(z)) * probeSpacing;
-}
-
-int DdgiPositiveModulo(int value, int modulus)
-{
-    int remainder = value % max(modulus, 1);
-    return remainder < 0 ? remainder + modulus : remainder;
 }
 
 uint3 DdgiLogicalProbeCoord(uint probeIndex)
@@ -356,35 +352,15 @@ float2 DdgiInteriorUv(uint2 interiorPixel, uint interiorSize)
     return ((float2(interiorPixel) + 0.5f) / float(interiorSize)) * 2.0f - 1.0f;
 }
 
-float3 DdgiOctDecode(float2 f)
-{
-    float3 n = float3(f.x, f.y, 1.0f - abs(f.x) - abs(f.y));
-    float t = saturate(-n.z);
-    n.xy += select(n.xy >= 0.0f, -t.xx, t.xx);
-    return normalize(n);
-}
-
-float2 DdgiOctEncode(float3 n)
-{
-    n /= abs(n.x) + abs(n.y) + abs(n.z);
-    float2 enc = n.xy;
-    if (n.z < 0.0f)
-    {
-        enc = (1.0f - abs(enc.yx)) * select(enc.xy >= 0.0f, 1.0f.xx, -1.0f.xx);
-    }
-    return enc;
-}
-
 float2 DdgiProbeAtlasUv(uint probeIndex, float3 direction, uint interiorSize)
 {
-    uint tileSize = interiorSize + tileBorderSize * 2u;
-    uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
-    uint tileX = physicalProbeIndex % atlasColumns;
-    uint tileY = physicalProbeIndex / atlasColumns;
-    float2 interiorUv = DdgiOctEncode(normalize(direction)) * 0.5f + 0.5f;
-    float2 atlasPixel = float2(tileX * tileSize + tileBorderSize, tileY * tileSize + tileBorderSize) +
-        interiorUv * float(interiorSize - 1u) + 0.5f.xx;
-    return atlasPixel / float2(atlasColumns * tileSize, atlasRows * tileSize);
+    return DdgiProbeAtlasUvFromLayout(
+        DdgiPhysicalProbeIndex(probeIndex),
+        direction,
+        interiorSize,
+        tileBorderSize,
+        atlasColumns,
+        atlasRows);
 }
 
 float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
@@ -556,26 +532,6 @@ float3 DdgiVisibilityRayDirection(uint rayIndex, uint rayCount, uint probeIndex)
     // realization that changes interpolation weights even in a static scene.
     // Physical storage identity keeps the rotation unchanged when the grid scrolls.
     return DdgiRayDirection(rayIndex, rayCount, probeIndex, 0u);
-}
-
-// Reference rays retain their directions across updates. Comparing their
-// radiance distinguishes scene changes from the rotating estimator's ray noise.
-static const uint DDGI_TEMPORAL_REFERENCE_RAY_COUNT = 16u;
-
-float3 DdgiReferenceRayDirection(uint rayIndex, uint probeIndex)
-{
-    return DdgiRayDirection(rayIndex, DDGI_TEMPORAL_REFERENCE_RAY_COUNT, probeIndex, 0u);
-}
-
-uint2 DdgiReferenceRayPixel(uint probeIndex, uint rayIndex)
-{
-    // The irradiance trace atlas has unused borders. Its top and bottom rows
-    // hold the reference samples without adding an atlas or increasing its size.
-    uint tileSize = irradianceTileInteriorSize + tileBorderSize * 2u;
-    uint2 local = rayIndex < tileSize
-        ? uint2(rayIndex, 0u)
-        : uint2(rayIndex - tileSize, tileSize - 1u);
-    return DdgiProbeTileOrigin(probeIndex, irradianceTileInteriorSize) + local;
 }
 
 float3 DdgiRelocationRayDirection(uint rayIndex)

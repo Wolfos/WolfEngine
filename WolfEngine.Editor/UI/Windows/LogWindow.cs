@@ -108,7 +108,8 @@ public sealed class LogWindow : EditorWindow
 	private void DrawKindToggle(string iconName, LogMessageKind kind, int count, ref bool enabled)
 	{
 		ImGui.PushID(kind.ToString());
-		if (enabled == false)
+		var dimmed = enabled == false;
+		if (dimmed)
 		{
 			ImGui.PushStyleVar(ImGuiStyleVar.Alpha, ImGui.GetStyle().Alpha * 0.45f);
 		}
@@ -127,7 +128,7 @@ public sealed class LogWindow : EditorWindow
 			_filtersDirty = true;
 		}
 
-		if (enabled == false)
+		if (dimmed)
 		{
 			ImGui.PopStyleVar();
 		}

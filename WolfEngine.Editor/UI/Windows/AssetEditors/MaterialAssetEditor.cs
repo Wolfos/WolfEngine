@@ -1,7 +1,11 @@
+using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
@@ -13,8 +17,21 @@ public sealed class MaterialAssetEditor
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
 	private readonly IEditorAssetSnapshotService _assetSnapshotService;
 	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly IMaterialExtractionService _materialExtractionService;
+	private readonly IEditorNotificationService _notificationService;
 	private readonly IIconManager _icons;
 	private readonly IAssetSelectionService _assetSelectionService;
+	private readonly IMaterialFactory _materialFactory;
+	private readonly ITextureFactory _textureFactory;
+	private readonly IRenderViewHost _viewHost;
+	private readonly RenderGraph _renderGraph;
+	private readonly IWorldManager _worldManager;
+	private readonly EditorRenderViews _renderViews;
+	private readonly EditorViewportStateBus _viewportStateBus;
+	private readonly Dictionary<string, Material> _previewMaterials = new(StringComparer.Ordinal);
+	private MaterialPreviewScene? _preview;
+	private bool _hostVisible = true;
+	private bool _readOnly;
 	private MaterialAsset? _loadedMaterialAsset;
 	private Guid? _loadedMaterialAssetId;
 	private long _loadedAssetDatabaseRevision = -1;
@@ -30,7 +47,16 @@ public sealed class MaterialAssetEditor
 		IEditorAssetSnapshotService assetSnapshotService,
 		IEditorUndoRedoService undoRedoService,
 		IIconManager icons,
-		IAssetSelectionService assetSelectionService)
+		IAssetSelectionService assetSelectionService,
+		IMaterialFactory materialFactory,
+		ITextureFactory textureFactory,
+		IRenderViewHost viewHost,
+		RenderGraph renderGraph,
+		IWorldManager worldManager,
+		EditorRenderViews renderViews,
+		EditorViewportStateBus viewportStateBus,
+		IMaterialExtractionService materialExtractionService,
+		IEditorNotificationService notificationService)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
@@ -40,29 +66,100 @@ public sealed class MaterialAssetEditor
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
 		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
+		_materialFactory = materialFactory ?? throw new ArgumentNullException(nameof(materialFactory));
+		_textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
+		_viewHost = viewHost ?? throw new ArgumentNullException(nameof(viewHost));
+		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
+		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
+		_renderViews = renderViews ?? throw new ArgumentNullException(nameof(renderViews));
+		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
+		_materialExtractionService = materialExtractionService ?? throw new ArgumentNullException(nameof(materialExtractionService));
+		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
+	}
+
+	public void SetHostVisible(bool visible)
+	{
+		_hostVisible = visible;
+		if (!visible && _preview is { } preview)
+			_viewportStateBus.PublishUiState(preview.View, SceneViewportUiState.Hidden);
+	}
+
+	public void SetReadOnly(bool readOnly) => _readOnly = readOnly;
+
+	public void HidePreview()
+	{
+		_preview?.Dispose();
+		_preview = null;
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
 	{
-		if (asset.IsGenerated)
-		{
-			ImGui.TextUnformatted("Generated material");
-			ImGui.TextDisabled("This material was produced from an imported 3D source and is read-only.");
-			return;
-		}
-
 		if (_loadedMaterialAssetId.HasValue && _loadedMaterialAssetId.Value != asset.Id)
 		{
 			CommitPendingChanges();
+		}
+		if (asset.IsGenerated)
+		{
+			var runtimeMaterial = new AssetRef<Material> { NodeId = asset.Id }.Asset;
+			if (runtimeMaterial is not null) DrawPreview(runtimeMaterial);
+			else
+			{
+				HidePreview();
+				ImGui.TextDisabled("Material preview unavailable.");
+			}
+			ImGui.TextUnformatted("Generated material");
+			ImGui.TextDisabled("This material was produced from an imported 3D source and is read-only.");
+			ImGui.BeginDisabled(_readOnly);
+			var extract = ImGui.Button("Extract Material");
+			ImGui.EndDisabled();
+			if (extract)
+			{
+				var result = _materialExtractionService.Extract(asset);
+				if (result.Success && result.AssetId is { } extractedId)
+				{
+					_notificationService.ReportInfo("Material extracted and scene and prefab references replaced.");
+					_assetSelectionService.Select(extractedId);
+					return;
+				}
+				_notificationService.ReportError(result.ErrorMessage ?? "Material extraction failed.");
+			}
 		}
 
 		var materialAsset = EnsureMaterialAssetLoaded(asset);
 		if (materialAsset is null)
 		{
+			HidePreview();
 			ImGui.TextUnformatted("Failed to load material asset.");
 			return;
 		}
+		if (!asset.IsGenerated)
+		{
+			var previewMaterial = SyncPreviewMaterial(materialAsset);
+			DrawPreview(previewMaterial);
+		}
+		var readOnly = _readOnly || asset.IsGenerated;
+		ImGui.BeginDisabled(readOnly);
+		try
+		{
+			DrawProperties(asset, materialAsset);
+		}
+		finally
+		{
+			ImGui.EndDisabled();
+		}
 
+		if (!readOnly)
+		{
+			SyncPreviewMaterial(materialAsset);
+			if (_hasPendingChanges && ImGui.IsAnyItemActive() == false)
+			{
+				CommitPendingChanges();
+			}
+		}
+	}
+
+	private void DrawProperties(AssetDatabaseEntry asset, MaterialAsset materialAsset)
+	{
 		var descriptors = _materialTypeRegistry.GetAll();
 		EditorUIUtility.Combo("Material Type", materialAsset.MaterialType.ToString(), () =>
 		{
@@ -87,6 +184,20 @@ public sealed class MaterialAssetEditor
 		var properties = materialAsset.GetActiveProperties();
 		var propertyDefinitions = _materialTypeRegistry.GetPropertiesForMaterialType(materialAsset.MaterialType);
 		DrawBaseColorEditor(asset, materialAsset, properties);
+		var uvOffset = new Vector2(properties.UvOffsetScale.X, properties.UvOffsetScale.Y);
+		var uvScale = new Vector2(properties.UvOffsetScale.Z, properties.UvOffsetScale.W);
+		if (EditorUIUtility.InputVector2("UV Offset", ref uvOffset))
+		{
+			BeginPendingChange(asset);
+			properties.UvOffsetScale = new Vector4(uvOffset.X, uvOffset.Y, uvScale.X, uvScale.Y);
+			_hasPendingChanges = true;
+		}
+		if (EditorUIUtility.InputVector2("UV Scale", ref uvScale))
+		{
+			BeginPendingChange(asset);
+			properties.UvOffsetScale = new Vector4(uvOffset.X, uvOffset.Y, uvScale.X, uvScale.Y);
+			_hasPendingChanges = true;
+		}
 		DrawFloatEditor("Metallic", properties.MetallicFactor, value =>
 		{
 			BeginPendingChange(asset);
@@ -124,17 +235,97 @@ public sealed class MaterialAssetEditor
 			});
 		}
 
+		if (HasProperty(propertyDefinitions, MaterialPropertyKind.DoubleSided))
+		{
+			DrawBoolEditor("Double Sided", materialAsset.DoubleSided, value =>
+			{
+				BeginPendingChange(asset);
+				materialAsset.DoubleSided = value;
+				_hasPendingChanges = true;
+			});
+		}
+
 		ImGui.Separator();
 		ImGui.TextUnformatted("Textures");
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo);
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Orm), "ORM", properties.Textures.Orm);
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal);
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive);
+	}
 
-		if (_hasPendingChanges && ImGui.IsAnyItemActive() == false)
+	private Material SyncPreviewMaterial(MaterialAsset asset)
+	{
+		var descriptor = _materialTypeRegistry.GetDescriptor(asset.MaterialType);
+		if (!_previewMaterials.TryGetValue(descriptor.ShaderPath, out var material))
 		{
-			CommitPendingChanges();
+			// The ordinary material factory allocates the same GPU resources as a scene MeshRenderer.
+			material = _materialFactory.GetMaterial(descriptor.ShaderPath, ColorRGBA.White);
+			_previewMaterials.Add(descriptor.ShaderPath, material);
 		}
+		var properties = asset.GetActiveProperties();
+		var albedo = ResolveTexture(properties.Textures.Albedo, _textureFactory.GetWhiteTexture());
+		var orm = ResolveTexture(properties.Textures.Orm, _textureFactory.GetWhiteTexture());
+		var normal = ResolveTexture(properties.Textures.Normal, _textureFactory.GetNeutralNormalTexture());
+		var emissive = ResolveTexture(properties.Textures.Emissive, _textureFactory.GetWhiteTexture());
+		var changed = !material.Color.Equals(properties.BaseColor) ||
+		              material.UvOffsetScale != properties.UvOffsetScale ||
+		              material.MetallicFactor != properties.MetallicFactor ||
+		              material.RoughnessFactor != properties.RoughnessFactor ||
+		              material.NormalScale != properties.NormalScale ||
+		              material.EmissiveFactor != properties.EmissiveFactor ||
+		              material.EmissiveIntensity != properties.EmissiveIntensity ||
+		              !ReferenceEquals(material.AlbedoTexture, albedo) ||
+		              !ReferenceEquals(material.OrmTexture, orm) ||
+		              !ReferenceEquals(material.NormalTexture, normal) ||
+		              !ReferenceEquals(material.EmissiveTexture, emissive) ||
+		              material.AlphaMode != descriptor.RuntimeAlphaMode ||
+		              material.AlphaCutoff != asset.AlphaCutoff ||
+		              material.DoubleSided != asset.DoubleSided;
+		material.Color = properties.BaseColor;
+		material.UvOffsetScale = properties.UvOffsetScale;
+		material.MetallicFactor = properties.MetallicFactor;
+		material.RoughnessFactor = properties.RoughnessFactor;
+		material.NormalScale = properties.NormalScale;
+		material.EmissiveFactor = properties.EmissiveFactor;
+		material.EmissiveIntensity = properties.EmissiveIntensity;
+		material.AlbedoTexture = albedo;
+		material.OrmTexture = orm;
+		material.NormalTexture = normal;
+		material.EmissiveTexture = emissive;
+		material.AlphaMode = descriptor.RuntimeAlphaMode;
+		material.AlphaCutoff = asset.AlphaCutoff;
+		material.DoubleSided = asset.DoubleSided;
+		if (changed) _renderGraph.EnsureMaterialResources(material);
+		return material;
+	}
+
+	private static Texture ResolveTexture(AssetRef<Texture> reference, Texture fallback) =>
+		reference.NodeId == Guid.Empty ? fallback : reference.Asset ?? fallback;
+
+	private void DrawPreview(Material material)
+	{
+		_preview ??= new MaterialPreviewScene(_viewHost, _worldManager, _renderViews, _viewportStateBus,
+			new DebugPrimitiveMeshFactory().GetMesh(DebugPrimitiveType.Sphere));
+		_preview.SetMaterial(material);
+		var availableWidth = MathF.Max(0.0f, ImGui.GetContentRegionAvail().X);
+		var size = MathF.Min(availableWidth, 256.0f);
+		if (size <= 0.0f)
+		{
+			_viewportStateBus.PublishUiState(_preview.View, SceneViewportUiState.Hidden);
+			return;
+		}
+		if (availableWidth > size) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + (availableWidth - size) * 0.5f);
+		var imageMin = ImGui.GetCursorScreenPos();
+		ImGui.Image(UiTextureIds.Viewport(_preview.View), new Vector2(size, size));
+		var scale = ImGui.GetIO().DisplayFramebufferScale;
+		var pixels = new Int2(Math.Max(0, (int)MathF.Round(size * scale.X)),
+			Math.Max(0, (int)MathF.Round(size * scale.Y)));
+		_viewportStateBus.PublishUiState(_preview.View, new SceneViewportUiState(
+			_hostVisible && !ImGui.IsWindowCollapsed() && pixels.X > 0 && pixels.Y > 0,
+			pixels, 1.0f, SceneDebugViewIds.FinalColor,
+			ImGui.IsItemHovered(), ImGui.IsWindowFocused(),
+			pointerAvailable: false, pointerCaptured: false, rightMousePressStartedHere: false,
+			imageMin, imageMin + new Vector2(size, size)));
 	}
 
 	private MaterialAsset? EnsureMaterialAssetLoaded(AssetDatabaseEntry asset)
@@ -196,6 +387,15 @@ public sealed class MaterialAssetEditor
 	{
 		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, typeof(float), currentValue));
 		if (drawResult.Changed && drawResult.Value is float value)
+		{
+			setter(value);
+		}
+	}
+
+	private void DrawBoolEditor(string label, bool currentValue, Action<bool> setter)
+	{
+		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, typeof(bool), currentValue));
+		if (drawResult.Changed && drawResult.Value is bool value)
 		{
 			setter(value);
 		}
@@ -265,6 +465,11 @@ public sealed class MaterialAssetEditor
 
 	private void BeginPendingChange(AssetDatabaseEntry asset)
 	{
+		if (_readOnly || asset.IsGenerated)
+		{
+			return;
+		}
+
 		if (_pendingBeforeSnapshot.HasValue)
 		{
 			return;
@@ -275,7 +480,8 @@ public sealed class MaterialAssetEditor
 
 	private void CommitPendingChanges()
 	{
-		if (_hasPendingChanges == false || _pendingBeforeSnapshot is not { } before || _loadedAssetEntry is null || _loadedMaterialAsset is null)
+		if (_hasPendingChanges == false || _pendingBeforeSnapshot is not { } before || _loadedAssetEntry is null ||
+		    _loadedAssetEntry.IsGenerated || _loadedMaterialAsset is null)
 		{
 			_hasPendingChanges = false;
 			_pendingBeforeSnapshot = null;

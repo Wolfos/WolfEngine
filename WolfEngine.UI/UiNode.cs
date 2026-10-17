@@ -4,6 +4,13 @@ internal sealed class UiNode
 {
 	public string Name { get; set; } = string.Empty;
 	public string? Text { get; set; }
+	public long Identity { get; set; }
+	public object? Key { get; set; }
+	public bool Hovered { get; set; }
+	public bool Active { get; set; }
+	public Dictionary<string, ulong> Events { get; } = new(StringComparer.Ordinal);
+	public bool Disabled => Name == "button" && Attributes.TryGetValue("disabled", out var value) && value is not false;
+	public int InteractionState => (Hovered ? 1 : 0) | (Active ? 2 : 0) | (Disabled ? 4 : 0);
 	public Dictionary<string, object?> Attributes { get; } = new(StringComparer.OrdinalIgnoreCase);
 	public List<UiNode> Children { get; } = [];
 	public ComputedStyle Style { get; set; } = ComputedStyle.Default;
@@ -11,6 +18,8 @@ internal sealed class UiNode
 	public float Top { get; set; }
 	public float Width { get; set; }
 	public float Height { get; set; }
+	public UiTextLayout? TextLayout { get; set; }
+	public UiInsets ResolvedPadding { get; set; }
 
 	public string? Id => Attributes.TryGetValue("id", out var value) ? value?.ToString() : null;
 	public string? Classes => Attributes.TryGetValue("class", out var value) ? value?.ToString() : null;
@@ -19,7 +28,9 @@ internal sealed class UiNode
 	public void Reset(string name)
 	{
 		Name = name;
+		Identity = 0; Key = null; Hovered = Active = false; Events.Clear();
 		Text = null;
+		TextLayout = null;
 		Attributes.Clear();
 		Children.Clear();
 		Style = ComputedStyle.Default;
@@ -27,6 +38,7 @@ internal sealed class UiNode
 		Top = 0;
 		Width = 0;
 		Height = 0;
+		ResolvedPadding = default;
 	}
 
 	public int CountNodes()
@@ -58,10 +70,13 @@ internal static class UiTreeReconciler
 		}
 
 		var textChanged = !string.Equals(retained.Text, updated.Text, StringComparison.Ordinal);
-		var intrinsicSizeChanged = (retained.Text?.Length ?? 0) != (updated.Text?.Length ?? 0);
+		var intrinsicSizeChanged = textChanged;
 		var layoutChanged = !LayoutStyleEquals(retained.Style, updated.Style);
 		var visualChanged = textChanged || !Equals(retained.Style, updated.Style);
 		retained.Text = updated.Text;
+		retained.Identity = updated.Identity; retained.Key = updated.Key;
+		retained.Hovered = updated.Hovered; retained.Active = updated.Active;
+		retained.Events.Clear(); foreach (var pair in updated.Events) retained.Events[pair.Key] = pair.Value;
 		retained.Style = updated.Style;
 		retained.Attributes.Clear();
 		foreach (var pair in updated.Attributes) retained.Attributes[pair.Key] = pair.Value;
@@ -76,13 +91,14 @@ internal static class UiTreeReconciler
 		return new UiTreeChanges(true, layoutChanged, intrinsicSizeChanged, visualChanged);
 	}
 
-	private static bool LayoutStyleEquals(ComputedStyle left, ComputedStyle right) =>
+	internal static bool LayoutStyleEquals(ComputedStyle left, ComputedStyle right) =>
 		left.Display == right.Display && left.Row == right.Row && left.Wrap == right.Wrap &&
 		left.Absolute == right.Absolute && left.Width == right.Width && left.Height == right.Height &&
 		left.MinWidth == right.MinWidth && left.MinHeight == right.MinHeight &&
 		left.MaxWidth == right.MaxWidth && left.MaxHeight == right.MaxHeight &&
-		left.Left == right.Left && left.Top == right.Top && left.FlexGrow == right.FlexGrow &&
+		left.Left == right.Left && left.Top == right.Top && left.Right == right.Right && left.Bottom == right.Bottom && left.FlexGrow == right.FlexGrow &&
 		left.FlexShrink == right.FlexShrink && left.Gap == right.Gap && left.Padding == right.Padding &&
 		left.Margin == right.Margin && left.JustifyContent == right.JustifyContent &&
-		left.AlignItems == right.AlignItems && left.FontSize == right.FontSize;
+		left.AlignItems == right.AlignItems && left.FontSize == right.FontSize && left.RootFontSize == right.RootFontSize && left.FontFamily == right.FontFamily &&
+		left.LineHeight == right.LineHeight && left.LineHeightPixels == right.LineHeightPixels && left.NoWrap == right.NoWrap;
 }

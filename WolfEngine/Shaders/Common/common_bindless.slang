@@ -42,6 +42,7 @@ cbuffer BindlessCounts : register(b27)
     // SRV index of a 1x1x1 volume texture. Index 0 is a 2D texture and cannot back the 3D view,
     // so GetTexture3D falls back here instead.
     uint g_BindlessFallbackTexture3D;
+    uint g_BindlessFallbackRWTexture3D;
 };
 
 uint SafeDescriptorIndex(uint handle, uint expectedKind, uint descriptorCount)
@@ -83,7 +84,7 @@ struct DescriptorHeapSamplers
 
 [[argument_buffer]] ParameterBlock<DescriptorHeapTextures> g_TextureHeap : register(b28, space1);
 #if !defined(WOLF_NO_RW_TEXTURES)
-// Three views over the same UAV descriptors - same handle, same index, different element
+// Four views over the same UAV descriptors - same handle, same index, different element
 // type or coherency. A texture is only legal to access through the view matching how it
 // was created and how it is used.
 //
@@ -102,10 +103,12 @@ struct DescriptorHeapRWTextures
     RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_RW_TEXTURE_MAX];
     RWTexture2D<uint> g_RWTexturesUint[WOLF_BINDLESS_RW_TEXTURE_MAX];
     globallycoherent RWTexture2D<float4> g_RWTexturesCoherent[WOLF_BINDLESS_RW_TEXTURE_MAX];
+    RWTexture3D<float4> g_RWTextures3D[WOLF_BINDLESS_RW_TEXTURE_MAX];
 #else
     RWTexture2D<float4> g_RWTextures[];
     RWTexture2D<uint> g_RWTexturesUint[];
     globallycoherent RWTexture2D<float4> g_RWTexturesCoherent[];
+    RWTexture3D<float4> g_RWTextures3D[];
 #endif
 };
 
@@ -144,6 +147,16 @@ RWTexture2D<float4> GetRWTexture(uint handle)
         return g_RWTextureHeap.g_RWTextures[0];
     }
     return g_RWTextureHeap.g_RWTextures[index];
+}
+
+RWTexture3D<float4> GetRWTexture3D(uint handle)
+{
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_UAV, g_BindlessUavCount);
+    if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
+    {
+        return g_RWTextureHeap.g_RWTextures3D[g_BindlessFallbackRWTexture3D];
+    }
+    return g_RWTextureHeap.g_RWTextures3D[index];
 }
 
 /// Same descriptor as GetRWTexture, viewed as a single-channel uint image. Only valid
@@ -211,6 +224,7 @@ RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_RW_TEXTURE_MAX] : register(u0, sp
 // D3D12Device; all of them share OffsetInDescriptorsFromTableStart = 0.
 RWTexture2D<uint> g_RWTexturesUint[WOLF_BINDLESS_RW_TEXTURE_MAX] : register(u0, space2);
 globallycoherent RWTexture2D<float4> g_RWTexturesCoherent[WOLF_BINDLESS_RW_TEXTURE_MAX] : register(u0, space3);
+RWTexture3D<float4> g_RWTextures3D[WOLF_BINDLESS_RW_TEXTURE_MAX] : register(u0, space4);
 #endif
 #else
 Texture2D<float4> g_Textures[] : register(t0, space1);
@@ -220,6 +234,7 @@ SamplerState g_Samplers[] : register(s0, space1);
 RWTexture2D<float4> g_RWTextures[] : register(u0, space1);
 RWTexture2D<uint> g_RWTexturesUint[] : register(u0, space2);
 globallycoherent RWTexture2D<float4> g_RWTexturesCoherent[] : register(u0, space3);
+RWTexture3D<float4> g_RWTextures3D[] : register(u0, space4);
 #endif
 #endif
 
@@ -254,6 +269,16 @@ RWTexture2D<float4> GetRWTexture(uint handle)
         return g_RWTextures[0];
     }
     return g_RWTextures[index];
+}
+
+RWTexture3D<float4> GetRWTexture3D(uint handle)
+{
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_UAV, g_BindlessUavCount);
+    if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
+    {
+        return g_RWTextures3D[g_BindlessFallbackRWTexture3D];
+    }
+    return g_RWTextures3D[index];
 }
 
 /// Same descriptor as GetRWTexture, viewed as a single-channel uint image. Only valid

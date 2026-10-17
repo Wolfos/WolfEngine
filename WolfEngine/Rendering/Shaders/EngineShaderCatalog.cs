@@ -1,4 +1,5 @@
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering.Shaders;
 
@@ -81,7 +82,9 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId Skinning = Id("skinning");
 	public static readonly ShaderProgramId TerrainAuthoringBrushes = Id("terrain-authoring-brushes");
 	public static readonly ShaderProgramId ScreenSpaceDecal = Id("screen-space-decal");
+	public static readonly ShaderProgramId SelectionOutline = Id("selection-outline");
 	public static readonly ShaderProgramId GBufferDecalSeed = Id("gbuffer-decal-seed");
+	public static readonly ShaderProgramId VolumetricFog = Id("volumetric-fog");
 
 	private static ShaderProgramId Id(string name) => new($"engine://shaders/{name}");
 }
@@ -155,7 +158,9 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.Skinning, "Animation/skinning.compute.slang"),
 			D(EngineShaderPrograms.TerrainAuthoringBrushes, "Terrain/Tools/terrain_authoring_brushes.compute.slang"),
 			D(EngineShaderPrograms.ScreenSpaceDecal, "Geometry/screen_space_decal.slang"),
-			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang")
+			D(EngineShaderPrograms.SelectionOutline, "Geometry/selection_outline.slang"),
+			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang"),
+			D(EngineShaderPrograms.VolumetricFog, "VolumetricFog/volumetric_fog.compute.slang")
 		};
 
 		_byId = new();
@@ -192,10 +197,14 @@ public sealed class EngineShaderCatalog
 
 		foreach (var define in request.GetDefines())
 		{
-			var legal = define == "WOLF_ALPHA_CLIP" && SupportsAlphaClip(request.ProgramId) ||
+			var legal = define == "WOLF_GBUFFER_SKINNED" && request.ProgramId == EngineShaderPrograms.GBuffer ||
+                            define == "WOLF_ALPHA_CLIP" && SupportsAlphaClip(request.ProgramId) ||
 			            define == "WOLF_GPU_DRAW_DIAGNOSTICS" && request.ProgramId == EngineShaderPrograms.GpuDrawCull ||
+			            define == DdgiUtilities.GetVisibilityIntegrateDefine(DdgiUtilities.HalfVisibilityTileInteriorSize) &&
+			            request.ProgramId == EngineShaderPrograms.DdgiIntegrate ||
 			            request.ProgramId == EngineShaderPrograms.ShadowMap &&
-			            (define == "WOLF_SHADOW_CASCADE_INDEX=0" || define == "WOLF_SHADOW_CASCADE_INDEX=1" || define == "WOLF_SHADOW_CASCADE_INDEX=2");
+			            (define == "WOLF_SHADOW_TERRAIN" || define == "WOLF_SHADOW_CASCADE_INDEX=0" ||
+			             define == "WOLF_SHADOW_CASCADE_INDEX=1" || define == "WOLF_SHADOW_CASCADE_INDEX=2");
 			if (legal == false)
 				throw new InvalidOperationException($"Define variant '{define}' is not declared for '{request.ProgramId}'.");
 		}
@@ -239,6 +248,11 @@ public sealed class EngineShaderCatalog
 				}
 				if (SupportsAlphaClip(descriptor.Id))
 					requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind, "WOLF_ALPHA_CLIP"));
+                if (descriptor.Id == EngineShaderPrograms.GBuffer)
+                {
+                    requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind, "WOLF_GBUFFER_SKINNED"));
+                    requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind, "WOLF_GBUFFER_SKINNED", "WOLF_ALPHA_CLIP"));
+                }
 				if (descriptor.Id == EngineShaderPrograms.ShadowMap)
 					for (var cascade = 0; cascade < 3; cascade++)
 					{
@@ -246,6 +260,8 @@ public sealed class EngineShaderCatalog
 							$"WOLF_SHADOW_CASCADE_INDEX={cascade}"));
 						requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind,
 							"WOLF_ALPHA_CLIP", $"WOLF_SHADOW_CASCADE_INDEX={cascade}"));
+						requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind,
+							"WOLF_SHADOW_TERRAIN", $"WOLF_SHADOW_CASCADE_INDEX={cascade}"));
 					}
 			}
 			else
@@ -261,6 +277,15 @@ public sealed class EngineShaderCatalog
 							backendKind,
 							"WOLF_GPU_DRAW_DIAGNOSTICS"));
 					}
+
+					if (descriptor.Id == EngineShaderPrograms.DdgiIntegrate)
+					{
+						requests.Add(ShaderRequest.Compute(
+							descriptor.Id,
+							entryPoint,
+							backendKind,
+							DdgiUtilities.GetVisibilityIntegrateDefine(DdgiUtilities.HalfVisibilityTileInteriorSize)!));
+					}
 				}
 			}
 		}
@@ -274,7 +299,8 @@ public sealed class EngineShaderCatalog
 		id == EngineShaderPrograms.GBuffer || id == EngineShaderPrograms.ImGui ||
 		id == EngineShaderPrograms.TransparentForward || id == EngineShaderPrograms.ShadowMap ||
 		id == EngineShaderPrograms.TerrainSharedGBuffer || id == EngineShaderPrograms.DebugPrimitiveForward ||
-		id == EngineShaderPrograms.DebugPrimitiveGBuffer || id == EngineShaderPrograms.ScreenSpaceDecal;
+		id == EngineShaderPrograms.DebugPrimitiveGBuffer || id == EngineShaderPrograms.ScreenSpaceDecal ||
+		id == EngineShaderPrograms.SelectionOutline;
 
 	private static bool IsDeclaredGraphicsEntryPointCombination(ShaderRequest request) =>
 		request.VertexEntryPoint == "vertexShader" &&
@@ -301,7 +327,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.ReflectionsScreenSpace) return ["ReflectionsScreenSpaceCS"];
 		if (id == EngineShaderPrograms.ReflectionsRayTraced) return ["ReflectionsRayTracedCS"];
 		if (id == EngineShaderPrograms.ReflectionsUpsample) return ["ReflectionsUpsampleCS"];
-		if (id == EngineShaderPrograms.DdgiClassify) return ["DdgiProbeClassifyCS"];
+		if (id == EngineShaderPrograms.DdgiClassify) return ["DdgiProbeActivityClearCS", "DdgiProbeActivityScatterCS", "DdgiProbeClassifyCS"];
 		if (id == EngineShaderPrograms.DdgiTrace) return ["DdgiProbeTraceCS", "DdgiRelocationTraceCS"];
 		if (id == EngineShaderPrograms.DdgiRelocate) return ["DdgiRelocationSolveCS"];
 		if (id == EngineShaderPrograms.DdgiIrradianceIntegrate) return ["DdgiIrradianceIntegrateCS"];
@@ -339,6 +365,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.Skinning) return ["SkinningCS"];
 		if (id == EngineShaderPrograms.TerrainAuthoringBrushes) return ["ApplyHeightmapRaiseLowerBrush", "ApplyHeightmapFlattenBrush", "ApplyHeightmapSmoothBrush", "ApplyLayerMapLayerBrush"];
 		if (id == EngineShaderPrograms.GBufferDecalSeed) return ["GBufferDecalSeedCS"];
+		if (id == EngineShaderPrograms.VolumetricFog) return ["VolumetricFogInjectCS", "VolumetricFogTemporalCS", "VolumetricFogIntegrateCS"];
 		return [];
 	}
 }

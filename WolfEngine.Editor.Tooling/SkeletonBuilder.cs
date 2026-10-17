@@ -62,7 +62,29 @@ internal static class SkeletonBuilder
 		// Walk up from every weighted bone to the scene root, so the chain that connects them is
 		// complete even when an exporter puts unweighted helper nodes in between.
 		var skeletonNodeNames = new HashSet<string>(StringComparer.Ordinal);
-		foreach (var boneName in offsetMatricesByBoneName.Keys)
+		var jointNames = new HashSet<string>(offsetMatricesByBoneName.Keys, StringComparer.Ordinal);
+		// Unweighted animated joints still drive sockets (head, toes and equipment).
+		for (var animationIndex = 0; animationIndex < scene->MNumAnimations; animationIndex++)
+		{
+			var animation = scene->MAnimations[animationIndex];
+			for (var channelIndex = 0; channelIndex < animation->MNumChannels; channelIndex++)
+			{
+				var name = animation->MChannels[channelIndex]->MNodeName.AsString;
+				if (nodesByName.TryGetValue(name, out var address) && ((Node*)address)->MNumMeshes == 0)
+					jointNames.Add(name);
+			}
+		}
+		foreach (var pair in nodesByName)
+		{
+			if (((Node*)pair.Value)->MNumMeshes > 0) continue;
+			var parent = pair.Key;
+			while (parentsByName.TryGetValue(parent, out var ancestor) && ancestor is not null)
+			{
+				if (offsetMatricesByBoneName.ContainsKey(ancestor)) { jointNames.Add(pair.Key); break; }
+				parent = ancestor;
+			}
+		}
+		foreach (var boneName in jointNames)
 		{
 			var current = boneName;
 			while (current is not null && skeletonNodeNames.Add(current))

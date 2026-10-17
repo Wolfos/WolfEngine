@@ -6,9 +6,12 @@
 // sits, so signature changes do not require a shader change.
 import "../Common/draw_data.slang";
 
+// Mirrors GpuDrawFlags in GpuDrawData.cs.
 static const uint DRAW_FLAG_ACTIVE = 1;
 static const uint DRAW_FLAG_BUCKET_SHIFT = 1;
-static const uint DRAW_FLAG_BUCKET_MASK = 0x7FFFFFFF;
+static const uint DRAW_FLAG_BUCKET_MASK = 0x1F;
+static const uint DRAW_FLAG_OWNER_VIEW_SHIFT = 6;
+static const uint DRAW_FLAG_OWNER_VIEW_MASK = 0x7F;
 
 cbuffer CompactParams : register(b12)
 {

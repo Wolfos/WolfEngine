@@ -203,6 +203,7 @@ public class EditorPreferences
 
 public sealed class EditorWorkspacePreferences
 {
+	public bool AnimationWorkspaceSeeded { get; set; }
 	public int Version { get; set; }
 	public Guid ActiveWorkspaceId { get; set; }
 	public List<EditorWorkspacePreference> Workspaces { get; set; } = new();

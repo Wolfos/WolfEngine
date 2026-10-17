@@ -49,6 +49,7 @@ internal static class TerrainRuntimeRegistry
 	public static void RemoveWorld(World world)
 	{
 		ArgumentNullException.ThrowIfNull(world);
+		var removed = new List<TerrainRuntimeData>();
 		lock (SyncRoot)
 		{
 			var keysToRemove = new List<TerrainRuntimeKey>();
@@ -62,9 +63,11 @@ internal static class TerrainRuntimeRegistry
 
 			for (var i = 0; i < keysToRemove.Count; i++)
 			{
-				RuntimeByKey.Remove(keysToRemove[i]);
+				if (RuntimeByKey.Remove(keysToRemove[i], out var runtime)) removed.Add(runtime);
 			}
 		}
+		// GPU release may dispatch to the renderer; never hold the registry lock across that call.
+		foreach (var runtime in removed) runtime.ReleaseRenderResources();
 	}
 
 	private readonly record struct TerrainRuntimeKey(World World, Entity Entity)

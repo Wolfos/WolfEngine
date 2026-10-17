@@ -21,7 +21,12 @@ public enum AssetType
 	// Persisted as integers in the SQLite index, so new members are appended rather than inserted.
 	Skeleton,
 	AnimationClip,
-	ColorLookupTable
+	ColorLookupTable,
+	AnimationGraph,
+	AnimationSet,
+	AnimationSequence,
+	BoneMask,
+	Font
 }
 
 public enum MaterialAssetType
@@ -171,6 +176,8 @@ public sealed class TerrainAssetSummary
 
 public sealed class MeshAssetSummary
 {
+	/// <summary>Legacy instance GUIDs resolve through this mesh; empty for the canonical asset.</summary>
+	public Guid CanonicalMeshNodeId { get; set; }
 	public string RelativeImportedMeshPath { get; set; } = string.Empty;
 	public int VertexCount { get; set; }
 	public int IndexCount { get; set; }
@@ -234,6 +241,10 @@ public sealed class TextureImportSettings
 
 public sealed class ModelImportSettings
 {
+	/// <summary>Explicit rig for animation-only sources. No retargeting is performed.</summary>
+	public Guid AnimationSkeletonId { get; set; }
+	public List<string> IgnoredAnimationChannels { get; set; } = [];
+
 	/// <summary>
 	/// Uniform scale applied while the source file is parsed. Assimp's global-scale step bakes it
 	/// into mesh vertices, bone offset matrices, animation position keys and node translations, so
@@ -260,6 +271,7 @@ public sealed class MaterialAsset : MaterialSurfaceProperties
 	public AssetType AssetType { get; set; } = AssetType.Material;
 	public MaterialAssetType MaterialType { get; set; } = MaterialAssetType.Opaque;
 	public float AlphaCutoff { get; set; } = 0.5f;
+	public bool DoubleSided { get; set; }
 
 	// Retained as a compatibility convenience for callers that operate on surface properties.
 	public MaterialSurfaceProperties GetActiveProperties() => this;
@@ -288,6 +300,8 @@ public sealed class MaterialTextureAssignments
 public abstract class MaterialSurfaceProperties
 {
 	public ColorRGBA BaseColor { get; set; } = ColorRGBA.White;
+	// XY is UV offset; ZW is UV scale. Identity preserves older material assets.
+	public Vector4 UvOffsetScale { get; set; } = new(0.0f, 0.0f, 1.0f, 1.0f);
 	public float MetallicFactor { get; set; } = 1.0f;
 	public float RoughnessFactor { get; set; } = 1.0f;
 	public float NormalScale { get; set; } = 1.0f;
@@ -298,11 +312,13 @@ public abstract class MaterialSurfaceProperties
 
 public sealed class ImportedMeshAssetFile
 {
-	public const int CurrentVersion = 2;
+	public const int CurrentVersion = ImportedMeshSerializer.CurrentVersion;
 
 	public int Version { get; set; } = CurrentVersion;
 	public Vector4[] Vertices { get; set; } = [];
 	public uint[] Indices { get; set; } = [];
+	public uint[] ShadowOpaqueIndices { get; set; } = [];
+	public uint[] ShadowAlphaTestIndices { get; set; } = [];
 	public Vector3[] Normals { get; set; } = [];
 	public Vector4[] Tangents { get; set; } = [];
 	public Vector2[] UVs { get; set; } = [];
@@ -366,6 +382,8 @@ public sealed class ImportedModelAssetFile
 
 public sealed class ImportedModelAssetNode
 {
+	public string? BoneParentName { get; set; }
+	public Matrix4x4? SkinBindToRig { get; set; }
 	public string Name { get; set; } = string.Empty;
 	public Matrix4x4 LocalTransform { get; set; } = Matrix4x4.Identity;
 	public List<ImportedModelAssetMeshInstance> Meshes { get; set; } = new();

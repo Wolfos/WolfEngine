@@ -13,6 +13,7 @@ public sealed class RenderGraphContext
 	private SceneDrawData? _sceneData;
 	private GpuDrawDatabase? _gpuDrawDatabase;
 	private FrameSnapshot? _frameSnapshot;
+	private RenderViewSnapshot? _viewSnapshot;
 
 	internal RenderGraphContext(RenderGraphResourceRegistry resourceRegistry, string passName)
 	{
@@ -46,6 +47,19 @@ public sealed class RenderGraphContext
 	{
 		get => _frameSnapshot ?? throw new InvalidOperationException("FrameSnapshot has not been set for this pass.");
 		internal set => _frameSnapshot = value;
+	}
+
+	/// <summary>
+	/// The view this pass runs for. A pass given no view snapshot — a shared pass on a single-view frame, or a
+	/// test — belongs to the primary view.
+	/// </summary>
+	public RenderViewId View => _viewSnapshot?.View ?? RenderViewId.Primary;
+
+	/// <summary>The scene packets and camera state for the view this pass is recording.</summary>
+	public RenderViewSnapshot ViewSnapshot
+	{
+		get => _viewSnapshot ?? throw new InvalidOperationException("ViewSnapshot has not been set for this pass.");
+		internal set => _viewSnapshot = value;
 	}
 
 	public IGfxTexture GetTexture(RenderGraphResourceHandle handle)

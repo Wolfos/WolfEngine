@@ -13,6 +13,49 @@ namespace WolfEngine.Tests;
 public sealed class RayTracingSceneResourcesTests
 {
 	[Test]
+	public void DdgiScatterBoundsCoverEveryIntersectingProbe()
+	{
+		const int count = 9;
+		const float spacing = 2.25f;
+		const float influence = spacing + 0.2f;
+		var origin = new Vector3(-9.0f, 3.0f, -4.0f);
+		var random = new Random(16462);
+		for (var sample = 0; sample < 1000; sample++)
+		{
+			var center = origin + new Vector3(
+				(float)random.NextDouble() * 32.0f - 6.0f,
+				(float)random.NextDouble() * 32.0f - 6.0f,
+				(float)random.NextDouble() * 32.0f - 6.0f);
+			var radius = (float)random.NextDouble() * 8.0f;
+			var reach = radius + influence;
+			var lower = (center - new Vector3(reach) - origin) / spacing;
+			var upper = (center + new Vector3(reach) - origin) / spacing;
+			var minimum = Vector3.Clamp(
+				new Vector3(MathF.Floor(lower.X), MathF.Floor(lower.Y), MathF.Floor(lower.Z)) - Vector3.One,
+				Vector3.Zero,
+				new Vector3(count - 1));
+			var maximum = Vector3.Clamp(
+				new Vector3(MathF.Ceiling(upper.X), MathF.Ceiling(upper.Y), MathF.Ceiling(upper.Z)) + Vector3.One,
+				Vector3.Zero,
+				new Vector3(count - 1));
+			for (var z = 0; z < count; z++)
+			for (var y = 0; y < count; y++)
+			for (var x = 0; x < count; x++)
+			{
+				var position = origin + new Vector3(x, y, z) * spacing;
+				var delta = Vector3.Abs(center - position) - new Vector3(influence);
+				var outside = Vector3.Max(delta, Vector3.Zero);
+				if (outside.LengthSquared() <= radius * radius)
+				{
+					Assert.That(x, Is.InRange(minimum.X, maximum.X));
+					Assert.That(y, Is.InRange(minimum.Y, maximum.Y));
+					Assert.That(z, Is.InRange(minimum.Z, maximum.Z));
+				}
+			}
+		}
+	}
+
+	[Test]
 	public void TonemappingAndPresentationShadersCompileForMetal()
 	{
 		if (OperatingSystem.IsMacOS() == false)
@@ -90,6 +133,8 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
 		Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(64));
 		Assert.That(cullParams.GetFieldOrThrow("planes[17]").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.Vector4));
+		Assert.That(cullParams.GetFieldOrThrow("planes[71]").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.Vector4));
+		Assert.That(cullParams.GetFieldOrThrow("planeCounts[2]").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
 		Assert.That(cullParams.GetFieldOrThrow("viewCount").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
 		Assert.That(cullParams.GetFieldOrThrow("outputDrawArgsStride").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
 		Assert.That(cullParams.GetFieldOrThrow("outputLaneStride").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
@@ -194,6 +239,8 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeActivityClearCS", ThreadsX: 64u, ThreadsY: 1u),
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeActivityScatterCS", ThreadsX: 64u, ThreadsY: 1u),
 			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS", ThreadsX: 64u, ThreadsY: 1u),
 			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS", ThreadsX: 64u, ThreadsY: 1u),
 			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS", ThreadsX: 16u, ThreadsY: 1u),
@@ -239,6 +286,8 @@ public sealed class RayTracingSceneResourcesTests
 		foreach (var shader in new[]
 		{
 			(Name: "AmbientOcclusion/ao_rtao.compute.slang", EntryPoint: "AmbientOcclusionRayTracedCS"),
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeActivityClearCS"),
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeActivityScatterCS"),
 			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS"),
 			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS"),
 			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS"),
@@ -523,7 +572,7 @@ public sealed class RayTracingSceneResourcesTests
 		var shape = DdgiUtilities.GetGridShape(ddgi);
 		Assert.That(shape.ProbeCount, Is.EqualTo(2048));
 		Assert.That(DdgiUtilities.GetAtlasSize(shape, DdgiUtilities.IrradianceTileInteriorSize), Is.EqualTo(new Int2(460, 450)));
-		Assert.That(DdgiUtilities.GetAtlasSize(shape, DdgiUtilities.VisibilityTileInteriorSize), Is.EqualTo(new Int2(828, 810)));
+		Assert.That(DdgiUtilities.GetAtlasSize(shape, DdgiUtilities.FullVisibilityTileInteriorSize), Is.EqualTo(new Int2(828, 810)));
 	}
 
 	[Test]
@@ -620,7 +669,7 @@ public sealed class RayTracingSceneResourcesTests
 	[TestCase(0, DdgiUtilities.IrradianceTileInteriorSize, 1)]
 	[TestCase(32, DdgiUtilities.IrradianceTileInteriorSize, 32)]
 	[TestCase(1024, DdgiUtilities.IrradianceTileInteriorSize, 64)]
-	[TestCase(1024, DdgiUtilities.VisibilityTileInteriorSize, 256)]
+	[TestCase(1024, DdgiUtilities.FullVisibilityTileInteriorSize, 256)]
 	public void DdgiRaySampleCountDoesNotExceedTemporaryTileCapacity(
 		int requestedRayCount,
 		int tileInteriorSize,
@@ -631,15 +680,17 @@ public sealed class RayTracingSceneResourcesTests
 			Is.EqualTo(expectedRayCount));
 	}
 
-	[TestCase(1, 18)]
-	[TestCase(64, 144)]
-	[TestCase(256, 336)]
-	public void DdgiProbeTraceInvocationCountIncludesVisibilityAndTemporalReferenceRays(
+	[TestCase(1, DdgiUtilities.FullVisibilityTileInteriorSize, 2)]
+	[TestCase(64, DdgiUtilities.FullVisibilityTileInteriorSize, 128)]
+	[TestCase(256, DdgiUtilities.FullVisibilityTileInteriorSize, 320)]
+	[TestCase(256, DdgiUtilities.HalfVisibilityTileInteriorSize, 128)]
+	public void DdgiProbeTraceInvocationCountIncludesVisibilityAndIrradianceRays(
 		int requestedRayCount,
+		int visibilityTileInteriorSize,
 		int expectedInvocationCount)
 	{
 		Assert.That(
-			DdgiUtilities.GetProbeTraceInvocationCount(requestedRayCount),
+			DdgiUtilities.GetProbeTraceInvocationCount(requestedRayCount, visibilityTileInteriorSize),
 			Is.EqualTo(expectedInvocationCount));
 	}
 
@@ -886,130 +937,83 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
-	public void DdgiEstimatorRejectsRayNoiseWhenReferenceTransportIsUnchanged()
+	public void DdgiEstimatorLimitsEachScheduledObservation()
 	{
-		var state = new DdgiVarianceData(new Vector3(5), new Vector3(5), new Vector3(25), new Vector3(5));
+		var state = new DdgiVarianceData(new Vector3(5), new Vector3(5), new Vector3(25));
 		for (var update = 0; update < 128; update++)
 		{
 			var sample = new Vector3(update % 2 == 0 ? 0 : 10);
 			var previous = state.Mean;
-			state = DdgiUtilities.UpdateVarianceEstimator(sample, new Vector3(5), state, 0.1f);
-			Assert.That((state.Mean - previous).Length(), Is.LessThanOrEqualTo((sample - previous).Length() * 0.02001f));
+			state = DdgiUtilities.UpdateVarianceEstimator(sample, state, 0.2f);
+			Assert.That((state.Mean - previous).Length(),
+				Is.LessThanOrEqualTo((sample - previous).Length() * 0.10001f));
 		}
-		Assert.That(state.Mean.X, Is.EqualTo(5).Within(0.1f));
-	}
-
-	[TestCase(0.08f)]
-	[TestCase(0.5f)]
-	[TestCase(1.0f)]
-	public void DdgiEstimatorDoesNotAmplifyNoisyReferenceInDimIndirectLighting(float shortWindowBlend)
-	{
-		var level = new Vector3(0.001f);
-		var state = new DdgiVarianceData(level, level, new Vector3(1e-6f), level);
-		for (var update = 0; update < 128; update++)
-		{
-			var sample = new Vector3(update % 2 == 0 ? 0 : 0.002f);
-			var reference = new Vector3(update % 2 == 0 ? 0.00095f : 0.00105f);
-			var previous = state.Mean;
-			state = DdgiUtilities.UpdateVarianceEstimator(sample, reference, state, shortWindowBlend);
-			Assert.That((state.Mean - previous).Length(), Is.LessThanOrEqualTo((sample - previous).Length() * 0.02001f));
-		}
+		Assert.That(state.Mean.X, Is.EqualTo(5).Within(0.3f));
 	}
 
 	[Test]
-	public void DdgiEstimatorPackedNoiseEstimateSurvivesVeryDimLighting()
+	public void DdgiEstimatorClampsOneBrightIndirectOutlier()
+	{
+		var level = new Vector3(0.01f);
+		var state = new DdgiVarianceData(level, level, Vector3.Zero);
+		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(100), state, 0.2f);
+		Assert.That(state.Mean.X, Is.LessThanOrEqualTo(0.011f));
+	}
+
+	[TestCase(0.0f)]
+	[TestCase(0.01f)]
+	public void DdgiEstimatorTracksSustainedLightingChange(float initialLevel)
+	{
+		var level = new Vector3(initialLevel);
+		var state = new DdgiVarianceData(level, level, Vector3.Zero);
+		for (var update = 0; update < 40; update++)
+		{
+			state = DdgiUtilities.UpdateVarianceEstimator(Vector3.One, state, 0.2f);
+		}
+		Assert.That(state.Mean.X, Is.GreaterThan(0.8f));
+	}
+
+	[Test]
+	public void DdgiEstimatorPreservesNoiseEstimateInDimLighting()
 	{
 		var level = new Vector3(1e-5f);
-		var state = new DdgiVarianceData(level, level, new Vector3(1e-10f), level);
-		for (var update = 0; update < 128; update++)
+		var state = new DdgiVarianceData(level, level, new Vector3(1e-10f));
+		for (var update = 0; update < 32; update++)
 		{
-			// The GPU stores deviation, since directly packed variance underflows.
 			var deviation = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(Vector3.SquareRoot(state.Variance)));
 			state.Variance = deviation * deviation;
 			Assert.That(state.Variance.X, Is.GreaterThan(0));
-			var sample = new Vector3(update % 2 == 0 ? 0 : 2e-5f);
-			var reference = new Vector3(update % 2 == 0 ? 0.95e-5f : 1.05e-5f);
-			var previous = state.Mean;
-			state = DdgiUtilities.UpdateVarianceEstimator(sample, reference, state, 0.5f);
-			Assert.That((state.Mean - previous).Length(), Is.LessThanOrEqualTo((sample - previous).Length() * 0.02001f));
+			state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(update % 2 == 0 ? 0 : 2e-5f), state, 0.2f);
 			state.Mean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.Mean));
 			state.ShortMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ShortMean));
-			state.ReferenceMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ReferenceMean));
 		}
 	}
 
 	[Test]
-	public void DdgiEstimatorSmallReferenceChangeCannotDisableFireflyRejection()
+	public void DdgiEstimatorDarkensGraduallyAfterLightTurnsOff()
 	{
-		var level = new Vector3(0.01f);
-		var state = new DdgiVarianceData(level, level, Vector3.Zero, level);
-		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(100), new Vector3(0.0105f), state, 0.5f);
-		Assert.That(state.Mean.X, Is.LessThan(0.011f));
-	}
-
-	[TestCase(0.0f, 0.01f)]
-	[TestCase(0.01f, 0.0f)]
-	public void DdgiEstimatorStillTracksRealDimLightingChanges(float before, float after)
-	{
-		var state = new DdgiVarianceData(new Vector3(before), new Vector3(before), Vector3.Zero, new Vector3(before));
-		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(after), new Vector3(after), state, 0.5f);
-		Assert.That(state.Mean.X, Is.EqualTo(after).Within(1e-6f));
-	}
-
-	[Test]
-	public void DdgiEstimatorRejectsUncorroboratedFirefly()
-	{
-		var state = new DdgiVarianceData(Vector3.One, Vector3.One, Vector3.Zero, Vector3.One);
-		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(1000), Vector3.One, state, 0.1f);
-		Assert.That(state.Mean.X, Is.EqualTo(1).Within(0.01f));
-	}
-
-	[TestCase(0.0f, 10.0f)]
-	[TestCase(10.0f, 0.0f)]
-	[TestCase(1.0f, 10.0f)]
-	[TestCase(10.0f, 1.0f)]
-	public void DdgiEstimatorTracksTransportStepsInBothDirections(float before, float after)
-	{
-		var state = new DdgiVarianceData(new Vector3(before), new Vector3(before), Vector3.Zero, new Vector3(before));
-		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(after), new Vector3(after), state, 0.1f);
-		Assert.That(state.Mean.X, Is.EqualTo(after).Within(0.001f));
-	}
-
-	[Test]
-	public void DdgiEstimatorTracksContinuousTransportChangesWithoutLightingEvents()
-	{
-		var state = new DdgiVarianceData(new Vector3(1), new Vector3(1), Vector3.Zero, new Vector3(1));
-		for (var update = 1; update <= 512; update++)
+		var state = new DdgiVarianceData(new Vector3(10), new Vector3(10), Vector3.Zero);
+		state = DdgiUtilities.UpdateVarianceEstimator(Vector3.Zero, state, 0.2f);
+		Assert.That(state.Mean.X, Is.EqualTo(9.0f).Within(1e-6f));
+		for (var update = 0; update < 40; update++)
 		{
-			var target = 1.0f + 0.8f * MathF.Sin(update * 0.04f);
-			var noisySample = new Vector3(target + (update % 2 == 0 ? 0.03f : -0.03f));
-			state = DdgiUtilities.UpdateVarianceEstimator(noisySample, new Vector3(target), state, 0.1f);
-			// Include the same quantization as the GPU estimator between updates.
-			state.Mean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.Mean));
-			state.ReferenceMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ReferenceMean));
-			Assert.That(state.Mean.X, Is.EqualTo(target).Within(0.1f));
+			state = DdgiUtilities.UpdateVarianceEstimator(Vector3.Zero, state, 0.2f);
 		}
+		Assert.That(state.Mean.X, Is.LessThan(0.2f));
 	}
 
 	[Test]
-	public void DdgiEstimatorDoesNotLeaveQuantizedBounceLightingAfterSourceTurnsOff()
+	public void DdgiEstimatorRecursiveBounceDecaysWithoutAReferenceTrigger()
 	{
-		var state = new DdgiVarianceData(new Vector3(10), new Vector3(10), Vector3.Zero, new Vector3(10));
-		for (var update = 0; update < 24; update++)
+		var state = new DdgiVarianceData(new Vector3(10), new Vector3(10), Vector3.Zero);
+		for (var update = 0; update < 128; update++)
 		{
-			var bounced = state.Mean * 0.6f;
-			state = DdgiUtilities.UpdateVarianceEstimator(bounced, bounced, state, 0.1f);
+			var previous = state.Mean.X;
+			state = DdgiUtilities.UpdateVarianceEstimator(state.Mean * 0.6f, state, 0.2f);
 			state.Mean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.Mean));
-			state.ReferenceMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ReferenceMean));
+			Assert.That(state.Mean.X, Is.LessThan(previous));
 		}
-		Assert.That(state.Mean.X, Is.LessThan(0.0001f));
-	}
-
-	[Test]
-	public void DdgiTemporalReferenceSamplesFitUnusedIrradianceTraceBorders()
-	{
-		var tileSize = DdgiUtilities.IrradianceTileInteriorSize + 2 * DdgiUtilities.TileBorderSize;
-		Assert.That(DdgiUtilities.TemporalReferenceRayCount, Is.LessThanOrEqualTo(2 * tileSize));
+		Assert.That(state.Mean.X, Is.LessThan(0.06f));
 	}
 
 	[Test]
@@ -1784,6 +1788,7 @@ public sealed class RayTracingSceneResourcesTests
 		var updates = new List<GpuDrawUpdate>();
 		database.CopyUpdates(updates);
 		resources.RecordUpdate(context, renderer, updates);
+		Assert.That(commandList.TopLevelInstances.Single().Mask, Is.EqualTo(0x02u));
 		database.ConsumeUpdates(updates);
 
 		database.BeginSync();
@@ -1878,6 +1883,7 @@ public sealed class RayTracingSceneResourcesTests
 		var updates = new List<GpuDrawUpdate>();
 		database.CopyUpdates(updates);
 		resources.RecordUpdate(context, renderer, updates);
+		Assert.That(commandList.TopLevelInstances.Single().Mask, Is.EqualTo(0x02u));
 		database.ConsumeUpdates(updates);
 
 		database.BeginSync();
@@ -1888,6 +1894,7 @@ public sealed class RayTracingSceneResourcesTests
 		resources.RecordUpdate(context, renderer, updates);
 		Assert.That(resources.LastStats.TopLevelRebuildReason, Is.EqualTo(RayTracingSceneRebuildReason.Transform));
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(1));
+		Assert.That(commandList.TopLevelInstances.Single().Mask, Is.EqualTo(0x01u));
 		database.ConsumeUpdates(updates);
 
 		database.BeginSync();
@@ -1900,6 +1907,7 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(resources.LastStats.PendingBottomLevelBuildCount, Is.EqualTo(1));
 		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(1));
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(1));
+		Assert.That(commandList.TopLevelInstances.Single().Mask, Is.EqualTo(0x01u));
 		database.ConsumeUpdates(updates);
 
 		commandList.ResetCounts();
@@ -2091,12 +2099,14 @@ public sealed class RayTracingSceneResourcesTests
 		public int BottomLevelBuildCount { get; private set; }
 		public int TopLevelBuildCount { get; private set; }
 		public List<IGfxBottomLevelAccelerationStructure> BottomLevelBuilds { get; } = new();
+		public RayTracingInstanceDescription[] TopLevelInstances { get; private set; } = [];
 		public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 		public void ResetCounts()
 		{
 			BottomLevelBuildCount = 0;
 			TopLevelBuildCount = 0;
 			BottomLevelBuilds.Clear();
+			TopLevelInstances = [];
 		}
 
 		public void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure)
@@ -2104,7 +2114,11 @@ public sealed class RayTracingSceneResourcesTests
 			BottomLevelBuildCount++;
 			BottomLevelBuilds.Add(accelerationStructure);
 		}
-		public void BuildTopLevelAccelerationStructure(IGfxTopLevelAccelerationStructure accelerationStructure, ReadOnlySpan<RayTracingInstanceDescription> instances) => TopLevelBuildCount++;
+		public void BuildTopLevelAccelerationStructure(IGfxTopLevelAccelerationStructure accelerationStructure, ReadOnlySpan<RayTracingInstanceDescription> instances)
+		{
+			TopLevelBuildCount++;
+			TopLevelInstances = instances.ToArray();
+		}
 		public void SynchronizeAccelerationStructureBuildForComputeRead(IGfxTopLevelAccelerationStructure accelerationStructure) { }
 		public void BeginPass(in PassTargets targets, in Viewport viewport) => throw new NotSupportedException();
 		public void EndPass() => throw new NotSupportedException();

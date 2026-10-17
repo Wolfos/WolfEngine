@@ -22,7 +22,7 @@ public sealed class GBufferDecalSeedPass
 
 	public GBufferDecalSeedPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
 		IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(context);

@@ -24,9 +24,14 @@ public struct DecalProjector : IEntityComponent
 	public Vector3 Size = Vector3.One;
 	public Vector4 UvScaleOffset = new(1.0f, 1.0f, 0.0f, 0.0f);
 	public ColorRGBA Tint = ColorRGBA.White;
+	// Live GPU textures assigned from code. They are not asset data, so they are never saved or cooked.
+	[NotSerialized]
 	public Texture? AlbedoTexture;
+	[NotSerialized]
 	public Texture? NormalTexture;
+	[NotSerialized]
 	public Texture? MaterialTexture;
+	[NotSerialized]
 	public Texture? EmissiveTexture;
 	public Vector3 MaterialFactors = new(1.0f, 1.0f, 0.0f);
 	public float EmissiveIntensity = 1.0f;

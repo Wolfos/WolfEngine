@@ -3,6 +3,7 @@ import "../Common/common_bindless.slang";
 import "../Common/draw_data.slang";
 import "../Common/common_lighting.slang";
 import "../Common/normal_decode.slang";
+import "../Common/volumetric_fog.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -33,9 +34,10 @@ cbuffer TransparentEnvironmentParams : register(b0)
     uint shadowMapHandle1;
     uint shadowMapHandle2;
     uint shadowSamplerHandle;
-    uint _envPadding0;
-    uint _envPadding1;
-    uint _envPadding2;
+    uint fogIntegratedHandle;
+    uint fogEnabled;
+    uint fogSliceCount;
+    float fogMaxDistance;
 };
 
 cbuffer CameraParams : register(b2)
@@ -125,7 +127,9 @@ VSOutput vertexShader(VSInput input)
     output.viewPos = viewPosition.xyz;
     output.normal = normalize(worldNormal.xyz);
     output.uv = input.uv;
-    output.tangent = float4(normalize(worldTangent), input.tangent.w);
+    // A reflection reverses the tangent frame handedness as well as triangle winding.
+    float orientation = determinant((float3x3)instanceData.world) < 0.0f ? -1.0f : 1.0f;
+    output.tangent = float4(normalize(worldTangent), input.tangent.w * orientation);
     output.instanceId = instanceId;
     return output;
 }
@@ -136,7 +140,7 @@ struct TransparentOutput
     float4 reactive : SV_Target1;
 };
 
-TransparentOutput fragmentShader(VSOutput input)
+TransparentOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFace)
 {
     TransparentOutput output;
     if (input.instanceId >= WOLF_MAX_INSTANCE_COUNT)
@@ -161,7 +165,9 @@ TransparentOutput fragmentShader(VSOutput input)
     }
 
     GpuMaterialData materialData = g_MaterialTable[materialIndex];
-    float3 normal = normalize(input.normal);
+    // A double-sided lane rasterises back faces, whose interpolated normal still points away from the
+    // viewer. Single-sided lanes cull them, so the flip only ever fires for geometry that asked for it.
+    float3 normal = normalize(input.normal) * (isFrontFace ? 1.0f : -1.0f);
 
     SamplerState sampler = GetSampler(materialData.samplerHandle);
     Texture2D<float4> albedoTex = GetTexture(materialData.albedoHandle);
@@ -169,12 +175,13 @@ TransparentOutput fragmentShader(VSOutput input)
     Texture2D<float4> normalTex = GetTexture(materialData.normalHandle);
     Texture2D<float4> emissiveTex = GetTexture(materialData.emissiveHandle);
 
-    float4 albedoSample = albedoTex.Sample(sampler, input.uv);
-    float4 ormSample = ormTex.Sample(sampler, input.uv);
+    float2 materialUv = input.uv * materialData.uvOffsetScale.zw + materialData.uvOffsetScale.xy;
+    float4 albedoSample = albedoTex.Sample(sampler, materialUv);
+    float4 ormSample = ormTex.Sample(sampler, materialUv);
     float3 tangentNormal = ApplyNormalMapScale(
-        DecodeNormalMapSample(normalTex.Sample(sampler, input.uv)),
+        DecodeNormalMapSample(normalTex.Sample(sampler, materialUv)),
         materialData.metallicRoughness.w);
-    float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
+    float4 emissiveSample = emissiveTex.Sample(sampler, materialUv);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
 
     float3 N = normal;
@@ -234,6 +241,14 @@ TransparentOutput fragmentShader(VSOutput input)
         samplerHandle,
         IBL_EXPOSURE);
     color += surface.emissive;
+
+    if (fogEnabled != 0u)
+    {
+        float2 screenUv = input.position.xy / float2(frameSizeX, frameSizeY);
+        float4 fog = SampleIntegratedFog(fogIntegratedHandle, samplerHandle, screenUv,
+            input.viewPos.z, fogSliceCount, nearPlane, fogMaxDistance);
+        color = color * fog.a + fog.rgb;
+    }
 
     float alpha = saturate(materialData.baseColor.a * albedoSample.a);
     output.color = float4(color, alpha);

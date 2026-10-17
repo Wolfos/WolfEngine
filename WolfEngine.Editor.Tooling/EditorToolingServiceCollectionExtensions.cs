@@ -20,11 +20,12 @@ public static class EditorToolingServiceCollectionExtensions
 		return services;
 	}
 
-	/// <summary>Registers the editor-only 3D source importer and its native Assimp dependency.</summary>
+	/// <summary>Registers editor-only 3D and font source tooling and their authoring dependencies.</summary>
 	public static IServiceCollection AddEditorToolingImporter(this IServiceCollection services)
 	{
 		ArgumentNullException.ThrowIfNull(services);
 		services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
+		services.AddSingleton<IFontCompiler, Fonts.FontCompiler>();
 		return services;
 	}
 }

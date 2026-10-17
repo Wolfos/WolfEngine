@@ -10,11 +10,42 @@ public enum GpuDrawKind : uint
 	Terrain = 2
 }
 
+/// <summary>
+/// Layout of <c>GpuDrawCommand.flags</c>. Mirrored by the <c>DRAW_FLAG_*</c> constants in
+/// <c>gpu_draw_cull.compute.slang</c> and <c>gpu_draw_compact.compute.slang</c>; change them together.
+/// </summary>
 public static class GpuDrawFlags
 {
 	public const uint Active = 1u << 0;
+
+	// Execution lane (bucket). Five bits: the cull's participation mask caps lanes at 32.
 	public const int BucketShift = 1;
-	public const uint BucketMask = 0x7FFFFFFFu;
+	public const uint BucketMask = 0x1Fu;
+
+	// Slot of the render view whose world owns the draw. Every view's draws live in one shared command table,
+	// and each view's cull skips commands owned by another view. Seven bits cover the 64 view slots.
+	public const int OwnerViewShift = 6;
+	public const uint OwnerViewMask = 0x7Fu;
+
+	public static uint Create(int bucketIndex, RenderViewId ownerView)
+	{
+		if ((uint)bucketIndex > BucketMask)
+		{
+			throw new ArgumentOutOfRangeException(nameof(bucketIndex), bucketIndex, $"Buckets must be below {BucketMask + 1}.");
+		}
+
+		if (ownerView.IsValid == false || (uint)ownerView.Index > OwnerViewMask)
+		{
+			throw new ArgumentOutOfRangeException(nameof(ownerView), ownerView, "Draw owner must be a valid view slot.");
+		}
+
+		return Active | ((uint)bucketIndex << BucketShift) | ((uint)ownerView.Index << OwnerViewShift);
+	}
+
+	public static RenderViewId GetOwnerView(uint flags) =>
+		RenderViewId.FromIndex((int)((flags >> OwnerViewShift) & OwnerViewMask));
+
+	public static int GetBucket(uint flags) => (int)((flags >> BucketShift) & BucketMask);
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -60,6 +91,7 @@ public readonly struct GpuMaterialData
 		ColorRGBA baseColor,
 		Vector4 metallicRoughness,
 		Vector4 emissiveFactorIntensity,
+		Vector4 uvOffsetScale,
 		uint albedoHandle,
 		uint ormHandle,
 		uint normalHandle,
@@ -69,6 +101,7 @@ public readonly struct GpuMaterialData
 		BaseColor = baseColor;
 		MetallicRoughness = metallicRoughness;
 		EmissiveFactorIntensity = emissiveFactorIntensity;
+		UvOffsetScale = uvOffsetScale;
 		AlbedoHandle = albedoHandle;
 		OrmHandle = ormHandle;
 		NormalHandle = normalHandle;
@@ -82,6 +115,7 @@ public readonly struct GpuMaterialData
 	public readonly ColorRGBA BaseColor;
 	public readonly Vector4 MetallicRoughness;
 	public readonly Vector4 EmissiveFactorIntensity;
+	public readonly Vector4 UvOffsetScale;
 	public readonly uint AlbedoHandle;
 	public readonly uint OrmHandle;
 	public readonly uint NormalHandle;
@@ -322,6 +356,7 @@ public readonly struct GpuDrawMaterialUpdateData
 		ColorRGBA baseColor,
 		Vector4 metallicRoughness,
 		Vector4 emissiveFactorIntensity,
+		Vector4 uvOffsetScale,
 		uint albedoHandle,
 		uint ormHandle,
 		uint normalHandle,
@@ -335,6 +370,7 @@ public readonly struct GpuDrawMaterialUpdateData
 		BaseColor = baseColor;
 		MetallicRoughness = metallicRoughness;
 		EmissiveFactorIntensity = emissiveFactorIntensity;
+		UvOffsetScale = uvOffsetScale;
 		AlbedoHandle = albedoHandle;
 		OrmHandle = ormHandle;
 		NormalHandle = normalHandle;
@@ -352,6 +388,7 @@ public readonly struct GpuDrawMaterialUpdateData
 	public readonly ColorRGBA BaseColor;
 	public readonly Vector4 MetallicRoughness;
 	public readonly Vector4 EmissiveFactorIntensity;
+	public readonly Vector4 UvOffsetScale;
 	public readonly uint AlbedoHandle;
 	public readonly uint OrmHandle;
 	public readonly uint NormalHandle;
@@ -411,6 +448,35 @@ public readonly struct GpuDecalProjectorData
 	private readonly uint _pad0;
 	private readonly uint _pad1;
 	private readonly uint _pad2;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public readonly struct GpuFogVolumeData
+{
+	public GpuFogVolumeData(Matrix4x4 worldToLocal, Vector4 albedoExtinction, Vector4 parameters)
+	{
+		WorldToLocal = worldToLocal;
+		AlbedoExtinction = albedoExtinction;
+		Parameters = parameters;
+	}
+
+	public readonly Matrix4x4 WorldToLocal;
+	public readonly Vector4 AlbedoExtinction;
+	/// <summary>x anisotropy, y blend distance in normalized local space, z shape.</summary>
+	public readonly Vector4 Parameters;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public readonly struct GpuFogCellHeader
+{
+	public GpuFogCellHeader(uint offset, uint count)
+	{
+		Offset = offset;
+		Count = count;
+	}
+
+	public readonly uint Offset;
+	public readonly uint Count;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

@@ -5,7 +5,7 @@ namespace WolfEngine.Animation;
 /// state machines and layers all arrive as other <see cref="IPoseSource"/> implementations rather
 /// than as changes here.
 /// </summary>
-public sealed class SingleClipPoseSource : IPoseSource
+internal sealed class SingleClipPoseSource
 {
 	private readonly BoneRemap _remap;
 	private readonly int[] _positionCursors;

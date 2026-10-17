@@ -6,6 +6,7 @@ using WolfEngine.Rendering.Passes;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 {
 	private nint _lastBindlessCountBufferPtr;
@@ -108,7 +109,7 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			metalIndexBuffer,
 			IndexFormat.UInt32,
 			mesh.IndexCount,
-			mesh.PackedIndexOffsetBytes,
+			mesh.GetPackedIndexOffsetBytes(resources.IndexStream),
 			0,
 			resources.DrawArgsBaseOffsetBytes + (drawArgsCommandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
 			instanceBuffer,

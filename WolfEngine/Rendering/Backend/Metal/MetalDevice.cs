@@ -10,12 +10,14 @@ using WolfEngine.Platform;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline, IGpuProfilerDevice
 {
 	private const int SubmissionsPerFrame = 2;
 	private const int MaxPendingCommandLists = GpuDrawResources.MaxFramesInFlight * SubmissionsPerFrame;
 	private const int MaxPooledTextures = 256;
 	private const int MaxPooledTexturesPerDescriptor = 2;
+	private const int MaxReportedCommandBufferErrors = 8;
 
 	private readonly struct TexturePoolKey : IEquatable<TexturePoolKey>
 	{
@@ -71,6 +73,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private int _pooledTextureCount;
 	private ulong _lastSubmittedId;
 	private ulong _completedId;
+	private int _reportedCommandBufferErrors;
 	private GpuSubmissionToken _lastPrimarySubmission;
 
 	private readonly struct PendingSubmission
@@ -101,6 +104,9 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	}
 
 	public IGfxDescriptorTable GlobalTable => _descriptorTable;
+
+	/// <summary>The live GPU resources by kind and owner. Empty unless the GPU memory census is enabled.</summary>
+	internal string FormatMemoryReport() => GpuMemoryCensus.FormatReport(_device.NativePtr);
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 	public bool SupportsRayTracing => _device.SupportsRaytracing;
@@ -291,6 +297,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			{
 				commandList.WaitUntilCompleted();
 			}
+
+			ReportExecutionError(commandList);
 			commandList.CompleteGpuProfiling();
 		}
 		catch (NullReferenceException)
@@ -309,6 +317,28 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 			MarkSubmissionCompleted(submission.Id);
 		}
+	}
+
+	private void ReportExecutionError(MetalCommandList commandList)
+	{
+		var error = commandList.ReadExecutionError();
+		if (error is null)
+		{
+			return;
+		}
+
+		lock (_submissionSync)
+		{
+			if (_reportedCommandBufferErrors >= MaxReportedCommandBufferErrors)
+			{
+				return;
+			}
+
+			_reportedCommandBufferErrors++;
+		}
+
+		// An errored command buffer is otherwise silent: its work is skipped and the frame simply looks wrong.
+		Console.Error.WriteLine($"Metal command buffer failed: {error}");
 	}
 
 	private void MarkSubmissionCompleted(ulong submissionId)
@@ -367,7 +397,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		textureDescriptor.TextureType = descriptor.Dimension == TextureDimension.Texture3D
 			? MTLTextureType.Type3D
 			: MTLTextureType.Type2D;
-		textureDescriptor.StorageMode = MTLStorageMode.Managed;
+		textureDescriptor.StorageMode = MTLStorageMode.Shared;
 		textureDescriptor.Usage = ToUsage(descriptor.Usage);
 
 		var texture = _device.NewTexture(textureDescriptor);

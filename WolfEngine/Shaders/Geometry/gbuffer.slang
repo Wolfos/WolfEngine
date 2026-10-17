@@ -2,7 +2,9 @@
 import "../Common/common_bindless.slang";
 import "../Common/draw_data.slang";
 import "../Common/normal_decode.slang";
+#ifdef WOLF_GBUFFER_SKINNED
 import "../Animation/skinning_common.slang";
+#endif
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -12,10 +14,13 @@ StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
 
+#ifdef WOLF_GBUFFER_SKINNED
 // Rebuilds skinned vertices' previous positions for motion vectors.
 StructuredBuffer<GpuSkinVertex> g_SkinVertices : register(t14);
 StructuredBuffer<GpuBoneMatrix> g_BoneMatrices : register(t15);
 StructuredBuffer<GpuSkinnedInstanceData> g_SkinnedInstances : register(t16);
+
+#endif
 
 // Written per indirect command by the command signature's root constant rather than by any binding
 // call, so each draw can find its own entry in the draw args table.
@@ -63,6 +68,7 @@ struct VSOutput
     float4 previousClip : TEXCOORD5;
 };
 
+#ifdef WOLF_GBUFFER_SKINNED
 /// Rebuilds a skinned vertex's previous object-space position.
 float3 ResolvePreviousObjectPosition(VSInput input, GpuInstanceData instanceData)
 {
@@ -93,6 +99,8 @@ float3 ResolvePreviousObjectPosition(VSInput input, GpuInstanceData instanceData
         skinnedInstance.boneCount);
 }
 
+#endif
+
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
@@ -114,18 +122,26 @@ VSOutput vertexShader(VSInput input)
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;
+#ifdef WOLF_GBUFFER_SKINNED
     float3 previousObjectPosition = ResolvePreviousObjectPosition(input, instanceData);
+#else
+    float3 previousObjectPosition = input.position;
+#endif
     float4 previousWorldPosition = mul(float4(previousObjectPosition, 1.0f), instanceData.previousWorld);
     previousWorldPosition.xyz -= previousCameraPosition;
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);
     float3 worldTangent = mul(float4(input.tangent.xyz, 0.0f), instanceData.world).xyz;
 
-    output.position = mul(worldPosition, viewProjection);
     output.currentClip = mul(worldPosition, unjitteredViewProjection);
+    output.position = output.currentClip;
+    // Left-handed perspective projection: view-space Z equals clip W.
+    output.position.xy += currentJitterNdc * output.currentClip.w;
     output.previousClip = mul(previousWorldPosition, previousViewProjection);
     output.normal = normalize(worldNormal.xyz);
     output.uv = input.uv;
-    output.tangent = float4(normalize(worldTangent), input.tangent.w);
+    // A reflection reverses the tangent frame handedness as well as triangle winding.
+    float orientation = determinant((float3x3)instanceData.world) < 0.0f ? -1.0f : 1.0f;
+    output.tangent = float4(normalize(worldTangent), input.tangent.w * orientation);
     output.instanceId = instanceId;
     return output;
 }
@@ -154,10 +170,10 @@ float ClipToDepth(float4 clipPosition)
     return clipPosition.z * invW;
 }
 
-PSOutput EvaluateFragment(VSOutput input)
+PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
 {
     PSOutput output;
-    
+
     if (input.instanceId >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.albedo = float4(1.0f, 0.0f, 1.0f, 1.0f);
@@ -183,7 +199,9 @@ PSOutput EvaluateFragment(VSOutput input)
     }
 
     GpuMaterialData materialData = g_MaterialTable[materialIndex];
-    float3 normal = normalize(input.normal);
+    // A double-sided lane rasterises back faces, whose interpolated normal still points away from the
+    // viewer. Single-sided lanes cull them, so the flip only ever fires for geometry that asked for it.
+    float3 normal = normalize(input.normal) * (isFrontFace ? 1.0f : -1.0f);
 
     SamplerState sampler = GetSampler(materialData.samplerHandle);
     Texture2D<float4> albedoTex = GetTexture(materialData.albedoHandle);
@@ -191,15 +209,16 @@ PSOutput EvaluateFragment(VSOutput input)
     Texture2D<float4> normalTex = GetTexture(materialData.normalHandle);
     Texture2D<float4> emissiveTex = GetTexture(materialData.emissiveHandle);
 
-    float4 albedoSample = albedoTex.Sample(sampler, input.uv);
-    float4 ormSample = ormTex.Sample(sampler, input.uv);
+    float2 materialUv = input.uv * materialData.uvOffsetScale.zw + materialData.uvOffsetScale.xy;
+    float4 albedoSample = albedoTex.Sample(sampler, materialUv);
+    float4 ormSample = ormTex.Sample(sampler, materialUv);
 #ifdef WOLF_ALPHA_CLIP
     if(albedoSample.a < materialData.metallicRoughness.z) discard;
 #endif
     float3 tangentNormal = ApplyNormalMapScale(
-        DecodeNormalMapSample(normalTex.Sample(sampler, input.uv)),
+        DecodeNormalMapSample(normalTex.Sample(sampler, materialUv)),
         materialData.metallicRoughness.w);
-    float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
+    float4 emissiveSample = emissiveTex.Sample(sampler, materialUv);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
     float3 N = normal;
     float3 T = normalize(input.tangent.xyz);
@@ -232,7 +251,7 @@ PSOutput EvaluateFragment(VSOutput input)
     return output;
 }
 
-PSOutput fragmentShader(VSOutput input)
+PSOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFace)
 {
-    return EvaluateFragment(input);
+    return EvaluateFragment(input, isFrontFace);
 }

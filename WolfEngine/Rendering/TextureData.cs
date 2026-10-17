@@ -78,6 +78,7 @@ public static class TextureFormatUtilities
 		TextureFormat.Rg16Float => 4,
 		TextureFormat.Rgba16Float => 8,
 		TextureFormat.R32Float => 4,
+		TextureFormat.R32Uint => 4,
 		TextureFormat.D32Float => 4,
 		_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported texture format.")
 	};

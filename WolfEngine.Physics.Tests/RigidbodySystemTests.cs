@@ -3,6 +3,7 @@ using JoltPhysicsSharp;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
+using WorldRay = global::WolfEngine.Mathematics.Ray;
 
 namespace WolfEngine.Physics.Tests;
 
@@ -152,6 +153,32 @@ public sealed class RigidbodySystemTests
 
 		Assert.That(system.GetTrackedWorldCount(), Is.EqualTo(0));
 		Assert.That(system.GetTrackedBodyCount(world), Is.EqualTo(0));
+	}
+
+	[Test]
+	public void WorldManagerRemoval_ReleasesPhysicsAndReplacementSimulatesIndependently()
+	{
+		var manager = new WorldManager();
+		using var system = new RigidbodySystem();
+		manager.AddSystem(system);
+		var first = manager.CreateWorld(WorldTag.Game);
+		var oldEntity = first.CreateEntity("Old Box", Matrix4x4.Identity);
+		first.AddComponent(oldEntity, BoxCollider.CreateDefault());
+		first.AddComponent(oldEntity, Rigidbody.CreateDefault());
+		manager.PhysicsUpdate(1f / 60, WorldTag.Game);
+		Assert.That(system.GetTrackedBodyCount(first), Is.EqualTo(1));
+		Assert.That(manager.RemoveWorld(first), Is.True);
+		Assert.That(system.GetTrackedWorldCount(), Is.Zero);
+		var second = manager.CreateWorld(WorldTag.Game);
+		var newEntity = second.CreateEntity("New Box", Matrix4x4.Identity);
+		second.AddComponent(newEntity, BoxCollider.CreateDefault());
+		second.AddComponent(newEntity, Rigidbody.CreateDefault());
+		manager.PhysicsUpdate(1f / 60, WorldTag.Game);
+		Assert.That(system.GetTrackedWorldCount(), Is.EqualTo(1));
+		Assert.That(system.GetTrackedBodyCount(first), Is.Zero);
+		Assert.That(system.GetTrackedBodyCount(second), Is.EqualTo(1));
+		manager.RemoveWorld(second);
+		Assert.That(system.GetTrackedWorldCount(), Is.Zero);
 	}
 
 	[Test]
@@ -788,6 +815,43 @@ public sealed class RigidbodySystemTests
 		Assert.That(hit.Entity, Is.EqualTo(floor));
 		Assert.That(hit.Point.Y, Is.EqualTo(-0.5f).Within(0.05f));
 		Assert.That(hit.Normal.Y, Is.GreaterThan(0.9f));
+	}
+
+	[Test]
+	public void TryRaycast_RayOverloadUsesMaxDistanceAndForwardsFilters()
+	{
+		var world = new World(WorldTag.Game);
+		var floor = world.CreateEntity("Floor", Matrix4x4.CreateTranslation(0.0f, -1.0f, 0.0f));
+		var floorCollider = BoxCollider.CreateDefault();
+		floorCollider.HalfExtents = new Vector3(5.0f, 0.5f, 5.0f);
+		world.AddComponent(floor, floorCollider);
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+		var ray = new WorldRay(new Vector3(0.0f, 2.0f, 0.0f), -Vector3.UnitY);
+
+		Assert.That(system.TryRaycast(world, ray, 2.0f, out _), Is.False);
+		Assert.That(system.TryRaycast(world, ray, 3.0f, out var hit), Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(floor));
+		Assert.That(hit.Point.Y, Is.EqualTo(-0.5f).Within(0.05f));
+		Assert.That(hit.Fraction, Is.EqualTo(2.5f / 3.0f).Within(0.05f));
+		Assert.That(system.TryRaycast(world, ray, 3.0f, out _, ignoredEntity: floor), Is.False);
+		Assert.That(system.TryRaycast(world, ray, 3.0f, out _, layerMask: 0), Is.False);
+	}
+
+	[TestCase(0.0f)]
+	[TestCase(-1.0f)]
+	[TestCase(float.NaN)]
+	[TestCase(float.PositiveInfinity)]
+	public void TryRaycast_RayOverloadRejectsInvalidRayOrDistance(float maxDistance)
+	{
+		var world = new World(WorldTag.Game);
+		using var system = new RigidbodySystem();
+		var validRay = new WorldRay(Vector3.Zero, Vector3.UnitZ);
+		var result = system.TryRaycast(world, validRay, maxDistance, out var hit);
+		Assert.That(result, Is.False);
+		Assert.That(hit, Is.EqualTo(default(PhysicsRaycastHit)));
+		Assert.That(system.TryRaycast(world, default(WorldRay), 1.0f, out hit), Is.False);
+		Assert.That(hit, Is.EqualTo(default(PhysicsRaycastHit)));
 	}
 
 	[Test]

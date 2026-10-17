@@ -1468,6 +1468,21 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		}
 	}
 
+	public void SynchronizeUnorderedAccess(IGfxResource resource)
+	{
+		ID3D12Resource* nativeResource = resource switch
+		{
+			ID3D12BackendTexture texture => texture.Resource,
+			D3D12Buffer buffer => buffer.Resource.Handle,
+			_ => throw new InvalidOperationException("UAV synchronization targeted an unsupported resource type.")
+		};
+		if (nativeResource is null)
+		{
+			throw new InvalidOperationException("UAV synchronization targeted a null resource.");
+		}
+		InsertUavBarrier(nativeResource);
+	}
+
 	/// <summary>
 	/// Issues a pass's transitions in one call. Each separate ResourceBarrier call is a point the driver
 	/// may drain and flush caches at, so a pass that transitions a dozen resources pays a dozen of them

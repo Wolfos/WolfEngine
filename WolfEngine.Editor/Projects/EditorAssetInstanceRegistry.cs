@@ -76,7 +76,9 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		]));
 	}
 
-	public void RefreshCatalog(IAssetCatalog catalog)
+	public void RefreshCatalog(IAssetCatalog catalog) => RefreshCatalog(catalog, Guid.Empty);
+
+	public void RefreshCatalog(IAssetCatalog catalog, Guid preservedRuntimeAssetId)
 	{
 		ArgumentNullException.ThrowIfNull(catalog);
 
@@ -90,7 +92,8 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 			var staleKeys = _instances.Keys.Where(key =>
 				!_assetsById.TryGetValue(key.NodeId, out var current) ||
 				!previousAssets.TryGetValue(key.NodeId, out var previous) ||
-				!MountedAssetsEquivalent(previous, current)).ToList();
+				!MountedAssetIdentityEquivalent(previous, current) ||
+				(key.NodeId != preservedRuntimeAssetId && !MountedAssetsEquivalent(previous, current))).ToList();
 			for (var i = 0; i < staleKeys.Count; i++)
 			{
 				_instances.Remove(staleKeys[i]);
@@ -100,14 +103,21 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		}
 	}
 
-	private static bool MountedAssetsEquivalent(MountedAsset left, MountedAsset right)
+	private static bool MountedAssetIdentityEquivalent(MountedAsset left, MountedAsset right)
 	{
 		var a = left.Asset;
 		var b = right.Asset;
 		return string.Equals(left.Mount.Id, right.Mount.Id, StringComparison.Ordinal) &&
 		       string.Equals(left.Mount.RootPath, right.Mount.RootPath, StringComparison.Ordinal) &&
 		       a.Type == b.Type &&
-		       string.Equals(a.RelativeAssetPath, b.RelativeAssetPath, StringComparison.Ordinal) &&
+		       string.Equals(a.RelativeAssetPath, b.RelativeAssetPath, StringComparison.Ordinal);
+	}
+
+	private static bool MountedAssetsEquivalent(MountedAsset left, MountedAsset right)
+	{
+		var a = left.Asset;
+		var b = right.Asset;
+		return MountedAssetIdentityEquivalent(left, right) &&
 		       string.Equals(a.SummaryJson, b.SummaryJson, StringComparison.Ordinal) &&
 		       a.Artifacts.Count == b.Artifacts.Count &&
 		       a.Artifacts.Zip(b.Artifacts).All(pair =>

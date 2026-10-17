@@ -10,6 +10,55 @@ namespace WolfEngine.Tests;
 [TestFixture]
 public sealed class FrameSnapshotGpuDrawTests
 {
+	[TestCase(-1, 1, 1, true)]
+	[TestCase(-1, -1, 1, false)]
+	[TestCase(-1, -1, -1, true)]
+	[TestCase(1, 1, 1, false)]
+	public void MirroredWorldTransform_UsesReflectionParity(float x, float y, float z, bool mirrored)
+	{
+		var world = Matrix4x4.CreateScale(x, y, z) * Matrix4x4.CreateRotationY(0.7f) *
+		            Matrix4x4.CreateTranslation(10, 20, 30);
+		Assert.That(GpuDrawClassification.ReversesWinding(world), Is.EqualTo(mirrored));
+		// Two inherited reflections cancel even when separated by a rotation.
+		var parent = Matrix4x4.CreateScale(-2, 3, 4);
+		Assert.That(GpuDrawClassification.ReversesWinding(world * parent), Is.EqualTo(!mirrored));
+	}
+
+	[Test]
+	public void MirroredLanes_PreserveParticipationAndMaterialSidedness()
+	{
+		foreach (var lane in GpuDrawExecutionLanes.Definitions.ToArray().Where(lane => !lane.ReverseWinding))
+		{
+			Assert.That(GpuDrawExecutionLanes.TryGetDefinition(lane.Key with { ReverseWinding = true }, out var mirrored), Is.True);
+			Assert.That(mirrored.Participation, Is.EqualTo(lane.Participation));
+			Assert.That(mirrored.ResolveCullMode(global::WolfEngine.Rendering.Abstraction.CullMode.Back),
+				Is.EqualTo(lane.ResolveCullMode(global::WolfEngine.Rendering.Abstraction.CullMode.Back)));
+		}
+	}
+
+	[Test]
+	public void GpuDrawDatabase_WindingChange_EmitsStructuralUpdateAndRetainsMeshOnTransformUpdates()
+	{
+		var database = new GpuDrawDatabase();
+		var mesh = CreateTestMesh();
+		var material = new Material("shader");
+		var entity = new Entity(1, 1);
+		var updates = new List<GpuDrawUpdate>();
+		foreach (var scale in new[] { 1f, -1f, -2f, 1f })
+		{
+			database.BeginSync();
+			database.TouchMesh(entity, mesh, material, Matrix4x4.CreateScale(scale, 1, 1));
+			database.EndSync();
+			database.ConsumeUpdates(updates);
+			if (scale == -1f || (scale == 1f && updates.All(update => update.Type != GpuDrawUpdateType.Add)))
+				Assert.That(updates.Any(update => update.Type == GpuDrawUpdateType.UpdateMaterial), Is.True);
+			if (scale == -2f)
+				Assert.That(updates.Any(update => update.Type == GpuDrawUpdateType.UpdateMaterial), Is.False);
+			foreach (var update in updates.Where(update => update.Type == GpuDrawUpdateType.UpdateTransform))
+				Assert.That(update.Mesh, Is.SameAs(mesh));
+		}
+	}
+
 	[Test]
 	public void FrameSnapshot_SetConfig_CopiesBloom()
 	{
@@ -252,6 +301,118 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(updates[0].Type, Is.EqualTo(GpuDrawUpdateType.UpdateTransform));
 		Assert.That(updates[0].PreviousWorld.Translation.X, Is.EqualTo(5.0f).Within(0.0001f));
 		Assert.That(updates[0].World.Translation.X, Is.EqualTo(9.0f).Within(0.0001f));
+	}
+
+	[Test]
+	public void FrameSnapshotBuffer_SeedsPreviousCameraIndependentlyForEveryView()
+	{
+		var buffer = new FrameSnapshotBuffer();
+		var secondaryView = RenderViewId.FromIndex(1);
+
+		Assert.That(buffer.TryBeginWrite(out var snapshotA), Is.True);
+		snapshotA.SetCamera(CreateCamera(), CreateCameraTransform(1.0f));
+		snapshotA.GetOrCreateView(secondaryView).SetCamera(CreateCamera(), CreateCameraTransform(10.0f));
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var snapshotB), Is.True);
+		snapshotB.SetCamera(CreateCamera(), CreateCameraTransform(2.0f));
+		snapshotB.GetOrCreateView(secondaryView).SetCamera(CreateCamera(), CreateCameraTransform(20.0f));
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var reusedSnapshotA), Is.True);
+		var primary = reusedSnapshotA.GetOrCreateView(RenderViewId.Primary);
+		var secondary = reusedSnapshotA.GetOrCreateView(secondaryView);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(primary.HasPreviousCameraState, Is.True);
+			Assert.That(primary.PreviousCameraWorldTransform.LocalToWorld.Translation.X,
+				Is.EqualTo(2.0f).Within(0.0001f));
+			Assert.That(secondary.HasPreviousCameraState, Is.True);
+			Assert.That(secondary.PreviousCameraWorldTransform.LocalToWorld.Translation.X,
+				Is.EqualTo(20.0f).Within(0.0001f));
+		});
+	}
+
+	[Test]
+	public void FrameSnapshot_ViewEntriesKeepScenePacketsAndDrawDatabasesIsolated()
+	{
+		var snapshot = new FrameSnapshot();
+		var primary = snapshot.GetOrCreateView(RenderViewId.Primary);
+		var secondary = snapshot.GetOrCreateView(RenderViewId.FromIndex(1));
+
+		primary.AddLight(new Light(), Matrix4x4.Identity);
+		secondary.AddFogVolume(new FogVolume { Extinction = 0.5f }, Matrix4x4.Identity);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(primary.LightPackets, Has.Count.EqualTo(1));
+			Assert.That(primary.FogVolumePackets, Is.Empty);
+			Assert.That(secondary.LightPackets, Is.Empty);
+			Assert.That(secondary.FogVolumePackets, Has.Count.EqualTo(1));
+			Assert.That(secondary.GpuDrawDatabase, Is.Not.SameAs(primary.GpuDrawDatabase));
+		});
+	}
+
+	[Test]
+	public void FrameSnapshot_ClearKeepsStorageButOmitsViewsNotSubmittedThisFrame()
+	{
+		var snapshot = new FrameSnapshot();
+		var secondaryView = RenderViewId.FromIndex(1);
+		var secondary = snapshot.GetOrCreateView(secondaryView);
+
+		snapshot.Clear();
+		snapshot.SetCamera(CreateCamera(), CreateCameraTransform(1.0f));
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(snapshot.Views.Select(view => view.View), Is.EqualTo(new[] { RenderViewId.Primary }));
+			Assert.That(snapshot.GetOrCreateView(secondaryView), Is.SameAs(secondary));
+			Assert.That(snapshot.Views.Select(view => view.View),
+				Is.EqualTo(new[] { RenderViewId.Primary, secondaryView }));
+		});
+	}
+
+	[Test]
+	public void FrameSnapshotBuffer_ReboundSlotDropsCameraAndDrawStateEvenForTheSameWorld()
+	{
+		var buffer = new FrameSnapshotBuffer();
+		var world = new World(WorldTag.All);
+		var view = RenderViewId.FromIndex(1);
+		var mesh = CreateTestMesh();
+		var material = new Material("rebound-view");
+		var entity = new Entity(1, 1);
+
+		Assert.That(buffer.TryBeginWrite(out var firstFrame), Is.True);
+		var firstView = firstFrame.BindView(view, world, bindingGeneration: 1);
+		firstView.SetCamera(CreateCamera(), CreateCameraTransform(10.0f));
+		firstView.GpuDrawDatabase.BeginSync();
+		firstView.GpuDrawDatabase.BeginWorld(world.Id);
+		firstView.GpuDrawDatabase.TouchPersistentMesh(entity, mesh, material, Matrix4x4.Identity);
+		firstView.GpuDrawDatabase.EndSync();
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var secondFrame), Is.True);
+		var secondView = secondFrame.BindView(view, world, bindingGeneration: 1);
+		Assert.That(secondView.PreviousCameraWorldTransform.LocalToWorld.Translation.X,
+			Is.EqualTo(10.0f).Within(0.0001f));
+		secondView.SetCamera(CreateCamera(), CreateCameraTransform(20.0f));
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var reusedFrame), Is.True);
+		var rebound = reusedFrame.BindView(view, world, bindingGeneration: 2);
+		var entries = new List<GpuDrawEntry>();
+		rebound.GpuDrawDatabase.CollectDrawEntries(entries);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(rebound.HasPreviousCameraState, Is.False);
+			Assert.That(entries, Is.Empty);
+		});
 	}
 
 	[Test]
@@ -649,6 +810,97 @@ public sealed class FrameSnapshotGpuDrawTests
 		database.ConsumeUpdates(updates);
 
 		Assert.That(updates.Select(update => update.Type), Does.Not.Contain(GpuDrawUpdateType.Remove));
+	}
+
+	[Test]
+	public void GpuDrawDatabase_EqualEntitiesInTwoWorlds_AreSeparateDraws()
+	{
+		// Entity indices restart per world, so two worlds routinely hold the same index and generation.
+		// Without the world in the draw key the second gather would overwrite the first one's draw.
+		var database = new GpuDrawDatabase();
+		var first = new World(WorldTag.All);
+		var second = new World(WorldTag.All);
+		var entity = new Entity(4, 1);
+		var firstMesh = CreateTestMesh();
+		var secondMesh = CreateTestMesh();
+		var material = new Material("two-world-shader");
+		var entries = new List<GpuDrawEntry>();
+
+		database.BeginSync();
+		database.BeginWorld(first.Id);
+		database.TouchMesh(entity, firstMesh, material, Matrix4x4.Identity);
+		database.BeginWorld(second.Id);
+		database.TouchMesh(entity, secondMesh, material, Matrix4x4.CreateTranslation(50.0f, 0.0f, 0.0f));
+		database.EndSync();
+
+		database.CollectDrawEntries(entries);
+		Assert.That(entries, Has.Count.EqualTo(2));
+		Assert.That(entries.Select(entry => entry.DrawHandle.Index).Distinct().Count(), Is.EqualTo(2));
+		Assert.That(entries.Select(entry => entry.Mesh), Is.EquivalentTo(new[] { firstMesh, secondMesh }));
+	}
+
+	[Test]
+	public void GpuDrawDatabase_RefreshSharedHandleState_SeesSlotsAllocatedByALaterViewGather()
+	{
+		var history = new GpuDrawTransformHistory();
+		var handles = new GpuDrawHandleRegistry();
+		var firstView = new GpuDrawDatabase(history, handles);
+		var secondView = new GpuDrawDatabase(history, handles);
+		var firstWorld = new World(WorldTag.All);
+		var secondWorld = new World(WorldTag.All);
+
+		firstView.BeginSync();
+		firstView.BeginWorld(firstWorld.Id);
+		firstView.TouchMesh(new Entity(1, 1), CreateTestMesh(), new Material("first-view"), Matrix4x4.Identity);
+		firstView.EndSync();
+
+		secondView.BeginSync();
+		secondView.BeginWorld(secondWorld.Id);
+		secondView.TouchMesh(new Entity(1, 1), CreateTestMesh(), new Material("second-view"), Matrix4x4.Identity);
+		secondView.EndSync();
+
+		var secondEntries = new List<GpuDrawEntry>();
+		secondView.CollectDrawEntries(secondEntries);
+		var laterHandle = secondEntries.Single().DrawHandle;
+		Assert.That(firstView.IsCurrentDrawHandle(laterHandle), Is.False,
+			"the early view copied generations before the later view allocated its slot");
+
+		firstView.RefreshSharedHandleState();
+
+		Assert.That(firstView.IsCurrentDrawHandle(laterHandle), Is.True);
+	}
+
+	[Test]
+	public void GpuDrawDatabase_EqualEntitiesInTwoWorlds_DoNotShareTransformHistory()
+	{
+		// The motion half of the same collision: one world's entity moving must not hand the other
+		// world's equal entity a previous transform it never had, which would smear its motion vectors.
+		var database = new GpuDrawDatabase();
+		var moving = new World(WorldTag.All);
+		var still = new World(WorldTag.All);
+		var entity = new Entity(7, 1);
+		var mesh = CreateTestMesh();
+		var material = new Material("two-world-history-shader");
+		var stillTransform = Matrix4x4.CreateTranslation(0.0f, 9.0f, 0.0f);
+		var entries = new List<GpuDrawEntry>();
+
+		database.BeginSync();
+		database.BeginWorld(moving.Id);
+		database.TouchMesh(entity, mesh, material, Matrix4x4.Identity);
+		database.BeginWorld(still.Id);
+		database.TouchMesh(entity, mesh, material, stillTransform);
+		database.EndSync();
+
+		database.BeginSync();
+		database.BeginWorld(moving.Id);
+		database.TouchMesh(entity, mesh, material, Matrix4x4.CreateTranslation(30.0f, 0.0f, 0.0f));
+		database.BeginWorld(still.Id);
+		database.TouchMesh(entity, mesh, material, stillTransform);
+		database.EndSync();
+
+		database.CollectDrawEntries(entries);
+		var stationary = entries.Single(entry => entry.World == stillTransform);
+		Assert.That(stationary.PreviousWorld, Is.EqualTo(stillTransform));
 	}
 
 	[Test]

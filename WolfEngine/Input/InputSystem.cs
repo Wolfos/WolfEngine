@@ -11,10 +11,75 @@ public interface IInputSystem
 	void SetButton(InputActionBinding binding, bool isPressed);
 	void SetAxis1D(InputActionBinding binding, float value);
 	void SetAxis2D(InputActionBinding binding, Vector2 value);
+	void ProcessPointerInput(IPointerInputRouter router, PointerInputContext context) { }
+	void SetPointerFocus(bool focused) { }
+	bool PointerFocused => true;
+	/// <summary>Gets the mouse position normalized to the current pointer viewport.</summary>
+	/// <remarks>Returns false until a position/context is known or while gameplay input is disabled or unfocused.</remarks>
+	bool TryGetMouseViewportPosition(out Vector2 position)
+	{
+		position = default;
+		return false;
+	}
+	/// <summary>Returns normalized mouse coordinates, or a non-finite vector when unavailable.</summary>
+	Vector2 GetMouseViewportPosition() =>
+		TryGetMouseViewportPosition(out var position) ? position : new Vector2(float.NaN);
 }
 
 public class InputSystem : IInputSystem
 {
+	private readonly PointerInputQueue? _pointer;
+	private readonly object _mouseViewportSync = new();
+	private PointerInputContext _mouseViewportContext;
+	private bool _hasMouseViewportContext;
+	private Vector2 _localMousePosition;
+	private bool _hasLocalMousePosition;
+	private readonly Dictionary<InputActionBinding, bool> _pointerOwners = [];
+	public InputSystem(PointerInputQueue? pointer = null) => _pointer = pointer;
+	public void SetPointerFocus(bool focused) => _pointer?.SetFocus(focused);
+	public bool PointerFocused => _pointer?.Focused ?? true;
+
+	public void ProcessPointerInput(IPointerInputRouter router, PointerInputContext context)
+	{
+		context = context with { Focused = context.Focused && (_pointer?.Focused ?? true) };
+		lock (_mouseViewportSync)
+		{
+			_mouseViewportContext = context;
+			_hasMouseViewportContext = true;
+		}
+		router.BeginFrame(context);
+		try
+		{
+			if (!context.Focused)
+				foreach (var binding in _pointerOwners.Keys)
+					if (!_pointerOwners[binding]) ApplyButton(binding, false);
+			if (_pointer is null) return;
+			var events = _pointer.Drain();
+			try
+			{
+				foreach (var input in events)
+				{
+					if (input.Cancelled)
+					{
+						router.BeginFrame(context with { Focused = false });
+						foreach (var owner in _pointerOwners) if (!owner.Value) ApplyButton(owner.Key, false);
+						router.BeginFrame(context);
+						continue;
+					}
+					var consumed = router.Route(input);
+					if (PointerInputQueue.Button(input.Binding) >= 0)
+					{
+						if (input.Pressed) _pointerOwners[input.Binding] = consumed;
+						else if (_pointerOwners.Remove(input.Binding, out var owner)) consumed = owner;
+						if (!consumed) ApplyButton(input.Binding, input.Pressed);
+					}
+					else if (!consumed) ApplyAxis2D(input.Binding, input.Value);
+				}
+			}
+			finally { events.Clear(); }
+		}
+		finally { router.EndFrame(); }
+	}
 	private const float AxisButtonThreshold = 0.5f;
 	private const float Axis2DButtonThresholdSquared = AxisButtonThreshold * AxisButtonThreshold;
 
@@ -83,6 +148,13 @@ public class InputSystem : IInputSystem
 	}
 
 	public void SetButton(InputActionBinding binding, bool isPressed)
+	{
+		_pointer?.SetModifier(binding, isPressed);
+		if (_pointer?.EnqueueButton(binding, isPressed) == true) return;
+		ApplyButton(binding, isPressed);
+	}
+
+	private void ApplyButton(InputActionBinding binding, bool isPressed)
 	{
 		EnsureBindingKind(binding, BindingKind.Button);
 
@@ -159,10 +231,79 @@ public class InputSystem : IInputSystem
 
 	public void SetAxis2D(InputActionBinding binding, Vector2 value)
 	{
+		if (binding == InputActionBinding.MousePosition && _pointer is null)
+		{
+			lock (_mouseViewportSync)
+			{
+				_localMousePosition = value;
+				_hasLocalMousePosition = true;
+			}
+		}
+
+		if (_pointer?.EnqueueAxis(binding, value) == true) return;
+		ApplyAxis2D(binding, value);
+	}
+
+	public bool TryGetMouseViewportPosition(out Vector2 position)
+	{
+		position = default;
+		Vector2 screenPosition;
+		bool hasScreenPosition;
+		if (_pointer is not null)
+		{
+			hasScreenPosition = _pointer.TryGetMousePosition(out screenPosition);
+		}
+		else
+		{
+			lock (_mouseViewportSync)
+			{
+				screenPosition = _localMousePosition;
+				hasScreenPosition = _hasLocalMousePosition;
+			}
+		}
+
+		if (hasScreenPosition == false)
+		{
+			return false;
+		}
+
+		PointerInputContext context;
+		bool hasContext;
+		lock (_mouseViewportSync)
+		{
+			context = _mouseViewportContext;
+			hasContext = _hasMouseViewportContext;
+		}
+
+		if (hasContext == false || context.Enabled == false || context.Focused == false || (_pointer?.Focused ?? true) == false ||
+		    IsFinite(screenPosition) == false || IsFinite(context.Origin) == false || IsFinite(context.Size) == false ||
+		    context.Size.X <= 0.0f || context.Size.Y <= 0.0f)
+		{
+			return false;
+		}
+
+		position = (screenPosition - context.Origin) / context.Size;
+		if (IsFinite(position) == false)
+		{
+			position = default;
+			return false;
+		}
+
+		return true;
+	}
+
+	public Vector2 GetMouseViewportPosition() =>
+		TryGetMouseViewportPosition(out var position) ? position : new Vector2(float.NaN);
+
+	private static bool IsFinite(Vector2 value) => float.IsFinite(value.X) && float.IsFinite(value.Y);
+
+	private void ApplyAxis2D(InputActionBinding binding, Vector2 value)
+	{
 		EnsureBindingKind(binding, BindingKind.Axis2D);
 
 		var previous = _axis2DStates.TryGetValue(binding, out var state) ? state : Vector2.Zero;
-		if (Vector2Equals(previous, value))
+		var isScroll = binding == InputActionBinding.MouseScroll;
+		if (isScroll == false && Vector2Equals(previous, value))
 		{
 			_axis2DStates[binding] = value;
 			return;
@@ -175,7 +316,7 @@ public class InputSystem : IInputSystem
 			foreach (var registration in axisActions)
 			{
 				var newValue = EvaluateAxis2D(registration.Action.Bindings);
-				if (Vector2Equals(newValue, registration.CurrentValue))
+				if (isScroll == false && Vector2Equals(newValue, registration.CurrentValue))
 				{
 					continue;
 				}

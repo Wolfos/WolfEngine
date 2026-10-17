@@ -12,6 +12,8 @@ public interface IAssetInstanceRegistry
 			throw new InvalidOperationException("The asset catalog does not contain a project mount.");
 		RefreshProject(projectMount.RootPath, projectMount.Database);
 	}
+	// An editor save can synchronize an instance in place before refreshing its metadata.
+	void RefreshCatalog(IAssetCatalog catalog, Guid preservedRuntimeAssetId) => RefreshCatalog(catalog);
 	void InvalidateAssets(IEnumerable<Guid> assetIds);
 	void ClearCachedInstances();
 	void Clear();

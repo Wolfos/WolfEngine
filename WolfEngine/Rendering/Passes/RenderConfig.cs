@@ -7,11 +7,27 @@ namespace WolfEngine.Rendering.Passes;
 [RuntimeAsset(AssetType.DataAsset, typeof(RenderConfig), typeof(IDataAssetRuntimeResolver))]
 public class RenderConfig: IDataAsset
 {
+	public const float MinRenderScale = 0.25f;
+
+	private float _renderScale = 1.0f;
+
+	/// <summary>
+	/// Per-axis fraction of the output resolution the scene renders at. Everything up to tonemapping runs at the
+	/// scaled size (G-buffer, lighting, AO, reflections, temporal anti-aliasing); FSR3 then upscales temporally,
+	/// and otherwise tonemapping filters the image up to the output. Post-processing and UI stay at full size.
+	/// </summary>
+	public float RenderScale
+	{
+		get => _renderScale;
+		set => _renderScale = float.IsFinite(value) ? Math.Clamp(value, MinRenderScale, 1.0f) : 1.0f;
+	}
+
 	public AmbientOcclusionConfig AmbientOcclusion { get; set; } = new();
 	public ReflectionConfig Reflections { get; set; } = new();
 	public DiffuseGlobalIlluminationConfig DiffuseGlobalIllumination { get; set; } = new();
 	public LightingConfig Lighting { get; set; } = new();
 	public ShadowMapConfig ShadowMaps { get; set; } = new();
+	public VolumetricFogConfig VolumetricFog { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
 	// Keep the serialized key for existing render-config assets while presenting the
 	// renderer that actually owns these settings in the editor.
@@ -22,6 +38,28 @@ public class RenderConfig: IDataAsset
 	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
 	public MotionVectorDebugConfig MotionVectorDebug { get; set; } = new();
+}
+
+public struct VolumetricFogConfig
+{
+	private int _froxelPixelSize = 16;
+	private int _sliceCount = 64;
+	private float _historyWeight = 0.9f;
+
+	public VolumetricFogConfig()
+	{
+	}
+
+	public bool Enabled { get; set; } = false;
+	public float Extinction { get; set; } = 0.01f;
+	public float BaseHeight { get; set; } = 0.0f;
+	public float HeightFalloff { get; set; } = 0.05f;
+	public ColorRGBA Albedo { get; set; } = new(0.85f, 0.9f, 1.0f, 1.0f);
+	public float Anisotropy { get; set; } = 0.35f;
+	public float MaxDistance { get; set; } = 250.0f;
+	public int FroxelPixelSize { readonly get => _froxelPixelSize; set => _froxelPixelSize = Math.Clamp(value, 4, 32); }
+	public int SliceCount { readonly get => _sliceCount; set => _sliceCount = Math.Clamp(value, 16, 128); }
+	public float HistoryWeight { readonly get => _historyWeight; set => _historyWeight = Math.Clamp(value, 0.0f, 0.999f); }
 }
 
 public struct LightingConfig
@@ -121,7 +159,11 @@ public struct ShadowMapConfig
 	{
 	}
 
+	public bool Enabled { get; set; } = true;
 	public int CascadeCount { get; set; } = ShadowMapPass.MaxCascadeCount;
+	public bool TightCasterCulling { get; set; } = true;
+	/// <summary>Use lossless shadow indices generated during asset import; UV and skinning seams are retained when required.</summary>
+	public bool WeldShadowVertices { get; set; } = true;
 	public int CascadeResolution { get; set; } = ShadowMapPass.DefaultCascadeResolution;
 	public float CascadeBlendDistance { get; set; } = ShadowMapPass.DefaultCascadeBlendDistance;
 	public float MaxDistance { get; set; } = ShadowMapPass.DefaultMaxShadowDistance;
@@ -132,6 +174,19 @@ public enum DiffuseGlobalIlluminationMode
 {
 	None,
 	RayTracedDdgi
+}
+
+/// <summary>
+/// Per-axis texels each probe gets in the DDGI visibility atlas, which stores the depth moments that keep light
+/// from leaking through walls. Half stores 8x8 per probe instead of 16x16: a quarter of the memory and of the
+/// integration work, with coarser occlusion. It holds up to 64 rays per probe, so more rays than that are not
+/// used for visibility.
+/// </summary>
+public enum DdgiVisibilityResolution
+{
+	// Full is zero so serialized settings that predate this property keep their original behavior.
+	Full = 0,
+	Half = 1
 }
 
 public struct DdgiProbeCounts
@@ -157,6 +212,7 @@ public struct DiffuseGlobalIlluminationConfig
 	public DdgiProbeCounts ProbeCounts { get; set; } = new();
 	public float ProbeSpacing { get; set; } = 2.0f;
 	public int RaysPerProbe { get; set; } = 64;
+	public DdgiVisibilityResolution VisibilityResolution { get; set; } = DdgiVisibilityResolution.Full;
 	public int ProbeUpdateFrames { get; set; } = 8;
 	public float MaxRayDistance { get; set; } = 6.0f;
 	public float NormalBias { get; set; } = 0.05f;

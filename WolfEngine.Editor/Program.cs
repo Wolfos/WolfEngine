@@ -1,3 +1,4 @@
+using WolfEngine.Rendering;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
@@ -13,7 +14,12 @@ public static class Program
 {
 	public static void Main(string[] args)
 	{
-		using var application = EditorApplication.Create();
+		if (args.Length == 2 && args[0] == "--migrate-animation")
+        {
+            Console.WriteLine($"Migrated {AnimationLegacyMigration.UpgradeProject(Path.GetFullPath(args[1]))} animator components and animation assets.");
+            return;
+        }
+        using var application = EditorApplication.Create();
 
 		if (EditorAutomationOptions.TryParse(args, out var automationOptions, out var parseError) == false)
 		{
@@ -33,6 +39,8 @@ public static class Program
 		services.AddSingleton<RigidbodySystem>();
 		services.AddSingleton<IEditorPlaySession, EditorPlaySession>();
 		services.AddSingleton<EditorCameraContext>();
+		services.AddSingleton<EditorRenderViews>();
+		services.AddSingleton<IRenderViewHost>(provider => provider.GetRequiredService<RenderGraph>());
 		services.AddSingleton<EditorCameraSystem>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();
@@ -69,11 +77,14 @@ public static class Program
 		services.AddSingleton<IMaterialAssetStore, MaterialAssetStore>();
 		services.AddSingleton<IDataAssetStore, DataAssetStore>();
 		services.AddSingleton<IMaterialAssetCreator, MaterialAssetCreator>();
+		services.AddSingleton<IMaterialExtractionService, MaterialExtractionService>();
 		services.AddSingleton<IDataAssetCreator, DataAssetCreator>();
 		services.AddSingleton<ITerrainAssetCreator, TerrainAssetCreator>();
 		services.AddSingleton<IPrefabAssetCreator, PrefabAssetCreator>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
 		services.AddSingleton<IAudioAssetImporter, AudioAssetImporter>();
+		services.AddSingleton<IFontAssetImporter, FontAssetImporter>();
+		services.AddSingleton<IFontContentProvider, EditorFontContentProvider>();
 		services.AddSingleton<EditorAudioContentProvider>();
 		services.AddSingleton<IAudioContentProvider>(provider => provider.GetRequiredService<EditorAudioContentProvider>());
 		services.AddSingleton<AudioService>();
@@ -89,6 +100,8 @@ public static class Program
 		services.AddSingleton<IMeshRuntimeAssetResolver, MeshRuntimeAssetResolver>();
 		services.AddSingleton<ISkeletonRuntimeAssetResolver, SkeletonRuntimeAssetResolver>();
 		services.AddSingleton<IAnimationClipRuntimeAssetResolver, AnimationClipRuntimeAssetResolver>();
+		services.AddSingleton<IAnimationAssetRuntimeResolver, AnimationAssetRuntimeResolver>();
+		services.AddSingleton<IPrefabRuntimeAssetResolver, PrefabRuntimeAssetResolver>();
 		services.AddSingleton<IPropertyDrawerRegistry, PropertyDrawerRegistry>();
 		services.AddSingleton<TextureAssetEditor>();
 		services.AddSingleton<AudioAssetEditor>();
@@ -98,9 +111,14 @@ public static class Program
 		services.AddSingleton<SceneAssetEditor>();
 		services.AddSingleton<PrefabAssetEditor>();
 		services.AddSingleton<ModelAssetEditor>();
+        services.AddSingleton<AnimationWindow>();
+        foreach (var type in new[] { AssetType.AnimationGraph })
+            services.AddSingleton<IEditorAssetHandler>(provider => new AnimationEditorAssetHandler(type,
+                provider.GetRequiredService<AnimationWindow>(), provider.GetRequiredService<IEditorProjectService>(), provider.GetRequiredService<IProjectAssetPipelineService>()));
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, AudioEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, ColorLookupTableEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, FontEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, DataEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, TerrainEditorAssetHandler>();
@@ -125,6 +143,7 @@ public static class Program
 		services.AddSingleton<CapsuleColliderGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();
 		services.AddSingleton<SceneSelectionController>();
+		services.AddSingleton<SelectionOutlineController>();
 		services.AddSingleton<EditorGui>();
 		services.AddSingleton<ProjectSettingsWindow>();
 		services.AddSingleton<EditorPreferencesWindow>();

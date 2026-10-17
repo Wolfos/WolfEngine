@@ -51,7 +51,8 @@ struct GpuDrawArgs
 
 constant uint kDrawFlagActive = 1u;
 constant uint kDrawFlagBucketShift = 1u;
-constant uint kDrawFlagBucketMask = 0x7FFFFFFFu;
+// Mirrors GpuDrawFlags in GpuDrawData.cs; bits above the bucket hold the owning view.
+constant uint kDrawFlagBucketMask = 0x1Fu;
 
 kernel void CSCompactIndirectCommands(
 	device const CompactionCommandBuffers& commandBuffers [[buffer(0)]],

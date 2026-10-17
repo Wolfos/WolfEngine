@@ -331,13 +331,22 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			clearValuePtr = &clearValue;
 		}
 
-		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
+		var createResult = _device.CreateCommittedResource(
 			&heapProps,
 			HeapFlags.None,
 			in resourceDesc,
 			initialState,
 			clearValuePtr,
-			out ComPtr<ID3D12Resource> resource));
+			out ComPtr<ID3D12Resource> resource);
+		if (createResult < 0)
+		{
+			throw new InvalidOperationException(
+				$"CreateCommittedResource failed (0x{createResult:X8}) for texture " +
+				$"{descriptor.Width}x{descriptor.Height}x{descriptor.Depth} {descriptor.Dimension} " +
+				$"format={descriptor.Format} srgb={descriptor.IsSrgb} mips={descriptor.MipLevels} " +
+				$"usage={descriptor.Usage} dxgi={resourceFormat} flags={resourceDesc.Flags} state={initialState}.",
+				Marshal.GetExceptionForHR(createResult));
+		}
 
 		var texture = new D3D12Texture();
 		texture.Initialize(null, descriptor, resource);
@@ -1650,7 +1659,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		const uint maxUavDescriptors = 16384;
 		const uint maxSamplerDescriptors = 2048;
 
-		var ranges = stackalloc DescriptorRange[6];
+		var ranges = stackalloc DescriptorRange[7];
 		ranges[0] = new DescriptorRange
 		{
 			RangeType = DescriptorRangeType.Srv,
@@ -1701,6 +1710,14 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		};
 		ranges[5] = new DescriptorRange
 		{
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 4,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[6] = new DescriptorRange
+		{
 			RangeType = DescriptorRangeType.Sampler,
 			NumDescriptors = maxSamplerDescriptors,
 			BaseShaderRegister = 0,
@@ -1716,13 +1733,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 3;
+		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 4;
 		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[2];
 		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[5];
+		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[6];
 		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessCountsCbv].ParameterType = RootParameterType.TypeCbv;
@@ -1852,7 +1869,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		const uint maxUavDescriptors = 16384;
 		const uint maxSamplerDescriptors = 2048;
 
-		var ranges = stackalloc DescriptorRange[6];
+		var ranges = stackalloc DescriptorRange[7];
 		ranges[0] = new DescriptorRange
 		{
 			RangeType = DescriptorRangeType.Srv,
@@ -1903,6 +1920,14 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		};
 		ranges[5] = new DescriptorRange
 		{
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 4,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[6] = new DescriptorRange
+		{
 			RangeType = DescriptorRangeType.Sampler,
 			NumDescriptors = maxSamplerDescriptors,
 			BaseShaderRegister = 0,
@@ -1918,13 +1943,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Compute.BindlessSrvTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 3;
+		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 4;
 		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[2];
 		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[5];
+		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[6];
 		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Compute.BindlessCountsCbv].ParameterType = RootParameterType.TypeCbv;
@@ -2113,7 +2138,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 				AbstractionCullMode.Front => D3DCullMode.Front,
 				_ => D3DCullMode.Back
 			},
-			FrontCounterClockwise = 0,
+			FrontCounterClockwise = state.ReverseWinding,
 			DepthBias = D3D12Api.DefaultDepthBias,
 			DepthBiasClamp = 0.0f,
 			SlopeScaledDepthBias = 0.0f,
@@ -2241,7 +2266,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			flags |= ResourceFlags.AllowUnorderedAccess;
 		}
 
-		if ((usage & TextureUsage.ShaderResource) == 0)
+		if ((usage & TextureUsage.ShaderResource) == 0 && (usage & TextureUsage.DepthStencil) != 0)
 		{
 			flags |= ResourceFlags.DenyShaderResource;
 		}

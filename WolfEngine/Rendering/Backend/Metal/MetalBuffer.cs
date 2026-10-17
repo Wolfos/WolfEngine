@@ -6,6 +6,7 @@ using WolfEngine.Rendering.Abstraction;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDisposable
 {
 	// Metal indirect commands cache native buffer pointers without retaining them.
@@ -20,6 +21,7 @@ internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDis
 		Name = name;
 		Descriptor = descriptor;
 		Buffer = buffer;
+		GpuMemoryCensus.Track(this, "Buffer", buffer.NativePtr, name);
 	}
 
 	public string? Name { get; }
@@ -104,6 +106,7 @@ internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDis
 			}
 
 			_disposeRequested = true;
+			GpuMemoryCensus.Untrack(this);
 			if (_indirectReferenceCount == 0 && _nativeDisposed == false)
 			{
 				_nativeDisposed = true;

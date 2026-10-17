@@ -9,7 +9,9 @@ StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
+#ifdef WOLF_SHADOW_TERRAIN
 StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t14);
+#endif
 
 // Written per indirect command by the command signature's root constant rather than by any binding
 // call, so each draw can find its own entry in the draw args table.
@@ -36,6 +38,7 @@ cbuffer CameraParams : register(b4)
 
 struct VSInput
 {
+    // Keep UV at material attribute index 2 on Metal. Unused inputs are optimized out.
     float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
@@ -46,8 +49,10 @@ struct VSInput
 struct VSOutput
 {
     float4 position : SV_Position;
+#ifdef WOLF_ALPHA_CLIP
     float2 uv : TEXCOORD0;
     uint instanceId : TEXCOORD1;
+#endif
 };
 
 uint ResolveMaterialIndex(uint materialHandle)
@@ -66,6 +71,7 @@ uint ResolveMaterialIndex(uint materialHandle)
     return 0;
 }
 
+#ifdef WOLF_SHADOW_TERRAIN
 float2 GetTerrainUv(float2 baseUv, GpuInstanceData instanceData)
 {
     return instanceData.terrainHeightmapUvScaleOffset.zw + baseUv * instanceData.terrainHeightmapUvScaleOffset.xy;
@@ -110,6 +116,7 @@ float SampleTerrainHeight(float2 uv, GpuTerrainMaterialData terrainData)
 
     return saturate(CubicHermite(rows[0], rows[1], rows[2], rows[3], fraction.y)) * terrainData.heightScale;
 }
+#endif
 
 VSOutput vertexShader(VSInput input)
 {
@@ -118,24 +125,33 @@ VSOutput vertexShader(VSInput input)
     if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);
+#ifdef WOLF_ALPHA_CLIP
         output.uv = float2(0.0f, 0.0f);
         output.instanceId = 0;
+#endif
         return output;
     }
 
     uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
-    uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
+#ifdef WOLF_ALPHA_CLIP
     float2 uv = input.uv;
+#endif
     float3 localPosition = input.position;
-    if (instanceData.drawKind == 2)
+#ifdef WOLF_SHADOW_TERRAIN
     {
+        // The execution lane selects this variant; no per-vertex draw-kind branch is needed.
+        uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
         GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
-        uv = GetTerrainUv(input.uv, instanceData);
+        float2 terrainUv = GetTerrainUv(input.uv, instanceData);
+#ifdef WOLF_ALPHA_CLIP
+        uv = terrainUv;
+#endif
         localPosition.x = instanceData.terrainChunkOriginSize.x + input.position.x * instanceData.terrainChunkOriginSize.z;
-        localPosition.y = SampleTerrainHeight(uv, terrainData) + input.position.y;
+        localPosition.y = SampleTerrainHeight(terrainUv, terrainData) + input.position.y;
         localPosition.z = instanceData.terrainChunkOriginSize.y + input.position.z * instanceData.terrainChunkOriginSize.w;
     }
+#endif
 
     float4 worldPosition = mul(float4(localPosition, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;
@@ -147,8 +163,10 @@ VSOutput vertexShader(VSInput input)
     viewProjection = viewProjection2;
 #endif
     output.position = mul(worldPosition, viewProjection);
+#ifdef WOLF_ALPHA_CLIP
     output.uv = uv;
     output.instanceId = instanceId;
+#endif
     return output;
 }
 
@@ -177,7 +195,8 @@ void fragmentShader(VSOutput input)
     GpuMaterialData materialData = g_MaterialTable[materialIndex];
     SamplerState sampler = GetSampler(materialData.samplerHandle);
     Texture2D<float4> albedoTex = GetTexture(materialData.albedoHandle);
-    float alpha = albedoTex.Sample(sampler, input.uv).a * materialData.baseColor.a;
+    float2 materialUv = input.uv * materialData.uvOffsetScale.zw + materialData.uvOffsetScale.xy;
+    float alpha = albedoTex.Sample(sampler, materialUv).a * materialData.baseColor.a;
     if (alpha < materialData.metallicRoughness.z)
     {
         discard;

@@ -35,6 +35,7 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle DdgiProbeRelocationDecisionDebug { get; init; }
 	public required bool DdgiFinalContributionDebugEnabled { get; init; }
 	public required bool DdgiProbeDebugEnabled { get; init; }
+	public required int DdgiVisibilityTileInteriorSize { get; init; }
 	public required DescriptorHandle ShadowMapDepth0 { get; init; }
 	public required DescriptorHandle ShadowMapDepth1 { get; init; }
 	public required DescriptorHandle ShadowMapDepth2 { get; init; }
@@ -45,6 +46,10 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle LightingOutput { get; init; }
 	public required DescriptorHandle LinearSampler { get; init; }
 	public required DescriptorHandle ShadowSampler { get; init; }
+	public required DescriptorHandle FogIntegrated { get; init; }
+	public required bool FogEnabled { get; init; }
+	public required int FogSliceCount { get; init; }
+	public required float FogMaxDistance { get; init; }
 
 	public required IGfxBuffer PointLightBuffer { get; init; }
 	public required IGfxBuffer ClusterHeaderBuffer { get; init; }

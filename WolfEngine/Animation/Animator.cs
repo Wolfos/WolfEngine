@@ -5,89 +5,131 @@ using WolfEngine.ECS;
 
 namespace WolfEngine.Animation;
 
-/// <summary>
-/// Drives a skeleton. For now it plays a single clip; the node-based animator graph will replace
-/// the pose source behind <see cref="IPoseSource"/> without changing anything that reads from here.
-/// </summary>
+/// <summary>One graph instance shared by every mesh on a character rig.</summary>
 public struct Animator : IEntityComponent, IJsonOnDeserialized
 {
 	public AssetRef<Skeleton> SkeletonAsset;
-	public AssetRef<AnimationClip> ClipAsset;
-
-	public float Speed;
-	public bool Loop;
-	public bool Playing;
-
-	/// <summary>Playback position in seconds. Writable so the editor can scrub.</summary>
-	public float Time;
+	public AssetRef<AnimationGraph> GraphAsset;
+	public AssetRef<AnimationSet> ClipSetAsset;
 
 	[JsonIgnore] internal Skeleton? Skeleton;
-	[JsonIgnore] internal AnimationClip? Clip;
-	[JsonIgnore] internal IPoseSource? PoseSource;
+	[JsonIgnore] internal AnimationGraph? Graph;
+	[JsonIgnore] internal AnimationSet? ClipSet;
+	[JsonIgnore] internal AnimationGraphInstance? GraphInstance;
 	[JsonIgnore] internal Pose? Pose;
-
-	/// <summary>Bone matrices for the current pose, uploaded to the skinning pass each frame.</summary>
+	[JsonIgnore] internal AnimationOutputBindings? Bindings;
 	[JsonIgnore] internal Matrix4x4[]? SkinningMatrices;
-
-	/// <summary>Bone matrices for the previous rendered pose, used for motion vectors.</summary>
 	[JsonIgnore] internal Matrix4x4[]? PreviousSkinningMatrices;
-
-	/// <summary>Whether the previous-pose matrices have been initialized.</summary>
 	[JsonIgnore] internal bool HasPreviousPose;
-
-	/// <summary>Bumped whenever the pose changes, so the renderer can skip unchanged characters.</summary>
+	[JsonIgnore] internal bool WasVisibilityCulled;
+	[JsonIgnore] internal bool BindPosePrepared;
 	[JsonIgnore] internal uint PoseGeneration;
+	[JsonIgnore] internal uint LastRenderedPoseGeneration;
+	[JsonIgnore] public string? Diagnostic { get; internal set; }
 
-	public static Animator Create(AssetRef<Skeleton> skeleton, AssetRef<AnimationClip> clip) =>
-		new()
-		{
-			SkeletonAsset = skeleton,
-			ClipAsset = clip,
-			Speed = 1.0f,
-			Loop = true,
-			Playing = true,
-			Time = 0.0f
-		};
+	private static readonly AnimationNode Rest = new() { Kind = AnimationNodeKind.BindPose };
+	private static readonly AnimationNode RestOutput = new() { Kind = AnimationNodeKind.Output, Inputs = [Rest.Id] };
+	private static readonly AnimationGraph RestGraph = new() { Nodes = [Rest, RestOutput], Output = RestOutput.Id };
 
-	/// <summary>
-	/// Resolves assets and (re)builds the pose source when the bound clip or skeleton changes.
-	/// Returns false when the animator cannot produce a pose.
-	/// </summary>
-	internal bool TryPrepare()
+	public static Animator Create(AssetRef<Skeleton> skeleton, AssetRef<AnimationGraph> graph, AssetRef<AnimationSet> clips = default) =>
+		new() { SkeletonAsset = skeleton, GraphAsset = graph, ClipSetAsset = clips };
+
+	[JsonIgnore] public AnimationGraphInstance? Instance => TryPrepare() ? GraphInstance : null;
+
+	/// <summary>Prepare a static bind pose for an authoring world without compiling a graph.</summary>
+	internal bool TryPrepareBindPose()
 	{
-		Skeleton ??= SkeletonAsset.IsValid ? SkeletonAsset.Asset : null;
-		Clip ??= ClipAsset.IsValid ? ClipAsset.Asset : null;
-
-		if (Skeleton is null || Clip is null)
+		var skeleton = SkeletonAsset.IsValid ? SkeletonAsset.Asset : Skeleton;
+		if (skeleton is null)
 		{
 			return false;
 		}
 
-		if (PoseSource is SingleClipPoseSource existing &&
-		    ReferenceEquals(existing.Clip, Clip) &&
-		    ReferenceEquals(existing.Skeleton, Skeleton))
+		if (BindPosePrepared && ReferenceEquals(Skeleton, skeleton) && GraphInstance is null && Pose is not null &&
+			SkinningMatrices?.Length == skeleton.BoneCount && PreviousSkinningMatrices?.Length == skeleton.BoneCount && HasPreviousPose)
 		{
 			return true;
 		}
 
-		var source = new SingleClipPoseSource(Clip, Skeleton) { Time = Time };
-		PoseSource = source;
-		Pose = Clip.CreatePose(Skeleton);
-		SkinningMatrices = new Matrix4x4[Skeleton.BoneCount];
-		PreviousSkinningMatrices = new Matrix4x4[Skeleton.BoneCount];
-		HasPreviousPose = false;
+		var pose = new Pose(skeleton.BoneCount);
+		pose.SetToBindPose(skeleton);
+		var matrices = new Matrix4x4[skeleton.BoneCount];
+		pose.ComputeSkinningMatrices(skeleton, matrices);
+
+		Skeleton = skeleton;
+		GraphInstance = null;
+		Pose = pose;
+		Bindings = null;
+		SkinningMatrices = matrices;
+		PreviousSkinningMatrices = (Matrix4x4[])matrices.Clone();
+		HasPreviousPose = true;
+		BindPosePrepared = true;
+		PoseGeneration++;
+		Diagnostic = null;
 		return true;
 	}
 
+	internal bool TryPrepare()
+	{
+		var skeleton = SkeletonAsset.IsValid ? SkeletonAsset.Asset : Skeleton;
+		var graph = GraphAsset.IsValid ? GraphAsset.Asset : Graph ?? RestGraph;
+		var clips = ClipSetAsset.IsValid ? ClipSetAsset.Asset : ClipSet;
+		if (skeleton is null || graph is null)
+		{
+			return false;
+		}
+
+		if (GraphInstance is not null && ReferenceEquals(Skeleton, skeleton) && ReferenceEquals(Graph, graph) && ReferenceEquals(ClipSet, clips))
+		{
+			return true;
+		}
+
+		try
+		{
+			var program = AnimationGraphCompiler.GetOrCompile(graph, skeleton, clips, Resolve);
+			GraphInstance = program.CreateInstance();
+			Skeleton = skeleton;
+			Graph = graph;
+			ClipSet = clips;
+			Pose = GraphInstance.Output;
+			SkinningMatrices = new Matrix4x4[skeleton.BoneCount];
+			PreviousSkinningMatrices = new Matrix4x4[skeleton.BoneCount];
+			HasPreviousPose = false;
+			WasVisibilityCulled = false;
+			BindPosePrepared = false;
+			Bindings = null;
+			Diagnostic = null;
+			return true;
+		}
+		catch (InvalidOperationException exception)
+		{
+			Diagnostic = exception.Message;
+			return false;
+		}
+	}
+
+	internal static object? Resolve(Guid id, Type type) =>
+		type == typeof(AnimationSequence) ? AssetDatabase.GetInstance<AnimationSequence>(id) :
+		type == typeof(AnimationClip) ? AssetDatabase.GetInstance<AnimationClip>(id) :
+		type == typeof(Skeleton) ? AssetDatabase.GetInstance<Skeleton>(id) :
+		type == typeof(BoneMask) ? AssetDatabase.GetInstance<BoneMask>(id) : null;
+
 	public void OnDeserialized()
 	{
-		Skeleton = SkeletonAsset.IsValid ? SkeletonAsset.Asset : null;
-		Clip = ClipAsset.IsValid ? ClipAsset.Asset : null;
-		PoseSource = null;
+		Skeleton = null;
+		Graph = null;
+		ClipSet = null;
+		GraphInstance = null;
 		Pose = null;
+		Bindings = null;
 		SkinningMatrices = null;
 		PreviousSkinningMatrices = null;
 		HasPreviousPose = false;
+		WasVisibilityCulled = false;
+		BindPosePrepared = false;
+		PoseGeneration = 0;
+		LastRenderedPoseGeneration = 0;
+		Diagnostic = null;
 	}
 }
 

@@ -1,0 +1,354 @@
+using WolfEngine.ECS;
+using WolfEngine.Mathematics;
+using WolfEngine.Rendering;
+using WolfEngine.Rendering.UI;
+
+namespace WolfEngine.Tests;
+
+[TestFixture]
+public sealed class RenderViewTests
+{
+	[Test]
+	public void UiTextureIds_PrimaryViewportSentinel_IsTheLegacySceneViewportId()
+	{
+		// The editor draws its scene image with UiTextureIds.SceneViewport. That id has to keep meaning
+		// the primary view, or every existing viewport draw resolves to the wrong texture.
+		Assert.That(UiTextureIds.Viewport(RenderViewId.Primary), Is.EqualTo(UiTextureIds.SceneViewport));
+	}
+
+	[Test]
+	public void UiTextureIds_ViewportSentinels_RoundTripAndAreDistinctPerView()
+	{
+		var seen = new HashSet<nint>();
+		for (var index = 0; index < UiTextureIds.MaxViewports; index++)
+		{
+			var view = RenderViewId.FromIndex(index);
+			var sentinel = UiTextureIds.Viewport(view);
+
+			Assert.That(seen.Add(sentinel), Is.True, $"sentinel for {view} collided with another view's");
+			Assert.That(UiTextureIds.TryGetViewport(sentinel, out var resolved), Is.True);
+			Assert.That(resolved, Is.EqualTo(view));
+		}
+	}
+
+	[Test]
+	public void UiTextureIds_TryGetViewport_RejectsEverythingOutsideTheReservedBlock()
+	{
+		// Bindless handles are packed into the positive range and the font atlas sits just above the block.
+		// Anything that is not a viewport sentinel has to be left alone, or a real texture gets rewritten.
+		Assert.Multiple(() =>
+		{
+			Assert.That(UiTextureIds.IsViewport(0), Is.False);
+			Assert.That(UiTextureIds.IsViewport(1), Is.False);
+			Assert.That(UiTextureIds.IsViewport(4096), Is.False);
+			Assert.That(UiTextureIds.IsViewport(UiTextureIds.FontAtlas), Is.False);
+			Assert.That(
+				UiTextureIds.IsViewport(UiTextureIds.Viewport(RenderViewId.FromIndex(UiTextureIds.MaxViewports - 1)) - 1),
+				Is.False,
+				"an id one past the reserved block must not resolve to a view");
+		});
+	}
+
+	[Test]
+	public void UiTextureIds_Viewport_RejectsViewsOutsideTheBlock()
+	{
+		Assert.Throws<ArgumentOutOfRangeException>(
+			() => UiTextureIds.Viewport(RenderViewId.FromIndex(UiTextureIds.MaxViewports)));
+		Assert.Throws<ArgumentException>(() => UiTextureIds.Viewport(RenderViewId.None));
+	}
+
+	[Test]
+	public void RenderViewId_NoneAndPrimary_AreDistinctAndOnlyPrimaryIsValid()
+	{
+		Assert.Multiple(() =>
+		{
+			Assert.That(RenderViewId.None.IsValid, Is.False);
+			Assert.That(RenderViewId.Primary.IsValid, Is.True);
+			Assert.That(RenderViewId.Primary, Is.Not.EqualTo(RenderViewId.None));
+			Assert.That(RenderViewId.FromIndex(0), Is.EqualTo(RenderViewId.Primary));
+		});
+	}
+
+	[Test]
+	public void EditorViewportStateBus_UiState_IsHeldPerView()
+	{
+		var bus = new EditorViewportStateBus();
+		var second = RenderViewId.FromIndex(1);
+
+		bus.PublishUiState(RenderViewId.Primary, CreateUiState(new Int2(800, 600), hovered: true));
+		bus.PublishUiState(second, CreateUiState(new Int2(320, 240), hovered: false));
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(bus.GetUiState(RenderViewId.Primary).ContentSizePixels, Is.EqualTo(new Int2(800, 600)));
+			Assert.That(bus.GetUiState(RenderViewId.Primary).Hovered, Is.True);
+			Assert.That(bus.GetUiState(second).ContentSizePixels, Is.EqualTo(new Int2(320, 240)));
+			Assert.That(bus.GetUiState(second).Hovered, Is.False);
+		});
+	}
+
+	[Test]
+	public void EditorViewportStateBus_ParameterlessMembers_AddressThePrimaryView()
+	{
+		var bus = new EditorViewportStateBus();
+		var second = RenderViewId.FromIndex(1);
+		bus.PublishUiState(CreateUiState(new Int2(1280, 720), hovered: true));
+		bus.PublishRenderState(new SceneViewportRenderState(
+			textureId: 42,
+			renderSizePixels: new Int2(1280, 720),
+			projection: System.Numerics.Matrix4x4.Identity,
+			debugViews: [],
+			activeDebugViewId: SceneDebugViewIds.FinalColor));
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(bus.GetUiState().ContentSizePixels, Is.EqualTo(new Int2(1280, 720)));
+			Assert.That(bus.GetUiState(RenderViewId.Primary).ContentSizePixels, Is.EqualTo(new Int2(1280, 720)));
+			Assert.That(bus.GetRenderState().TextureId, Is.EqualTo((nint)42));
+			Assert.That(bus.GetRenderState(RenderViewId.Primary).TextureId, Is.EqualTo((nint)42));
+			// A view nobody published to reads as hidden rather than inheriting the primary's state.
+			Assert.That(bus.GetUiState(second).Visible, Is.False);
+			Assert.That(bus.GetRenderState(second).TextureId, Is.EqualTo((nint)0));
+		});
+	}
+
+	[Test]
+	public void EditorViewportStateBus_RemoveView_DropsStateSoASlotIsNotInherited()
+	{
+		var bus = new EditorViewportStateBus();
+		var second = RenderViewId.FromIndex(1);
+		bus.PublishUiState(second, CreateUiState(new Int2(320, 240), hovered: true));
+		Assert.That(bus.GetViews(), Does.Contain(second));
+
+		bus.RemoveView(second);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(bus.GetViews(), Does.Not.Contain(second));
+			Assert.That(bus.GetUiState(second).Visible, Is.False);
+			Assert.That(bus.GetUiState(second).Hovered, Is.False);
+		});
+	}
+
+	[Test]
+	public void EditorViewportStateBus_OverrideDebugView_AppliesToEveryViewIncludingLaterPublishes()
+	{
+		var bus = new EditorViewportStateBus();
+		var second = RenderViewId.FromIndex(1);
+		bus.PublishUiState(RenderViewId.Primary, CreateUiState(new Int2(800, 600), hovered: true));
+
+		bus.OverrideDebugView(SceneDebugViewIds.GBufferNormal);
+		bus.PublishUiState(second, CreateUiState(new Int2(320, 240), hovered: false));
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(
+				bus.GetUiState(RenderViewId.Primary).RequestedDebugViewId,
+				Is.EqualTo(SceneDebugViewIds.GBufferNormal),
+				"an override has to reach views that already published");
+			Assert.That(
+				bus.GetUiState(second).RequestedDebugViewId,
+				Is.EqualTo(SceneDebugViewIds.GBufferNormal),
+				"an override has to reach views that publish after it");
+		});
+	}
+
+	[Test]
+	public void Camera_GetPerspective_DerivesAspectFromTheViewSizeNotTheComponent()
+	{
+		// The point of the change: one camera rendered by two views at different sizes must produce two
+		// projections. Camera.Perspective can only hold one, so views cannot read it.
+		var camera = new Camera { Fov = 70.0f, NearPlane = 0.1f, FarPlane = 1000.0f };
+		camera.ScreenResolution = new Int2(1280, 720);
+		camera.SetPerspective(70.0f);
+
+		var wide = camera.GetPerspective(new Int2(1600, 400));
+		var tall = camera.GetPerspective(new Int2(400, 1600));
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(wide.M11, Is.Not.EqualTo(tall.M11).Within(0.0001f));
+			// A 16:9 request has to reproduce what the component baked for 1280x720.
+			Assert.That(camera.GetPerspective(new Int2(1280, 720)).M11, Is.EqualTo(camera.Perspective.M11).Within(0.0001f));
+			// The component is left alone; resolving a projection is not a mutation.
+			Assert.That(camera.ScreenResolution, Is.EqualTo(new Int2(1280, 720)));
+		});
+	}
+
+	[Test]
+	public void Camera_GetPerspective_ToleratesDegenerateSizes()
+	{
+		var camera = new Camera { Fov = 70.0f };
+		Assert.DoesNotThrow(() => camera.GetPerspective(Int2.Zero));
+		Assert.That(camera.GetPerspective(Int2.Zero).M11, Is.EqualTo(camera.GetPerspective(new Int2(1, 1)).M11).Within(0.0001f));
+	}
+
+	[Test]
+	public void RenderViewRegistry_RejectsASecondViewOverTheSameWorld()
+	{
+		// This is what keeps the renderer's transform-change tracking correct. A world gathered by two views'
+		// draw databases has its changes pruned before every database has consumed them, and draws go stale
+		// with nothing logged, so the binding is refused rather than merely discouraged.
+		var registry = new RenderViewRegistry();
+		var world = new World(WorldTag.All);
+		var first = registry.Create(world, "first", RenderViewOutput.Texture);
+
+		var error = Assert.Throws<InvalidOperationException>(
+			() => registry.Create(world, "second", RenderViewOutput.Texture));
+
+		Assert.That(error!.Message, Does.Contain("at most one view"));
+		Assert.That(registry.TryGetViewForWorld(world, out var bound), Is.True);
+		Assert.That(bound, Is.EqualTo(first.View));
+	}
+
+	[Test]
+	public void RenderViewRegistry_CreateBindsThePrecreatedPrimarySlotFirst()
+	{
+		var registry = new RenderViewRegistry();
+		registry.GetOrCreate(RenderViewId.Primary);
+		var world = new World(WorldTag.All);
+
+		var state = registry.Create(world, "scene", RenderViewOutput.Texture);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(state.View, Is.EqualTo(RenderViewId.Primary));
+			Assert.That(state.World, Is.SameAs(world));
+			Assert.That(registry.ViewIds, Is.EqualTo(new[] { RenderViewId.Primary }));
+		});
+	}
+
+	[Test]
+	public void RenderViewRegistry_AllocatesDistinctSlotsAndReusesThemAfterRelease()
+	{
+		var registry = new RenderViewRegistry();
+		var worldA = new World(WorldTag.All);
+		var worldB = new World(WorldTag.All);
+		var a = registry.Create(worldA, "a", RenderViewOutput.Texture).View;
+		var b = registry.Create(worldB, "b", RenderViewOutput.Texture).View;
+		Assert.That(a, Is.Not.EqualTo(b));
+
+		// Give the released view some state, so a reused slot inheriting it would be visible.
+		registry.TryGet(a, out var releasedState);
+		releasedState.HistoryValid = true;
+		Assert.That(registry.Release(a, null), Is.True);
+
+		var worldC = new World(WorldTag.All);
+		var c = registry.Create(worldC, "c", RenderViewOutput.Texture);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(c.View, Is.EqualTo(a), "the freed slot should be reused");
+			Assert.That(c.HistoryValid, Is.False, "a reused slot must not inherit the released view's history");
+			Assert.That(c.World, Is.SameAs(worldC));
+			Assert.That(registry.TryGetViewForWorld(worldA, out _), Is.False);
+		});
+	}
+
+	[Test]
+	public void RenderViewRegistry_AWorldFreedByReleaseCanBackAViewAgain()
+	{
+		var registry = new RenderViewRegistry();
+		var world = new World(WorldTag.All);
+		var first = registry.Create(world, "first", RenderViewOutput.Texture).View;
+		registry.Release(first, null);
+
+		Assert.DoesNotThrow(() => registry.Create(world, "again", RenderViewOutput.Texture));
+	}
+
+	[Test]
+	public void RenderViewRegistry_ReusedSlotReceivesANewBindingGeneration()
+	{
+		var registry = new RenderViewRegistry();
+		registry.GetOrCreate(RenderViewId.Primary);
+		var world = new World(WorldTag.All);
+		var first = registry.Create(world, "first", RenderViewOutput.Texture);
+		var firstGeneration = first.BindingGeneration;
+		registry.Release(first.View, null);
+
+		var rebound = registry.Create(world, "again", RenderViewOutput.Texture);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(rebound.View, Is.EqualTo(first.View));
+			Assert.That(rebound.BindingGeneration, Is.GreaterThan(firstGeneration));
+		});
+	}
+
+	[Test]
+	public void RenderViewRegistry_Rebind_MovesAViewToAnotherWorldAndStartsANewBinding()
+	{
+		// The editor's scene view keeps its id and output when a scene loads or play mode starts, but everything
+		// derived from the old world has to go: a new generation tells the snapshot and the render thread so.
+		var registry = new RenderViewRegistry();
+		var authoring = new World(WorldTag.All);
+		var runtime = new World(WorldTag.All);
+		var view = registry.Create(authoring, "scene", RenderViewOutput.Texture).View;
+		registry.TryGetBinding(view, out _, out var firstGeneration);
+
+		Assert.That(registry.Rebind(view, runtime), Is.True);
+		registry.TryGetBinding(view, out var boundWorld, out var secondGeneration);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(boundWorld, Is.SameAs(runtime));
+			Assert.That(secondGeneration, Is.GreaterThan(firstGeneration));
+			Assert.That(registry.TryGetViewForWorld(authoring, out _), Is.False, "the old world is free again");
+			Assert.That(registry.TryGetViewForWorld(runtime, out var byWorld), Is.True);
+			Assert.That(byWorld, Is.EqualTo(view));
+		});
+	}
+
+	[Test]
+	public void RenderViewRegistry_Rebind_RefusesAWorldThatBacksAnotherViewAndIgnoresTheSameWorld()
+	{
+		var registry = new RenderViewRegistry();
+		var first = new World(WorldTag.All);
+		var second = new World(WorldTag.All);
+		var firstView = registry.Create(first, "first", RenderViewOutput.Texture).View;
+		registry.Create(second, "second", RenderViewOutput.Texture);
+		registry.TryGetBinding(firstView, out _, out var generation);
+
+		Assert.Throws<InvalidOperationException>(() => registry.Rebind(firstView, second));
+		Assert.That(registry.Rebind(firstView, first), Is.True);
+		registry.TryGetBinding(firstView, out _, out var unchanged);
+		Assert.Multiple(() =>
+		{
+			Assert.That(unchanged, Is.EqualTo(generation), "rebinding to the same world must not reset its history");
+			Assert.That(registry.Rebind(RenderViewId.FromIndex(9), first), Is.False);
+		});
+	}
+
+	[Test]
+	public void RenderViewState_ResetHistoryForNewBinding_DropsHistoryAndRecordsTheGeneration()
+	{
+		var state = new RenderViewState(RenderViewId.Primary)
+		{
+			BindingGeneration = 4,
+			HistoryValid = true,
+			HasPreviousResolvedProjection = true
+		};
+
+		state.ResetHistoryForNewBinding();
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(state.HistoryValid, Is.False);
+			Assert.That(state.HasPreviousResolvedProjection, Is.False);
+			Assert.That(state.HistoryBindingGeneration, Is.EqualTo(4));
+		});
+	}
+
+	private static SceneViewportUiState CreateUiState(Int2 contentSizePixels, bool hovered) => new(
+		visible: true,
+		contentSizePixels: contentSizePixels,
+		resolutionScale: 1.0f,
+		requestedDebugViewId: SceneDebugViewIds.FinalColor,
+		hovered: hovered,
+		focused: false,
+		pointerAvailable: false,
+		pointerCaptured: false,
+		rightMousePressStartedHere: false,
+		imageMin: System.Numerics.Vector2.Zero,
+		imageMax: System.Numerics.Vector2.Zero);
+}

@@ -8,6 +8,48 @@ namespace WolfEngine.Editor.Tests;
 [TestFixture]
 public sealed class EditorSceneSnapshotServiceTests
 {
+	[TestCase(false)]
+	[TestCase(true)]
+	public void RestoreDeletedEntities_ReconnectsSubtreeToSurvivingParent(bool parentHasPersistentId)
+	{
+		var scene = new EditorScene();
+		var service = new EditorSceneSnapshotService(CreateTypeResolver());
+		var parent = scene.World.CreateEntity("Parent", Matrix4x4.CreateTranslation(10, 20, 30));
+		if (parentHasPersistentId)
+		{
+			service.EnsurePersistentEntityId(scene, parent);
+		}
+
+		var localTransform = Matrix4x4.CreateTranslation(1, 2, 3);
+		var child = scene.World.CreateEntity("Child", localTransform);
+		var grandchild = scene.World.CreateEntity("Grandchild", Matrix4x4.Identity);
+		scene.World.SetParent(child, parent);
+		scene.World.SetParent(grandchild, child);
+
+		// Capture descendants first to also cover parents whose ids are assigned later.
+		var snapshots = service.CaptureDeletedEntities(scene, [grandchild, child]);
+		Assert.That(snapshots[1].Entity.ParentEntityId, Is.EqualTo(scene.EntityIds[parent]));
+		var ids = snapshots.Select(snapshot => snapshot.Entity.EntityId).ToArray();
+
+		// Repeat deletion/restoration to exercise the same snapshots across redo/undo.
+		for (var cycle = 0; cycle < 2; cycle++)
+		{
+			service.DeleteEntitiesByPersistentIds(scene, ids);
+			Assert.That(scene.World.IsAlive(parent), Is.True);
+			Assert.That(scene.World.HasComponent<Children>(parent), Is.False);
+			service.RestoreDeletedEntities(scene, snapshots);
+
+			var restoredChild = FindEntityByName(scene.World, "Child");
+			var restoredGrandchild = FindEntityByName(scene.World, "Grandchild");
+			Assert.That(scene.World.GetComponent<Parent>(restoredChild).Value, Is.EqualTo(parent));
+			Assert.That(scene.World.GetComponent<Children>(parent).First, Is.EqualTo(restoredChild));
+			Assert.That(scene.World.GetComponent<Parent>(restoredGrandchild).Value, Is.EqualTo(restoredChild));
+			Assert.That(scene.World.GetComponent<Children>(restoredChild).First, Is.EqualTo(restoredGrandchild));
+			Assert.That(scene.World.GetComponent<LocalTransform>(restoredChild).GetTransform(), Is.EqualTo(localTransform));
+			Assert.That(scene.EntityIds[restoredChild], Is.EqualTo(snapshots[1].Entity.EntityId));
+		}
+	}
+
 	[Test]
 	public void RestoreDeletedEntities_ResolvesReferenceToAnotherEntityInTheSameBatch()
 	{

@@ -49,6 +49,7 @@ public sealed class CookedRuntimeSettings
 
 public sealed class WolfBootstrapManifest
 {
+	public Dictionary<string, Guid> FontSources { get; set; } = new(StringComparer.Ordinal);
 	public const int CurrentVersion = 1;
 	public int Version { get; set; } = CurrentVersion;
 	public string Target { get; set; } = string.Empty;
@@ -157,7 +158,7 @@ public static class WolfPackFile
 		byte[] table;
 		while (true)
 		{
-			table = JsonSerializer.SerializeToUtf8Bytes(entries, AssetJson.SerializerOptions);
+			table = JsonSerializer.SerializeToUtf8Bytes(entries, EngineJsonContext.Default.ListWolfPackEntry);
 			long offset = Magic.Length + sizeof(int) * 2 + sizeof(long) + table.Length;
 			var changed = false;
 			foreach (var entry in entries)
@@ -175,7 +176,7 @@ public static class WolfPackFile
 				break;
 		}
 
-		table = JsonSerializer.SerializeToUtf8Bytes(entries, AssetJson.SerializerOptions);
+		table = JsonSerializer.SerializeToUtf8Bytes(entries, EngineJsonContext.Default.ListWolfPackEntry);
 		Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
 		using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
 		using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
@@ -203,7 +204,7 @@ public static class WolfPackFile
 		var tableLength = reader.ReadInt64();
 		if (count < 0 || tableLength < 2 || tableLength > int.MaxValue)
 			throw new InvalidDataException("Invalid wolfpack table dimensions.");
-		var entries = JsonSerializer.Deserialize<List<WolfPackEntry>>(reader.ReadBytes((int)tableLength), AssetJson.SerializerOptions)
+		var entries = JsonSerializer.Deserialize(reader.ReadBytes((int)tableLength), EngineJsonContext.Default.ListWolfPackEntry)
 			?? throw new InvalidDataException("Wolfpack table is missing.");
 		if (entries.Count != count || entries.Select(entry => entry.Id).Distinct().Count() != count)
 			throw new InvalidDataException("Wolfpack table count or stable IDs are invalid.");
@@ -221,7 +222,7 @@ public sealed class WolfPackCatalog : IDisposable
 		try
 		{
 			var manifestBytes = File.ReadAllBytes(manifestPath);
-			Manifest = JsonSerializer.Deserialize<WolfBootstrapManifest>(manifestBytes, AssetJson.SerializerOptions)
+			Manifest = JsonSerializer.Deserialize(manifestBytes, EngineJsonContext.Default.WolfBootstrapManifest)
 				?? throw new InvalidDataException("Bootstrap manifest is invalid.");
 			if (Manifest.Version != WolfBootstrapManifest.CurrentVersion)
 				throw new InvalidDataException($"Unsupported bootstrap manifest version {Manifest.Version}.");

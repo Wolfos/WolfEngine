@@ -36,6 +36,14 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 	private readonly uint[] _bindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly ulong[] _bindingVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _frameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
+	private MeshIndexStream _indexStream;
+
+	internal void SetIndexStream(MeshIndexStream stream)
+	{
+		if (_indexStream == stream) return;
+		_indexStream = stream;
+		InvalidateEncoding();
+	}
 
 	public SharedDrawIndirectCommandSet()
 	{
@@ -181,6 +189,17 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		return _frameBindings[slotIndex] != frameSlot ||
 		       _bindlessEpochs[slotIndex] != bindlessEpoch ||
 		       _bindingVersions[slotIndex] != bindingVersion;
+	}
+
+	/// <summary>
+	/// Forgets what every slot was encoded against, so each slot's next use re-encodes in full rather than
+	/// replaying structural records. For a set that stopped being used: the replay log is compacted without
+	/// waiting for it, so by the time it is used again the records it would need may be gone.
+	/// </summary>
+	public void InvalidateEncoding()
+	{
+		Array.Fill(_frameBindings, -1);
+		Array.Clear(_appliedStructuralVersions);
 	}
 
 	public void MarkSlotEncoded(int slotIndex, int frameSlot, uint bindlessEpoch, ulong bindingVersion, ulong structuralVersion)

@@ -24,6 +24,7 @@ public class SceneWindow: EditorWindow
     private readonly TerrainToolController _terrainToolController;
     private readonly TransformGizmoController _transformGizmoController;
     private readonly SceneSelectionController _sceneSelectionController;
+    private readonly SelectionOutlineController _selectionOutlineController;
     private float _sceneViewportScale;
     private string _selectedDebugViewId = SceneDebugViewIds.FinalColor;
     private bool _rightMousePressStartedHere;
@@ -43,7 +44,8 @@ public class SceneWindow: EditorWindow
         TerrainToolSettingsOverlay terrainToolSettingsOverlay,
         TerrainToolController terrainToolController,
         TransformGizmoController transformGizmoController,
-        SceneSelectionController sceneSelectionController)
+        SceneSelectionController sceneSelectionController,
+        SelectionOutlineController selectionOutlineController)
     {
         _viewportStateBus = viewportStateBus;
         _worldManager = worldManager;
@@ -54,15 +56,16 @@ public class SceneWindow: EditorWindow
         _terrainToolController = terrainToolController;
         _transformGizmoController = transformGizmoController;
         _sceneSelectionController = sceneSelectionController;
+        _selectionOutlineController = selectionOutlineController;
 
         _sceneViewportScale = Math.Clamp(EditorPreferences.GetSceneViewportResolutionScale(), 0.5f, 1.0f);
     }
 
     public override string Name => "Scene";
 
-    public void OnHidden()
+    public override void OnHidden()
     {
-        _viewportStateBus.PublishUiState(SceneViewportUiState.Hidden);
+        _viewportStateBus.PublishUiState(RenderViewId.Primary, SceneViewportUiState.Hidden);
         _terrainToolController.ClearPreview();
         _gizmoLineRenderer.BeginFrame();
     }
@@ -134,7 +137,7 @@ public class SceneWindow: EditorWindow
         }
 
         ImGui.SameLine();
-        var renderState = _viewportStateBus.GetRenderState();
+        var renderState = _viewportStateBus.GetRenderState(RenderViewId.Primary);
         var debugViews = renderState.DebugViews.Length > 0 ? renderState.DebugViews : FallbackDebugViews;
         ImGui.SetNextItemWidth(150.0f);
         if (ImGui.BeginCombo("##DebugView", GetDebugViewLabel(debugViews, renderState.ActiveDebugViewId)))
@@ -263,7 +266,7 @@ public class SceneWindow: EditorWindow
             _terrainToolSettingsOverlay.Draw(_terrainTool, _terrainToolController.Settings, layerSet, imageMin, imageMax);
         }
 
-        _viewportStateBus.PublishUiState(new SceneViewportUiState(
+        _viewportStateBus.PublishUiState(RenderViewId.Primary, new SceneViewportUiState(
             visible,
             contentPixels,
             _sceneViewportScale,
@@ -277,6 +280,14 @@ public class SceneWindow: EditorWindow
             imageMax));
 
         _gizmoLineRenderer.BeginFrame();
+
+        // Follows the gizmo rule rather than the tool mode: the outline marks what
+        // is selected, which stays meaningful in the terrain tool but must not
+        // follow the selection into play mode.
+        _selectionOutlineController.Sync(
+            world,
+            ShouldDrawGizmos(_playSession.State) ? EditorGui.SelectedEntities : Array.Empty<Entity>());
+
         if (ShouldDrawGizmos(_playSession.State))
         {
             _worldManager.OnDrawGizmos(WorldTag.Authoring);

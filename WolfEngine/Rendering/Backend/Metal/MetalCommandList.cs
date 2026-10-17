@@ -5,11 +5,13 @@ using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Platform;
 using WolfEngine.Profiling;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
-[SupportedOSPlatform("MacOS")]
+[SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 {
 	private readonly MTLCommandQueue _queue;
@@ -18,6 +20,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private readonly MTLCommandBuffer _commandBuffer;
 	private MTLRenderCommandEncoder _renderEncoder;
 	private MTLComputeCommandEncoder _computeEncoder;
+	private MTLDispatchType _computeEncoderDispatchType;
 	private CAMetalDrawable _presentDrawable;
 	private PassTargets _currentTargets;
 	private bool _hasTargets;
@@ -46,6 +49,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private readonly List<GpuTimestampScope> _gpuTimestampScopes = new();
 	private bool _gpuProfilingFailed;
 	private ulong _gpuFrameIndex;
+    private readonly List<string> _eventNames = new();
 
 	public MetalCommandList(
 		MTLCommandQueue queue,
@@ -56,6 +60,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_descriptorTable = descriptorTable;
 		_indirectCompactionKernel = indirectCompactionKernel;
 		_commandBuffer = _queue.CommandBuffer();
+		TakeOwnership(_commandBuffer.NativePtr);
 	}
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
@@ -64,11 +69,14 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	{
 		ThrowIfDisposed();
 		EndActiveEncoders();
+        _eventNames.Add(name);
 	}
 
 	public void EndEvent()
 	{
 		ThrowIfDisposed();
+        EndActiveEncoders();
+        if (_eventNames.Count > 0) _eventNames.RemoveAt(_eventNames.Count - 1);
 	}
 
 	public void BeginPass(in PassTargets targets, in Viewport viewport)
@@ -151,7 +159,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 				CullMode.Back => MTLCullMode.Back,
 				_ => MTLCullMode.None
 			});
-			var winding = metalPipeline.Key.Layout == GraphicsLayoutKind.Skybox
+			var winding = (metalPipeline.Key.Layout == GraphicsLayoutKind.Skybox) ^ metalPipeline.RenderState.ReverseWinding
 				? MTLWinding.CounterClockwise
 				: MTLWinding.Clockwise;
 			_renderEncoder.SetFrontFacingWinding(winding);
@@ -296,7 +304,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			attachment.SampleBuffer = block.SampleBuffer;
 			attachment.StartOfEncoderSampleIndex = start;
 			attachment.EndOfEncoderSampleIndex = end;
-			_gpuTimestampScopes.Add(new GpuTimestampScope("Compute stage", block, start, end));
+			_gpuTimestampScopes.Add(new GpuTimestampScope(_eventNames.Count > 1 ? _eventNames[^1] : "Compute stage", block, start, end));
 		}
 		catch (Exception exception)
 		{
@@ -678,6 +686,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		EndActiveEncoders();
 		var blit = _commandBuffer.BlitCommandEncoder();
+		TakeOwnership(blit.NativePtr);
 		blit.FillBuffer(metalBuffer.Buffer, new NSRange { location = 0, length = metalBuffer.Buffer.Length }, 0);
 		blit.EndEncoding();
 		if (blit.NativePtr != IntPtr.Zero)
@@ -716,7 +725,9 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
-		EnsureComputeEncoder();
+		// Pages write disjoint outputs, so they can run concurrently. A serial encoder drains the GPU after
+		// every ICB-writing dispatch (~40 us per page).
+		EnsureComputeEncoder(MTLDispatchType.Concurrent);
 
 		// This kernel belongs to the backend and has no MetalPipeline wrapper, so setting it directly
 		// leaves the cached compute bindings describing state that is no longer bound. Clearing them makes
@@ -819,6 +830,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		EndActiveEncoders();
 		var encoder = _commandBuffer.AccelerationStructureCommandEncoder();
+		TakeOwnership(encoder.NativePtr);
 		encoder.BuildAccelerationStructure(
 			blas.AccelerationStructure,
 			blas.MetalDescriptor,
@@ -870,6 +882,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		EndActiveEncoders();
 		var encoder = _commandBuffer.AccelerationStructureCommandEncoder();
+		TakeOwnership(encoder.NativePtr);
 		for (var i = 0; i < instances.Length; i++)
 		{
 			if (instances[i].AccelerationStructure is MetalBottomLevelAccelerationStructure blas)
@@ -1002,6 +1015,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		EndActiveEncoders();
 
 		var blit = _commandBuffer.BlitCommandEncoder();
+		TakeOwnership(blit.NativePtr);
 		blit.CopyFromBuffer(
 			sourceBuffer.Buffer,
 			(nuint)sourceOffset,
@@ -1021,6 +1035,14 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		// Metal handles resource hazards implicitly for most use cases.
 	}
 
+	public void SynchronizeUnorderedAccess(IGfxResource resource)
+	{
+		ThrowIfDisposed();
+		ArgumentNullException.ThrowIfNull(resource);
+		// Encoder boundaries order texture writes and reads across dispatches.
+		EndActiveEncoders();
+	}
+
 	public void CopyTexture(MTLTexture source, MTLTexture destination, uint width, uint height)
 	{
 		ThrowIfDisposed();
@@ -1032,6 +1054,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		EndActiveEncoders();
 
 		var blit = _commandBuffer.BlitCommandEncoder();
+		TakeOwnership(blit.NativePtr);
 		var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
 		var size = new MTLSize { width = width, height = height, depth = 1 };
 		blit.CopyFromTexture(source, 0, 0, origin, size, destination, 0, 0, origin);
@@ -1092,6 +1115,24 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		}
 	}
 
+	/// <summary>Metal's error if this command buffer failed. Call once <see cref="HasFinishedExecuting"/> is true.</summary>
+	internal string? ReadExecutionError()
+	{
+		if (_disposed ||
+		    _committed == false ||
+		    _commandBuffer.NativePtr == IntPtr.Zero ||
+		    _commandBuffer.Status != MTLCommandBufferStatus.Error)
+		{
+			return null;
+		}
+
+		var error = _commandBuffer.Error;
+
+		return error.NativePtr == IntPtr.Zero
+			? "unknown error"
+			: error.LocalizedDescription.ToString() ?? "unknown error";
+	}
+
 	public void SetPresentDrawable(CAMetalDrawable drawable)
 	{
 		ThrowIfDisposed();
@@ -1132,6 +1173,21 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		}
 
 		_disposed = true;
+	}
+
+	/// <summary>
+	/// Metal returns command buffers and encoders autoreleased, so the caller does not own them. This class
+	/// releases them through SharpMetal's Dispose, so it must retain them first. Otherwise the enclosing
+	/// autorelease pool releases them a second time when it drains.
+	/// </summary>
+	private static void TakeOwnership(IntPtr nativePtr)
+	{
+		if (nativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		ObjCNative.ObjcRetain(nativePtr);
 	}
 
 	private void EnsureRenderEncoder()
@@ -1201,6 +1257,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		ConfigureRenderStageProfiling(descriptor);
 		_renderEncoder = _commandBuffer.RenderCommandEncoder(descriptor);
+		TakeOwnership(_renderEncoder.NativePtr);
 		_currentGraphicsPipeline = null;
 		_bindlessBuffersSetRender = false;
 		_lastBindlessVersionRender = uint.MaxValue;
@@ -1218,17 +1275,36 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		ApplyBindlessToRenderEncoder();
 	}
 
-	private void EnsureComputeEncoder()
+	/// <summary>
+	/// Reopens the encoder when the dispatch type changes. Only request Concurrent for independent dispatches.
+	/// </summary>
+	private void EnsureComputeEncoder(MTLDispatchType dispatchType = MTLDispatchType.Serial)
 	{
 		ThrowIfDisposed();
 		if (_computeEncoder.NativePtr != IntPtr.Zero)
 		{
-			return;
+			if (_computeEncoderDispatchType == dispatchType)
+			{
+				return;
+			}
+
+			EndActiveEncoders();
 		}
 
-		using var descriptor = new MTLComputePassDescriptor();
-		ConfigureComputeStageProfiling(descriptor);
-		_computeEncoder = _commandBuffer.ComputeCommandEncoder(descriptor);
+		var descriptor = new MTLComputePassDescriptor();
+		try
+		{
+			descriptor.DispatchType = dispatchType;
+			ConfigureComputeStageProfiling(descriptor);
+			_computeEncoder = _commandBuffer.ComputeCommandEncoder(descriptor);
+			TakeOwnership(_computeEncoder.NativePtr);
+		}
+		finally
+		{
+			descriptor.Dispose();
+		}
+
+		_computeEncoderDispatchType = dispatchType;
 		_currentComputePipeline = null;
 		_bindlessBuffersSetCompute = false;
 		_lastBindlessVersionCompute = uint.MaxValue;

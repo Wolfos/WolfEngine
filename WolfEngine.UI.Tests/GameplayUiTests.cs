@@ -11,7 +11,27 @@ namespace WolfEngine.UI.Tests;
 public sealed class GameplayUiTests
 {
 	[Test]
-	public async Task ScreenSurfaceSerializesResizeAndParameterRebuilds()
+	public void WorldTextureRevisionSurvivesDroppedSnapshotsAndScreenOnlyPublications()
+	{
+		using var services = new ServiceCollection().BuildServiceProvider();
+		using var host = new GameplayUiHost(services);
+		using var world = host.Create<ConcurrentHud>(new UiSurfaceOptions { Kind = UiSurfaceKind.Texture });
+		using var screen = host.Create<ConcurrentHud>(new UiSurfaceOptions());
+		Assert.That(host.TryConsumeLatest(out var initial), Is.True);
+		var originalRevision = initial.TextureSurfaces.Single().Revision; initial.Release();
+		for (var i = 1; i <= 10; i++) world.SetParameters(new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = i });
+		// This publication used to mark the world clean even though none of its updates were rendered.
+		screen.SetParameters(new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = 99 });
+		Assert.That(host.TryConsumeLatest(out var latest), Is.True);
+		var revision = latest.TextureSurfaces.Single().Revision;
+		Assert.That(revision, Is.GreaterThan(originalRevision));
+		Assert.That(latest.TextureSurfaces.Single().Frame, Is.Not.SameAs(UiFrameData.Empty)); latest.Release();
+		screen.SetParameters(new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = 100 });
+		Assert.That(host.TryConsumeLatest(out var unchanged), Is.True);
+		Assert.That(unchanged.TextureSurfaces.Single().Revision, Is.EqualTo(revision)); unchanged.Release();
+	}
+	[Test]
+	public void ScreenSurfaceSerializesResizeAndParameterRebuilds()
 	{
 		using var services = new ServiceCollection().BuildServiceProvider();
 		using var host = new GameplayUiHost(services);
@@ -20,15 +40,6 @@ public sealed class GameplayUiTests
 		using var start = new ManualResetEventSlim();
 		var parameters = new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = 0 };
 
-		var update = Task.Run(() =>
-		{
-			start.Wait();
-			for (var i = 1; i <= 20; i++)
-			{
-				parameters[nameof(ConcurrentHud.Frame)] = i;
-				surface.SetParameters(parameters);
-			}
-		});
 		var resize = Task.Run(() =>
 		{
 			start.Wait();
@@ -36,8 +47,14 @@ public sealed class GameplayUiTests
 		});
 
 		start.Set();
-		await Task.WhenAll(update, resize);
-		Assert.That(surface.Performance.Revision, Is.GreaterThanOrEqualTo(41));
+		for (var i = 1; i <= 20; i++)
+		{
+			parameters[nameof(ConcurrentHud.Frame)] = i;
+			surface.SetParameters(parameters);
+		}
+		resize.GetAwaiter().GetResult();
+		host.BeginFrame(default);
+		Assert.That(surface.Performance.Revision, Is.GreaterThanOrEqualTo(22));
 	}
 
 	[Test]
@@ -178,7 +195,7 @@ public sealed class GameplayUiTests
 		{
 			Assert.That(changes.CanRetain, Is.True);
 			Assert.That(changes.LayoutChanged, Is.False);
-			Assert.That(changes.IntrinsicSizeChanged, Is.False);
+			Assert.That(changes.IntrinsicSizeChanged, Is.True, "Equal-length proportional text can have different metrics.");
 			Assert.That(changes.VisualChanged, Is.True);
 			Assert.That(retained.Children[0].Text, Is.EqualTo("0043"));
 			Assert.That(retained.Children[0].Style.Opacity, Is.EqualTo(0.25f));

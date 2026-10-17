@@ -192,7 +192,7 @@ public sealed class ScreenSpaceDecalPassTests
 		var bindlessRegistry = new BindlessResourceRegistry();
 		var gpuDrawResources = new GpuDrawResources(shaderProvider.Object);
 		var hardeningStats = new GpuDrawHardeningStats();
-		var gameplayUiRenderer = new GameplayUiGpuRenderer(shaderProvider.Object, bindlessRegistry);
+		var gameplayUiRenderer = new GameplayUiGpuRenderer(shaderProvider.Object, bindlessRegistry, renderer.Object);
 
 		var graph = new RenderGraph(
 			registry,
@@ -226,7 +226,10 @@ public sealed class ScreenSpaceDecalPassTests
 			gpuDrawResources,
 			NullImGuiRenderer.Instance,
 			gameplayUiRenderer,
-			shaderProvider.Object);
+			shaderProvider.Object,
+			// Shared with the graph, as in production: the graph names and tags passes from the same view state
+			// the builder records into.
+			graph.ViewRegistry);
 
 		return (graph, frameBuilder);
 	}

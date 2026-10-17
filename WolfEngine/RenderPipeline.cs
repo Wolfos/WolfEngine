@@ -7,12 +7,32 @@ using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine;
 
+public readonly record struct RenderViewSubmission(
+	RenderViewId View,
+	Camera Camera,
+	WorldTransform CameraWorldTransform,
+	RenderConfig Config);
+
 public interface IRenderPipeline
 {
 	void Run(Action? startup = null);
 
+	/// <summary>
+	/// Starts rendering on the calling thread without taking it over, for hosts that own their main loop, such as
+	/// iOS apps driven by the display. Call <see cref="RenderFrame"/> once per frame on the same thread, then
+	/// <see cref="Stop"/>, which also runs if <see cref="Start"/> throws.
+	/// </summary>
+	void Start(Action? startup = null);
+
+	/// <summary>Renders one frame. Returns false once rendering has been asked to stop.</summary>
+	bool RenderFrame();
+
+	void Stop();
+
 	void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, RenderConfig config,
 		IReadOnlyList<World> worlds);
+
+	void PublishSnapshot(IReadOnlyList<RenderViewSubmission> views);
 }
 
 public class RenderPipeline : IRenderPipeline
@@ -27,10 +47,10 @@ public class RenderPipeline : IRenderPipeline
 	private readonly TerrainRuntimeCache _terrainRuntimeCache = new();
 	private readonly DebugPrimitiveMeshFactory _debugPrimitiveMeshFactory = new();
 	private readonly Dictionary<GpuDrawDatabase, List<World>> _renderWorldsByDatabase = new();
+	private readonly Dictionary<GpuDrawDatabase, int> _forcedReconcileSnapshotsByDatabase = new();
+	private readonly Dictionary<GpuDrawDatabase, bool> _gpuHardeningStressByDatabase = new();
 	private readonly List<Entity> _dirtyWorldTransformRemovalScratch = new();
 	private int _stressFrame;
-	private bool _gpuHardeningStressWasEnabled;
-	private int _forcedReconcileSnapshotCount;
 
 	public RenderPipeline(RenderGraph renderGraph)
 	{
@@ -49,32 +69,152 @@ public class RenderPipeline : IRenderPipeline
 		}
 	}
 
+	public void Start(Action? startup = null)
+	{
+		_renderGraph.Start(startup ?? (() => { }), static _ => { });
+	}
+
+	public bool RenderFrame()
+	{
+		return _renderGraph.RenderFrame();
+	}
+
+	public void Stop()
+	{
+		try
+		{
+			_renderGraph.Stop();
+		}
+		finally
+		{
+			_renderGraph.CompleteSnapshotPublishing();
+		}
+	}
+
 	public void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, RenderConfig config,
 		IReadOnlyList<World> worlds)
 	{
 		using (FrameProfiler.Instance.Measure("Build Snapshot"))
 		{
-			FrameSnapshot snapshot;
+			FrameSnapshot frameSnapshot;
+			RenderViewSnapshot snapshot;
 			using (FrameProfiler.Instance.Measure("Wait for snapshot"))
 			{
-				if (_renderGraph.TryBeginSnapshotWrite(out snapshot) == false)
+				if (_renderGraph.TryBeginSnapshotWrite(out frameSnapshot) == false)
 				{
 					return;
 				}
 
-				snapshot.SetCamera(camera, cameraWorldTransform);
-				snapshot.SetConfig(config);
-
-				var lookupTableRef = config.ColorGrading.LookupTable;
-				var lookupTable = lookupTableRef.IsValid ? lookupTableRef.Asset : null;
-				if (lookupTable is not null)
-				{
-					_renderGraph.EnsureTextureResources(lookupTable.Texture);
-				}
-
-				snapshot.SetColorGradingLookupTable(lookupTable);
+				snapshot = _renderGraph.TryGetViewBinding(RenderViewId.Primary, out var world, out var generation)
+					? frameSnapshot.BindView(RenderViewId.Primary, world, generation)
+					: frameSnapshot.GetOrCreateView(RenderViewId.Primary);
+				PrepareViewSnapshot(snapshot, camera, cameraWorldTransform, config);
 			}
 
+			PopulateSnapshot(snapshot, cameraWorldTransform, config, worlds);
+			if (_renderGraph.TryPublishSnapshot() == false)
+			{
+				return;
+			}
+
+			_stressFrame++;
+		}
+	}
+
+	public void PublishSnapshot(IReadOnlyList<RenderViewSubmission> views)
+	{
+		ArgumentNullException.ThrowIfNull(views);
+		if (views.Count == 0)
+		{
+			throw new ArgumentException("At least one render view submission is required.", nameof(views));
+		}
+
+		var worlds = new World[views.Count];
+		var bindingGenerations = new long[views.Count];
+		var submittedViews = new HashSet<RenderViewId>();
+		for (var i = 0; i < views.Count; i++)
+		{
+			var submission = views[i];
+			if (submission.View.IsValid == false)
+			{
+				throw new ArgumentException($"Submission {i} has an invalid render view id.", nameof(views));
+			}
+			if (submittedViews.Add(submission.View) == false)
+			{
+				throw new ArgumentException($"View {submission.View} was submitted more than once.", nameof(views));
+			}
+			if (_renderGraph.TryGetViewBinding(submission.View, out worlds[i], out bindingGenerations[i]) == false)
+			{
+				throw new InvalidOperationException(
+					$"View {submission.View} is not bound to a world. Create the view before submitting it.");
+			}
+			ArgumentNullException.ThrowIfNull(submission.Config);
+		}
+
+		using (FrameProfiler.Instance.Measure("Build Snapshot"))
+		{
+			if (_renderGraph.TryBeginSnapshotWrite(out var frameSnapshot) == false)
+			{
+				return;
+			}
+
+			for (var i = 0; i < views.Count; i++)
+			{
+				var submission = views[i];
+				var snapshot = frameSnapshot.BindView(submission.View, worlds[i], bindingGenerations[i]);
+				PrepareViewSnapshot(
+					snapshot,
+					submission.Camera,
+					submission.CameraWorldTransform,
+					submission.Config);
+				PopulateSnapshot(
+					snapshot,
+					submission.CameraWorldTransform,
+					submission.Config,
+					[worlds[i]]);
+			}
+
+			// Every database copies the process-wide generation tables after all gathers. A later view can
+			// allocate a shared draw, mesh or material slot that an earlier view must see this same frame.
+			for (var i = 0; i < frameSnapshot.Views.Count; i++)
+			{
+				frameSnapshot.Views[i].GpuDrawDatabase.RefreshSharedHandleState();
+			}
+
+			if (_renderGraph.TryPublishSnapshot() == false)
+			{
+				return;
+			}
+
+			_stressFrame++;
+		}
+	}
+
+	private void PrepareViewSnapshot(
+		RenderViewSnapshot snapshot,
+		Camera camera,
+		WorldTransform cameraWorldTransform,
+		RenderConfig config)
+	{
+		snapshot.SetCamera(camera, cameraWorldTransform);
+		snapshot.SetConfig(config);
+
+		var lookupTableRef = config.ColorGrading.LookupTable;
+		var lookupTable = lookupTableRef.IsValid ? lookupTableRef.Asset : null;
+		if (lookupTable is not null)
+		{
+			_renderGraph.EnsureTextureResources(lookupTable.Texture);
+		}
+
+		snapshot.SetColorGradingLookupTable(lookupTable);
+	}
+
+	private void PopulateSnapshot(
+		RenderViewSnapshot snapshot,
+		WorldTransform cameraWorldTransform,
+		RenderConfig config,
+		IReadOnlyList<World> worlds)
+	{
 			var sunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
 			var sunIntensityScale = 1.0f;
 			var hasSunDirection = false;
@@ -88,16 +228,22 @@ public class RenderPipeline : IRenderPipeline
 			if (ConsumeWorldTransformRemovalOverflow(worlds))
 			{
 				// Removals were dropped; both snapshot databases rebuild from the live worlds.
-				_forcedReconcileSnapshotCount = WorldTransformRemovalSyncCount;
+				_forcedReconcileSnapshotsByDatabase[gpuDrawDatabase] = WorldTransformRemovalSyncCount;
 			}
+			_forcedReconcileSnapshotsByDatabase.TryGetValue(gpuDrawDatabase, out var forcedReconcileSnapshotCount);
+			_gpuHardeningStressByDatabase.TryGetValue(gpuDrawDatabase, out var gpuHardeningStressWasEnabled);
 			var reconcilePersistentMeshes = renderWorldListChanged ||
 			                                gpuHardeningStressEnabled ||
-			                                (_gpuHardeningStressWasEnabled && gpuHardeningStressEnabled == false) ||
-			                                _forcedReconcileSnapshotCount > 0;
-			_gpuHardeningStressWasEnabled = gpuHardeningStressEnabled;
-			if (_forcedReconcileSnapshotCount > 0)
+			                                (gpuHardeningStressWasEnabled && gpuHardeningStressEnabled == false) ||
+			                                forcedReconcileSnapshotCount > 0;
+			_gpuHardeningStressByDatabase[gpuDrawDatabase] = gpuHardeningStressEnabled;
+			if (forcedReconcileSnapshotCount > 1)
 			{
-				_forcedReconcileSnapshotCount--;
+				_forcedReconcileSnapshotsByDatabase[gpuDrawDatabase] = forcedReconcileSnapshotCount - 1;
+			}
+			else if (forcedReconcileSnapshotCount == 1)
+			{
+				_forcedReconcileSnapshotsByDatabase.Remove(gpuDrawDatabase);
 			}
 			using (FrameProfiler.Instance.Measure("Begin Sync"))
 			{
@@ -111,6 +257,8 @@ public class RenderPipeline : IRenderPipeline
 				{
 					continue;
 				}
+
+				gpuDrawDatabase.BeginWorld(world.Id);
 
 				using (FrameProfiler.Instance.Measure("Remove meshes"))
 				{
@@ -177,6 +325,7 @@ public class RenderPipeline : IRenderPipeline
 
 				using (FrameProfiler.Instance.Measure("Gather skinned meshes"))
 				{
+                    long paletteTicks = 0, snapshotTicks = 0, drawTicks = 0;
 					foreach (var entry in world.View<WorldTransform, SkinnedMeshRenderer>())
 					{
 						if (world.IsEnabled(entry.Entity) == false) continue;
@@ -204,8 +353,47 @@ public class RenderPipeline : IRenderPipeline
 						if (animator.SkinningMatrices is not { Length: > 0 } skinningMatrices) continue;
 						if (animator.PreviousSkinningMatrices is not { Length: > 0 } previousSkinningMatrices) continue;
 
-						snapshot.AddSkinning(sourceMesh, instanceMesh, skinningMatrices, previousSkinningMatrices);
-						gpuDrawDatabase.TouchMesh(entry.Entity, instanceMesh, material, transform.LocalToWorld);
+						var paletteStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        var meshToRig = skinnedRenderer.MeshBindToRig ?? (world.HasComponent<WorldTransform>(animatorEntity)
+                            ? transform.LocalToWorld * world.GetComponent<WorldTransform>(animatorEntity).WorldToLocal
+                            : transform.LocalToWorld);
+                        skinnedRenderer.PrepareSkinningPalette(skinningMatrices, previousSkinningMatrices, animator.PoseGeneration, meshToRig);
+                        paletteTicks += System.Diagnostics.Stopwatch.GetTimestamp() - paletteStart;
+                        var snapshotStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        snapshot.AddSkinning(sourceMesh, instanceMesh, skinnedRenderer.LocalSkinningMatrices,
+                            skinnedRenderer.PreviousLocalSkinningMatrices, skinnedRenderer.LocalPoseGeneration);
+						snapshotTicks += System.Diagnostics.Stopwatch.GetTimestamp() - snapshotStart;
+                        var drawStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        gpuDrawDatabase.TouchMesh(entry.Entity, instanceMesh, material, transform.LocalToWorld);
+                        drawTicks += System.Diagnostics.Stopwatch.GetTimestamp() - drawStart;
+					}
+                    FrameProfiler.Instance.RecordElapsed("Skin palette conversion", paletteTicks);
+                    FrameProfiler.Instance.RecordElapsed("Skin snapshot copy", snapshotTicks);
+                    FrameProfiler.Instance.RecordElapsed("Skin draw registration", drawTicks);
+				}
+
+				using (FrameProfiler.Instance.Measure("Gather outlines"))
+				{
+					// Runs after the skinned gather so a skinned entity's per-instance mesh
+					// already exists; outlining the source mesh would trace the bind pose.
+					foreach (var entry in world.View<WorldTransform, OutlineHighlight>())
+					{
+						if (world.IsEnabled(entry.Entity) == false)
+						{
+							continue;
+						}
+
+						if (TryResolveOutlineMesh(world, entry.Entity, out var outlineMesh) == false)
+						{
+							continue;
+						}
+
+						ref var outline = ref entry.Second;
+						snapshot.AddOutline(
+							outlineMesh,
+							entry.First.LocalToWorld,
+							outline.Color,
+							outline.GetResolvedThicknessPixels());
 					}
 				}
 
@@ -297,10 +485,24 @@ public class RenderPipeline : IRenderPipeline
 				{
 					CollectDecalProjectors(snapshot, world, _renderGraph);
 				}
+
+				using (FrameProfiler.Instance.Measure("Gather fog volumes"))
+				{
+					foreach (var entry in world.View<WorldTransform, FogVolume>())
+					{
+						if (world.IsEnabled(entry.Entity) && entry.Second.IsValid)
+						{
+							snapshot.AddFogVolume(entry.Second, entry.First.LocalToWorld);
+						}
+					}
+				}
 			}
 
 			using (FrameProfiler.Instance.Measure("Gather DDGI probe debug primitives"))
 			{
+				// Debug probes use synthetic negative entity ids. Their world scope is view-specific too:
+				// two views must never share a draw handle just because both show probe number zero.
+				gpuDrawDatabase.BeginWorld(-snapshot.View.Index - 1);
 				CollectDdgiProbeDebugPrimitives(
 					config,
 					cameraOrigin,
@@ -309,14 +511,6 @@ public class RenderPipeline : IRenderPipeline
 			}
 
 			gpuDrawDatabase.EndSync();
-			if (_renderGraph.TryPublishSnapshot() == false)
-			{
-				return;
-			}
-
-
-			_stressFrame++;
-		}
 	}
 
 	internal static void RemoveMeshesForWorldTransformRemovals(World world, GpuDrawDatabase gpuDrawDatabase)
@@ -457,6 +651,12 @@ public class RenderPipeline : IRenderPipeline
 	internal static void CollectDecalProjectors(
 		FrameSnapshot snapshot,
 		World world,
+		IRenderResourceScheduler resourceScheduler) =>
+		CollectDecalProjectors(snapshot.GetOrCreateView(RenderViewId.Primary), world, resourceScheduler);
+
+	internal static void CollectDecalProjectors(
+		RenderViewSnapshot snapshot,
+		World world,
 		IRenderResourceScheduler resourceScheduler)
 	{
 		ArgumentNullException.ThrowIfNull(snapshot);
@@ -502,4 +702,40 @@ public class RenderPipeline : IRenderPipeline
 				terrain.AuthoringBrushPreviewLocalTransform * terrainTransform.LocalToWorld);
 		}
 	}
+
+	/// <summary>
+	/// The mesh whose silhouette an outlined entity should trace. Entities without
+	/// renderable geometry -- lights, cameras, bare transforms -- have none, and
+	/// terrain is excluded because its silhouette is the whole screen edge.
+	/// </summary>
+	private static bool TryResolveOutlineMesh(World world, Entity entity, out Mesh mesh)
+	{
+		mesh = null!;
+		if (world.HasComponent<SkinnedMeshRenderer>(entity))
+		{
+			ref var skinnedRenderer = ref world.GetComponent<SkinnedMeshRenderer>(entity);
+			if (skinnedRenderer.SkinnedInstance is not { } skinnedInstance)
+			{
+				return false;
+			}
+
+			mesh = skinnedInstance;
+			return true;
+		}
+
+		if (world.HasComponent<MeshRenderer>(entity) == false)
+		{
+			return false;
+		}
+
+		ref var meshRenderer = ref world.GetComponent<MeshRenderer>(entity);
+		if (meshRenderer.TryValidate() == false)
+		{
+			return false;
+		}
+
+		mesh = meshRenderer.Mesh;
+		return true;
+	}
+
 }

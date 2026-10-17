@@ -8,6 +8,7 @@ import "../Terrain/terrain_layer_blend.slang";
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
 #define WOLF_DRAW_KIND_TERRAIN 2u
+static const uint DDGI_STATIC_GEOMETRY_MASK = 0x02u;
 
 RaytracingAccelerationStructure sceneTlas : register(t3);
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t4);
@@ -464,8 +465,9 @@ bool DdgiTryResolveHitSurface(
 
     GpuMaterialData material = g_MaterialTable[materialIndex];
     SamplerState materialSampler = GetSampler(material.samplerHandle);
-    float3 albedoSample = GetTexture(material.albedoHandle).SampleLevel(materialSampler, surface.uv, 0.0f).rgb;
-    float3 emissiveSample = GetTexture(material.emissiveHandle).SampleLevel(materialSampler, surface.uv, 0.0f).rgb;
+    float2 materialUv = surface.uv * material.uvOffsetScale.zw + material.uvOffsetScale.xy;
+    float3 albedoSample = GetTexture(material.albedoHandle).SampleLevel(materialSampler, materialUv, 0.0f).rgb;
+    float3 emissiveSample = GetTexture(material.emissiveHandle).SampleLevel(materialSampler, materialUv, 0.0f).rgb;
     surface.albedo = max(material.baseColor.rgb * albedoSample, 0.0f.xxx);
     surface.emissive =
         emissiveSample *
@@ -580,7 +582,7 @@ DdgiTraceResult DdgiTraceGeometryRay(float3 originPosition, float3 rayDirection)
     ray.TMin = 0.001f;
     ray.TMax = maxRayDistance;
 
-    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
+    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, DDGI_STATIC_GEOMETRY_MASK);
 
     DdgiTraceResult result = (DdgiTraceResult)0;
     result.hitDistance = maxRayDistance;
@@ -692,14 +694,6 @@ void DdgiProbeTraceCS(
             normalizedDistance * normalizedDistance,
             result.hitGeometry ? 1.0f : 0.0f,
             result.backfaceHit ? 1.0f : 0.0f);
-    }
-
-    if (groupThreadId.x < DDGI_TEMPORAL_REFERENCE_RAY_COUNT)
-    {
-        uint rayIndex = groupThreadId.x;
-        float3 direction = DdgiReferenceRayDirection(rayIndex, probeIndex);
-        DdgiTraceResult result = DdgiTraceRay(probePosition, direction);
-        irradianceTarget[DdgiReferenceRayPixel(probeIndex, rayIndex)] = float4(result.radiance, 1.0f);
     }
 
     if (groupThreadId.x < irradianceRayCount)

@@ -4,7 +4,8 @@ namespace WolfEngine.Editor.Projects;
 
 public interface IGameBuildService
 {
-	GameBuildResult Build(string outputPath, bool debug = false);
+	/// <param name="target">The runtime identifier to build for, or null for this machine. See <see cref="GameBuildOptions.Target"/>.</param>
+	GameBuildResult Build(string outputPath, bool debug = false, string? target = null);
 }
 
 public sealed class GameBuildService : IGameBuildService
@@ -16,7 +17,7 @@ public sealed class GameBuildService : IGameBuildService
 		_projectService = projectService;
 	}
 
-	public GameBuildResult Build(string outputPath, bool debug = false)
+	public GameBuildResult Build(string outputPath, bool debug = false, string? target = null)
 	{
 		if (_projectService.HasOpenProject == false || string.IsNullOrWhiteSpace(_projectService.ProjectRootPath))
 			throw new InvalidOperationException("Open a project before building a game.");
@@ -32,6 +33,6 @@ public sealed class GameBuildService : IGameBuildService
 				AssetDatabase = _projectService.CloneCurrentAssetDatabase(),
 				AssetCatalog = _projectService.CurrentAssetCatalog
 			},
-			new GameBuildOptions(outputPath, debug));
+			new GameBuildOptions(outputPath, debug, target));
 	}
 }

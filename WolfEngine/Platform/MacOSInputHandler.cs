@@ -44,6 +44,10 @@ public class MacOsInputHandler: IMacOSInputHandler
 	{
 		switch ((EventType)@event.Type)
 		{
+			case EventType.Windowevent:
+				if (@event.Window.Event == (byte)WindowEventID.FocusLost) _inputSystem.SetPointerFocus(false);
+				else if (@event.Window.Event == (byte)WindowEventID.FocusGained) _inputSystem.SetPointerFocus(true);
+				break;
 			case EventType.Keydown:
 				HandleKeyDown(@event.Key);
 				break;
@@ -136,6 +140,9 @@ public class MacOsInputHandler: IMacOSInputHandler
 
 	private void HandleMouseButton(MouseButtonEvent buttonEvent, bool isDown)
 	{
+		var position = new Vector2(buttonEvent.X, buttonEvent.Y);
+		_inputSystem.SetAxis2D(InputActionBinding.MousePosition, position);
+		_imguiInputSink.SetMousePosition(position);
 		if (TryMapMouseButton(buttonEvent.Button, out var binding))
 		{
 			_inputSystem.SetButton(binding, isDown);

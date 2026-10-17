@@ -43,7 +43,7 @@ public static class AudioArtifact
 		ArgumentNullException.ThrowIfNull(header);
 		ArgumentNullException.ThrowIfNull(payload);
 		header.Version = AudioArtifactHeader.CurrentVersion;
-		var json = JsonSerializer.SerializeToUtf8Bytes(header, AssetJson.SerializerOptions);
+		var json = JsonSerializer.SerializeToUtf8Bytes(header, AudioJsonContext.Default.AudioArtifactHeader);
 		using var writer = new BinaryWriter(destination, Encoding.UTF8, leaveOpen: true);
 		writer.Write(Magic);
 		writer.Write(json.Length);
@@ -62,7 +62,7 @@ public static class AudioArtifact
 			var headerLength = reader.ReadInt32();
 			if (headerLength is <= 0 or > 1024 * 1024)
 				throw new InvalidDataException("Invalid WolfEngine audio artifact metadata length.");
-			var header = JsonSerializer.Deserialize<AudioArtifactHeader>(reader.ReadBytes(headerLength), AssetJson.SerializerOptions)
+			var header = JsonSerializer.Deserialize(reader.ReadBytes(headerLength), AudioJsonContext.Default.AudioArtifactHeader)
 			             ?? throw new InvalidDataException("WolfEngine audio artifact metadata is missing.");
 			if (header.Version != AudioArtifactHeader.CurrentVersion)
 				throw new InvalidDataException($"Unsupported WolfEngine audio artifact version {header.Version}.");

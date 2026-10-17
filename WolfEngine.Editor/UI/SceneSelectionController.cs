@@ -1,7 +1,9 @@
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
+using WolfEngine.Mathematics;
 using WolfEngine.Physics;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
@@ -67,7 +69,7 @@ public sealed class SceneSelectionController
 	{
 		ArgumentNullException.ThrowIfNull(scene);
 
-		var viewportState = _viewportStateBus.GetUiState();
+		var viewportState = _viewportStateBus.GetUiState(RenderViewId.Primary);
 		if (viewportState.Visible == false)
 		{
 			_pressOwnedByViewport = false;
@@ -120,9 +122,9 @@ public sealed class SceneSelectionController
 		Vector2 mousePosition,
 		ScenePickSelectionMode mode)
 	{
-		if (_cameraContext.TryGet(out var camera, out var cameraWorldTransform) == false ||
-		    SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, out var inverseViewProjection) == false ||
-		    SceneViewportRayUtility.TryBuildWorldRay(viewportState, mousePosition, inverseViewProjection, out var ray) == false)
+		var renderState = _viewportStateBus.GetRenderState(RenderViewId.Primary);
+		if (_cameraContext.TryGet(out var camera, out _) == false ||
+		    SceneViewportRayUtility.TryBuildWorldRay(viewportState, mousePosition, renderState.ViewProjection, out var ray) == false)
 		{
 			return;
 		}
@@ -156,7 +158,7 @@ public sealed class SceneSelectionController
 		}
 	}
 
-	private bool TryPick(World world, in SceneViewportRay ray, float maxDistance, out Entity entity)
+	private bool TryPick(World world, in Ray ray, float maxDistance, out Entity entity)
 	{
 		entity = default;
 		var hasMeshHit = SceneViewportPicker.TryPick(world, ray, maxDistance, out var meshHit);
@@ -185,7 +187,7 @@ public sealed class SceneSelectionController
 	/// </summary>
 	private bool TryPickTerrain(
 		World world,
-		in SceneViewportRay ray,
+		in Ray ray,
 		float maxDistance,
 		out Entity entity,
 		out float distance)

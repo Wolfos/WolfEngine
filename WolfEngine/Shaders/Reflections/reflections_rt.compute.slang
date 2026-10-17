@@ -286,6 +286,7 @@ bool TryShadeHitMaterial(
 
     GpuMaterialData material = g_MaterialTable[GetHandleIndex(instanceData.materialHandle)];
     SamplerState materialSampler = GetSampler(material.samplerHandle);
+    uv = uv * material.uvOffsetScale.zw + material.uvOffsetScale.xy;
     float4 albedoSample =
         GetTexture(material.albedoHandle).SampleLevel(materialSampler, uv, 0.0f);
     float4 ormSample =

@@ -9,6 +9,8 @@ public readonly struct DdgiPassConfig
 	public required IGfxPipeline TracePipeline { get; init; }
 	public required IGfxPipeline RelocationTracePipeline { get; init; }
 	public required IGfxPipeline ClassifyPipeline { get; init; }
+	public required IGfxPipeline ClassifyClearPipeline { get; init; }
+	public required IGfxPipeline ClassifyScatterPipeline { get; init; }
 	public required IGfxPipeline RelocatePipeline { get; init; }
 	public required IGfxPipeline IrradianceIntegratePipeline { get; init; }
 	public required IGfxPipeline VisibilityIntegratePipeline { get; init; }
@@ -32,6 +34,8 @@ public readonly struct DdgiPassConfig
 	public required DescriptorHandle ProbeStateWriteHandle { get; init; }
 	public required DescriptorHandle ProbeActivityReadHandle { get; init; }
 	public required DescriptorHandle ProbeActivityWriteHandle { get; init; }
+	public required DescriptorHandle ProbeActivityMarksHandle { get; init; }
+	public required IGfxTexture ProbeActivityMarksTexture { get; init; }
 	public required DescriptorHandle ProbeRelocationDecisionHandle { get; init; }
 	public required DescriptorHandle EnvironmentHandle { get; init; }
 	public required DescriptorHandle SamplerHandle { get; init; }
@@ -51,6 +55,7 @@ public readonly struct DdgiPassConfig
 	public required IGfxBuffer FirstProbeRelocationReadbackBuffer { get; init; }
 	public required Int2 IrradianceAtlasSize { get; init; }
 	public required Int2 VisibilityAtlasSize { get; init; }
+	public required int VisibilityTileInteriorSize { get; init; }
 	public required DdgiGridShape GridShape { get; init; }
 	public required Vector3 Origin { get; init; }
 	public required Int3 StorageOffset { get; init; }

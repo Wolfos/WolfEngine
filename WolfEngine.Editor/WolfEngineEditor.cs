@@ -35,7 +35,11 @@ public class WolfEngineEditor
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly EditorCameraContext _cameraContext;
-	private readonly List<World> _renderWorlds = new(2);
+	// One submission per rendered view, reused every frame.
+	private readonly List<RenderViewSubmission> _viewSubmissions = new(2);
+	// Secondary views — previews, prefab documents — published alongside the scene view. Null when the host
+	// registered none, as in tests that construct the editor directly.
+	private readonly EditorRenderViews? _editorRenderViews;
 	private readonly EditorGui _editorGui;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
 	private readonly IEditorPlaySession _playSession;
@@ -67,6 +71,7 @@ public class WolfEngineEditor
 	private IGameplayModule? _boundGameplayModule;
 	private EditorAutomationController? _automationController;
 	private EditorRemoteAutomationController? _remoteAutomationController;
+	private EditorCameraSystem _editorCameraSystem = null!;
 
 	public WolfEngineEditor(
 		IWorldManager worldManager,
@@ -107,6 +112,13 @@ public class WolfEngineEditor
 		_editorGui = editorGui ?? throw new ArgumentNullException(nameof(editorGui));
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
+		_playSession.RuntimeSceneUnloading += world =>
+		{
+			// Stop rendering the outgoing world before its removal listeners retire private GPU geometry.
+			if (_renderGraph.TryGetViewForWorld(world, out var view) && view == RenderViewId.Primary)
+				_renderGraph.RebindView(view, _playSession.AuthoringScene.World);
+			if (ReferenceEquals(_boundGameplayWorld, world)) UnbindGameplayModule();
+		};
 		_typeCatalog = typeCatalog ?? throw new ArgumentNullException(nameof(typeCatalog));
 		_gameplayAssemblyHost = gameplayAssemblyHost ?? throw new ArgumentNullException(nameof(gameplayAssemblyHost));
 		_sceneReloadService = sceneReloadService ?? throw new ArgumentNullException(nameof(sceneReloadService));
@@ -120,6 +132,7 @@ public class WolfEngineEditor
 		_audioRuntime = audioRuntime ?? throw new ArgumentNullException(nameof(audioRuntime));
 		_gameplayExceptionReporter = new GameplayExceptionReporter(logService);
 		_worldManager.SetExceptionHandler(SystemExecutionGroup.Gameplay, _gameplayExceptionReporter.ReportSystem);
+		_editorRenderViews = serviceProvider?.GetService(typeof(EditorRenderViews)) as EditorRenderViews;
 		_serviceProvider = serviceProvider;
 		_rigidbodySystem = serviceProvider.GetRequiredService<RigidbodySystem>();
 	}
@@ -162,10 +175,14 @@ public class WolfEngineEditor
 		_sceneWorkspace.Initialize(authoringScene);
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
-		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
-		_worldManager.AddSystem<AnimationSystem>();
+        _worldManager.AddSystem(new AnimationRenderResourceLifecycle(_serviceProvider.GetRequiredService<RenderGraph>()));
+        // Authoring renders skeletons at rest without advancing or compiling animation graphs.
+        // Keep this before TransformSystem so newly added bind-pose sockets propagate immediately.
+        _worldManager.AddSystem(new BindPoseAnimationSystem(), SystemExecutionGroup.Shared);
+        _worldManager.AddSystem(new AnimationSystem(WorldTag.Game), SystemExecutionGroup.Gameplay);
 		_worldManager.AddSystem<TransformSystem>();
-		_worldManager.AddSystem(_serviceProvider.GetRequiredService<EditorCameraSystem>());
+		_editorCameraSystem = _serviceProvider.GetRequiredService<EditorCameraSystem>();
+		_worldManager.AddSystem(_editorCameraSystem);
 		_worldManager.AddSystem(_boxColliderGizmoDrawer);
 		_worldManager.AddSystem(_sphereColliderGizmoDrawer);
 		_worldManager.AddSystem(_capsuleColliderGizmoDrawer);
@@ -182,7 +199,7 @@ public class WolfEngineEditor
 
 		_editorCamera = CreateEditorCamera(_editorWorld);
 		_currentScene = _playSession.ActiveScene;
-		RefreshRenderWorlds();
+		BindSceneView();
 	}
 
 	private void EditorLoop()
@@ -205,6 +222,13 @@ public class WolfEngineEditor
 
 			var deltaTime = _automationController?.DeltaTime ?? (float)(frameStart - last).TotalSeconds;
 			last = frameStart;
+			var pointerViewport = _viewportStateBus.GetUiState(RenderViewId.Primary);
+			var pointerRouter = _serviceProvider.GetService(typeof(IPointerInputRouter)) as IPointerInputRouter ?? NullPointerInputRouter.Instance;
+			_inputSystem.ProcessPointerInput(pointerRouter, new PointerInputContext(
+				_playSession.State == EditorPlayState.Playing && !_operationService.Current.IsActive,
+				pointerViewport.Visible && pointerViewport.PointerAvailable,
+				pointerViewport.Visible && (pointerViewport.Focused || pointerViewport.PointerAvailable || pointerViewport.PointerCaptured),
+				pointerViewport.ImageMin, pointerViewport.ImageMax - pointerViewport.ImageMin));
 			UpdateAudioLifecycle(deltaTime);
 
 			// A loading operation owns editor state. Keep publishing frames, but do not let
@@ -212,12 +236,14 @@ public class WolfEngineEditor
 			if (_operationService.Current.IsActive == false)
 			{
 				HandleGameplayBuildAndReload();
+				ProcessSceneLoadRequest();
 				SyncCurrentScene();
 				ValidateSelection();
 				EnsureGameplayModuleBound();
 
 				using (FrameProfiler.Instance.Measure("World Update"))
 				{
+					_editorCameraSystem.BeginFrame();
 					UpdatePhysics(deltaTime);
 					UpdateGameplay(deltaTime);
 					var (worldMask, groupMask) = GetExecutionMask();
@@ -233,7 +259,7 @@ public class WolfEngineEditor
 
 			using (FrameProfiler.Instance.Measure("Publish Snapshot"))
 			{
-				PublishSnapshot();
+				PublishSnapshot(deltaTime);
 			}
 
 			using (FrameProfiler.Instance.Measure("UI"))
@@ -295,7 +321,7 @@ public class WolfEngineEditor
 		}
 	}
 
-	private void PublishSnapshot()
+	private void PublishSnapshot(float deltaTime)
 	{
 		ref var editorCamera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
 		ref var editorCameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
@@ -305,7 +331,37 @@ public class WolfEngineEditor
 			editorCamera,
 			editorCameraWorldTransform);
 		_cameraContext.Publish(camera, cameraWorldTransform);
-		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, GetConfig(), _renderWorlds);
+		// The scene view renders the current scene's world only; the editor camera lives in the editor world and is
+		// passed here explicitly, so that world contributes no draws and needs no view of its own.
+		_viewSubmissions.Clear();
+		_viewSubmissions.Add(new RenderViewSubmission(RenderViewId.Primary, camera, cameraWorldTransform, GetConfig()));
+		_editorRenderViews?.AppendSubmissions(deltaTime, _viewSubmissions);
+		_renderPipeline.PublishSnapshot(_viewSubmissions);
+	}
+
+	private void ProcessSceneLoadRequest()
+	{
+		var requests = _serviceProvider.GetRequiredService<SceneLoadRequests>();
+		if (!requests.TryTake(_playSession.RuntimeScene?.World, out var request)) return;
+		try
+		{
+			// Deserialize before touching the live scene, so a missing or invalid asset leaves Play running.
+			var next = _playSession.PrepareSceneLoad(request.SceneId);
+			if (!_renderGraph.RebindView(RenderViewId.Primary, next.World))
+				throw new InvalidOperationException("Scene render view is unavailable.");
+			UnbindGameplayModule();
+			_playSession.ReplaceRuntimeScene(next);
+			_physicsAccumulator.Reset();
+			SyncCurrentScene();
+			EnsureGameplayModuleBound();
+			if (_playSession.State == EditorPlayState.Paused) _audioRuntime.PauseAll();
+			request.Complete();
+		}
+		catch (Exception exception)
+		{
+			request.Fail(exception);
+			_notificationService.ReportError($"Scene load failed:{Environment.NewLine}{exception}");
+		}
 	}
 
 	private void SyncCurrentScene()
@@ -318,7 +374,7 @@ public class WolfEngineEditor
 
 		var selectedEntityIds = GetSelectedEntityIds(_currentScene);
 		_currentScene = nextScene;
-		RefreshRenderWorlds();
+		BindSceneView();
 		RestoreSelectedEntities(_currentScene, selectedEntityIds);
 	}
 
@@ -474,7 +530,7 @@ public class WolfEngineEditor
 		_playSession.Restart(previousState);
 		_currentScene = _playSession.ActiveScene;
 		RefreshAssetBackedComponents(_currentScene);
-		RefreshRenderWorlds();
+		BindSceneView();
 		RestoreSelectedEntities(_currentScene, selectedEntityIds);
 	}
 
@@ -542,11 +598,27 @@ public class WolfEngineEditor
 		EditorGui.ClearEntitySelection();
 	}
 
-	private void RefreshRenderWorlds()
+	/// <summary>
+	/// Points the scene view at the current scene's world. The view keeps its id and output across a scene load or
+	/// a play-mode switch; rebinding drops the draws and temporal history that belonged to the previous world.
+	/// </summary>
+	private void BindSceneView()
 	{
-		_renderWorlds.Clear();
-		_renderWorlds.Add(_editorWorld);
-		_renderWorlds.Add(_currentScene.World);
+		if (_renderGraph.TryGetViewForWorld(_currentScene.World, out var bound) && bound == RenderViewId.Primary)
+		{
+			return;
+		}
+
+		if (_renderGraph.RebindView(RenderViewId.Primary, _currentScene.World) == false)
+		{
+			var created = _renderGraph.CreateView(
+				new RenderViewDescriptor(_currentScene.World, "scene", RenderViewOutput.Texture));
+			if (created != RenderViewId.Primary)
+			{
+				throw new InvalidOperationException(
+					$"The scene view must be the primary render view, but it was created as {created}.");
+			}
+		}
 	}
 
 	private (WorldTag WorldMask, SystemExecutionGroup GroupMask) GetExecutionMask()
@@ -634,7 +706,10 @@ public class WolfEngineEditor
 		_audioRuntime.StopAll();
 		for (var index = _registeredGameplaySystems.Count - 1; index >= 0; index--)
 		{
-			_worldManager.RemoveSystem(_registeredGameplaySystems[index]);
+			var system = _registeredGameplaySystems[index];
+			if (system is IWorldRemovedListener listener)
+				_gameplayExceptionReporter.Run(nameof(IWorldRemovedListener.OnWorldRemoved), () => listener.OnWorldRemoved(_boundGameplayWorld));
+			_worldManager.RemoveSystem(system);
 		}
 
 		_registeredGameplaySystems.Clear();
@@ -658,7 +733,7 @@ public class WolfEngineEditor
 
 		var entity = world.CreateEntity("Editor Camera", worldTransform);
 		world.AddComponent(entity, camera);
-		world.AddComponent(entity, new EditorCameraMover());
+		world.AddComponent(entity, new EditorCameraMover { View = RenderViewId.Primary });
 		return entity;
 	}
 

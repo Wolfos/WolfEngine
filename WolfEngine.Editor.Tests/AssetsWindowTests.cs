@@ -499,6 +499,7 @@ public sealed class AssetsWindowTests
 				@"..\WolfEngine\WolfEngine.Tests\WolfEngine.Tests.csproj",
 				@"..\WolfEngine\WolfEngine.Editor.Automation\WolfEngine.Editor.Automation.csproj",
 				@"..\WolfEngine\WolfEngine.Runtime\WolfEngine.Runtime.csproj",
+				@"..\WolfEngine\WolfEngine.Runtime.Desktop\WolfEngine.Runtime.Desktop.csproj",
 				@"..\WolfEngine\WolfEngine.Build\WolfEngine.Build.csproj",
 				@"..\WolfEngine\WolfEngine.Audio.Tests\WolfEngine.Audio.Tests.csproj",
 				@"..\WolfEngine\WolfEngine.Audio\WolfEngine.Audio.csproj"

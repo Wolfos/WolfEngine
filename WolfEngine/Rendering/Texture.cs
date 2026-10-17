@@ -12,7 +12,8 @@ public sealed class Texture
     private int _height;
     private bool _isSrgb;
     private TextureFormat _format;
-    private TextureMipData[] _mipLevels;
+    private TextureMipData[]? _mipLevels;
+    private int _mipCount;
     private TextureDimension _dimension;
     private int _depth;
     private readonly bool _isRenderTarget;
@@ -33,6 +34,7 @@ public sealed class Texture
         _isSrgb = isSrgb;
         _format = format;
         _mipLevels = mipLevels;
+        _mipCount = mipLevels.Length;
         _dimension = dimension;
         _depth = depth;
         _isRenderTarget = isRenderTarget;
@@ -45,8 +47,8 @@ public sealed class Texture
     public TextureDimension Dimension => _dimension;
     public bool IsSrgb => _isSrgb;
     public TextureFormat Format => _format;
-    public TextureMipData[] MipLevels => _mipLevels;
-    public int MipCount => _mipLevels.Length;
+    public TextureMipData[] MipLevels => GetMipLevels();
+    public int MipCount => _mipCount;
     public bool IsRenderTarget => _isRenderTarget;
 
     /// <summary>
@@ -74,6 +76,63 @@ public sealed class Texture
             format,
             [new TextureMipData(width, height, Array.Empty<byte>())],
             isRenderTarget: true);
+    }
+
+    /// <summary>
+    /// Reads this texture's mip data again from immutable content, such as a cooked pack. Set only when that
+    /// content cannot change; it lets the CPU copy go once the renderer has uploaded it.
+    /// </summary>
+    internal Func<TextureMipData[]>? MipDataSource { get; set; }
+
+    /// <summary>Diagnostic: whether the CPU copy of the mip data is currently held.</summary>
+    internal bool HasCpuMipData => Volatile.Read(ref _mipLevels) is not null;
+
+    /// <summary>
+    /// Drops the CPU copy of the mip data once the renderer has uploaded it, when it can be read again from
+    /// <see cref="MipDataSource"/>.
+    /// </summary>
+    internal void ReleaseMipDataAfterUpload()
+    {
+        if (MipDataSource is null)
+        {
+            return;
+        }
+
+        lock (_resourceSync)
+        {
+            _mipLevels = null;
+        }
+    }
+
+    private TextureMipData[] GetMipLevels()
+    {
+        var mipLevels = Volatile.Read(ref _mipLevels);
+        if (mipLevels is not null)
+        {
+            return mipLevels;
+        }
+
+        lock (_resourceSync)
+        {
+            if (_mipLevels is not null)
+            {
+                return _mipLevels;
+            }
+
+            var source = MipDataSource
+                ?? throw new InvalidOperationException($"Texture '{Name}' mip data was released and has no source to reload it from.");
+            var reloaded = source();
+            if (reloaded.Length != _mipCount)
+            {
+                throw new InvalidOperationException(
+                    $"Texture '{Name}' reloaded {reloaded.Length} mips where {_mipCount} were uploaded.");
+            }
+
+            // Kept from then on: a reader that needed it once is likely to need it again.
+            Volatile.Write(ref _mipLevels, reloaded);
+
+            return reloaded;
+        }
     }
 
     internal ITextureResources? Resources
@@ -166,6 +225,17 @@ public sealed class Texture
         }
     }
 
+    internal void DetachGpuResources()
+    {
+        lock (_resourceSync)
+        {
+            _resources = null;
+            _hasGpuResources = false;
+            _resourceRequestPending = false;
+            _resourceRevision++;
+        }
+    }
+
     public void ApplyTextureData(int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels,
         TextureDimension dimension = TextureDimension.Texture2D, int depth = 1)
     {
@@ -180,7 +250,14 @@ public sealed class Texture
         _height = height;
         _isSrgb = isSrgb;
         _format = format;
-        _mipLevels = mipLevels;
+        lock (_resourceSync)
+        {
+            // The new data did not come from the old source, so it cannot be reloaded from there.
+            MipDataSource = null;
+            _mipLevels = mipLevels;
+            _mipCount = mipLevels.Length;
+        }
+
         _dimension = dimension;
         _depth = depth;
         MarkGpuResourcesDirty();

@@ -1,3 +1,4 @@
+using System.Numerics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.AssetPipeline;
@@ -9,10 +10,11 @@ public sealed class Material
 {
     private readonly object _stateSync = new();
     private ColorRGBA _color = ColorRGBA.White;
+    private Vector4 _uvOffsetScale = new(0.0f, 0.0f, 1.0f, 1.0f);
     private float _metallicFactor = 1.0f;
     private float _roughnessFactor = 1.0f;
     private float _normalScale = 1.0f;
-    private System.Numerics.Vector3 _emissiveFactor = System.Numerics.Vector3.Zero;
+    private Vector3 _emissiveFactor = Vector3.Zero;
     private float _emissiveIntensity = 1.0f;
     private Texture _albedoTexture = null!;
     private Texture _ormTexture = null!;
@@ -20,6 +22,7 @@ public sealed class Material
     private Texture _emissiveTexture = null!;
     private AlphaMode _alphaMode;
     private float _alphaCutoff;
+    private bool _doubleSided;
     private IMaterialResources? _resources;
     private int _contentRevision = 1;
     private int _resourceRevision;
@@ -44,6 +47,12 @@ public sealed class Material
     {
         get => _color;
         set => SetField(ref _color, value);
+    }
+
+    public Vector4 UvOffsetScale
+    {
+        get => _uvOffsetScale;
+        set => SetField(ref _uvOffsetScale, value);
     }
 
     public float MetallicFactor
@@ -110,6 +119,17 @@ public sealed class Material
     {
         get => _alphaCutoff;
         set => SetField(ref _alphaCutoff, value);
+    }
+
+    /// <summary>
+    /// Renders both faces of the surface, for geometry authored as single-sided cards such as foliage
+    /// or cloth. Draws using it are routed to a separate execution lane whose pipelines disable face
+    /// culling, so toggling this moves the draw between lanes rather than changing shading.
+    /// </summary>
+    public bool DoubleSided
+    {
+        get => _doubleSided;
+        set => SetField(ref _doubleSided, value);
     }
 
     internal IMaterialResources? Resources

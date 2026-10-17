@@ -15,7 +15,7 @@ public sealed class TransparentForwardPass
 	private readonly Dictionary<GpuDrawExecutionKey, IGfxPipeline> _pipelinesByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, SharedDrawGraphicsBufferBindings> _bufferBindingsByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, ShaderReflectionLayout> _reflectionByExecutionKey = new();
-	private readonly SharedDrawIndirectCommandSet _indirectCommandSet = new();
+	private readonly PerViewIndirectCommandSets _indirectCommandSets = new();
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private GraphicsBackendKind? _reflectionBackendKind;
@@ -30,9 +30,14 @@ public sealed class TransparentForwardPass
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
-	public SharedDrawIndirectCommandSet IndirectCommandSet => _indirectCommandSet;
+	/// <summary>The given view's command set; see <see cref="PerViewIndirectCommandSets"/>.</summary>
+	public SharedDrawIndirectCommandSet GetIndirectCommandSet(int viewIndex) => _indirectCommandSets.Get(viewIndex);
 
-	public void EnsureIndirectResources(IGfxDevice device)
+	/// <summary>Removes a destroyed view's command set, for the caller to retire.</summary>
+	internal IReadOnlyList<SharedDrawIndirectCommandSet> TakeViewCommandSets(int viewIndex) =>
+		_indirectCommandSets.Take(viewIndex);
+
+	public void EnsureIndirectResources(IGfxDevice device, int viewIndex)
 	{
 		ArgumentNullException.ThrowIfNull(device);
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
@@ -41,7 +46,7 @@ public sealed class TransparentForwardPass
 			EnsurePipeline(device, laneDefinitions[i]);
 		}
 
-		_indirectCommandSet.EnsureCreated(device);
+		_indirectCommandSets.Get(viewIndex).EnsureCreated(device);
 	}
 
 	public bool HasIndirectLane(GpuDrawExecutionLaneDefinition lane) => _pipelinesByExecutionKey.ContainsKey(lane.Key);
@@ -70,7 +75,8 @@ public sealed class TransparentForwardPass
 
 	public TransparentForwardPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
+		RenderFrameSharedResources sharedResources,
 		IGfxDevice device,
 		GpuDrawResources gpuDrawResources,
 		ShadowFrameData shadowData,
@@ -106,6 +112,9 @@ public sealed class TransparentForwardPass
 			? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateWrite))
 			: _bindlessRegistry.ErrorTextureHandle;
 		var ddgiGridShape = DdgiUtilities.GetGridShape(resources.Config.DiffuseGlobalIllumination);
+		var fogIntegrated = resources.FogIntegrated.IsValid
+			? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.FogIntegrated))
+			: _bindlessRegistry.ErrorTextureHandle;
 
 		var buckets = BuildBuckets(device, gpuDrawResources);
 
@@ -119,15 +128,19 @@ public sealed class TransparentForwardPass
 			ShadowMapDepth0 = shadowMap0,
 			ShadowMapDepth1 = shadowMap1,
 			ShadowMapDepth2 = shadowMap2,
-			SkyboxEnvironment = ResolveSkyboxHandle(context, resources.SkyboxEnvironment),
-			SkyboxIrradiance = ResolveSkyboxHandle(context, resources.SkyboxIrradiance),
-			SkyboxPrefilter = ResolveSkyboxHandle(context, resources.SkyboxPrefilter),
-			SkyboxBrdfLut = ResolveSkyboxHandle(context, resources.SkyboxBrdfLut),
+			SkyboxEnvironment = ResolveSkyboxHandle(context, sharedResources.SkyboxEnvironment),
+			SkyboxIrradiance = ResolveSkyboxHandle(context, sharedResources.SkyboxIrradiance),
+			SkyboxPrefilter = ResolveSkyboxHandle(context, sharedResources.SkyboxPrefilter),
+			SkyboxBrdfLut = ResolveSkyboxHandle(context, sharedResources.SkyboxBrdfLut),
 			LinearSampler = _linearSampler,
 			ShadowMapHandle0 = _bindlessRegistry.RegisterTexture(shadowMap0),
 			ShadowMapHandle1 = _bindlessRegistry.RegisterTexture(shadowMap1),
 			ShadowMapHandle2 = _bindlessRegistry.RegisterTexture(shadowMap2),
 			ShadowSampler = _shadowSampler,
+			FogIntegrated = fogIntegrated,
+			FogEnabled = resources.FogIntegrated.IsValid,
+			FogSliceCount = Math.Clamp(resources.Config.VolumetricFog.SliceCount, 16, 128),
+			FogMaxDistance = Math.Max(resources.Config.VolumetricFog.MaxDistance, sceneData.NearPlane + 0.001f),
 			DdgiProbeState = ddgiProbeState,
 			DdgiProbeStateAvailable = ddgiProbeStateAvailable,
 			DdgiProbeRelocationEnabled =
@@ -209,6 +222,10 @@ public sealed class TransparentForwardPass
 		environmentWriter.SetUInt("shadowMapHandle1", config.ShadowMapHandle1.Value);
 		environmentWriter.SetUInt("shadowMapHandle2", config.ShadowMapHandle2.Value);
 		environmentWriter.SetUInt("shadowSamplerHandle", config.ShadowSampler.Value);
+		environmentWriter.SetUInt("fogIntegratedHandle", config.FogIntegrated.Value);
+		environmentWriter.SetUInt("fogEnabled", config.FogEnabled ? 1u : 0u);
+		environmentWriter.SetUInt("fogSliceCount", (uint)config.FogSliceCount);
+		environmentWriter.SetFloat("fogMaxDistance", config.FogMaxDistance);
 
 		var lightingWriter = _lightingWriter
 			?? throw new InvalidOperationException("Transparent lighting writer was not initialized.");
@@ -361,7 +378,8 @@ public sealed class TransparentForwardPass
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
 		var buckets = new List<TransparentExecutionBucket>(laneDefinitions.Length);
 		var activeIndirectSlot = gpuDrawResources.ActiveIndirectCommandSlot;
-		_indirectCommandSet.EnsureCreated(device);
+		var indirectCommandSet = _indirectCommandSets.Get(gpuDrawResources.ActiveViewIndex);
+		indirectCommandSet.EnsureCreated(device);
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
 			var laneDefinition = laneDefinitions[i];
@@ -375,7 +393,7 @@ public sealed class TransparentForwardPass
 				GetPassBindingSet(laneDefinition, gpuDrawResources)
 					?? throw new InvalidOperationException($"Missing pass bindings for transparent lane '{laneDefinition.DebugName}'."),
 				pipeline,
-				_indirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
+				indirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
 		}
 
 		return buckets;
@@ -390,10 +408,11 @@ public sealed class TransparentForwardPass
 
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
-			CullMode.Back,
+			lane.ResolveCullMode(CullMode.Back),
 			depthTestEnabled: true,
 			depthWriteEnabled: false,
-			BlendMode.AlphaBlend);
+			BlendMode.AlphaBlend,
+				reverseWinding: lane.ReverseWinding);
 
 		var key = new PipelineKey(
 			PassKind.Graphics,

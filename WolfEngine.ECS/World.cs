@@ -6,16 +6,20 @@ namespace WolfEngine.ECS;
 public class World
 {
 	private const int MaxWorldTransformRemovals = 1 << 16;
+	private static int _nextId;
     private readonly FreeList _entities = new();
     private readonly Dictionary<Type, IComponentPool> _pools = new();
 	private readonly List<WorldTransformRemoval> _worldTransformRemovals = new();
 	private bool _worldTransformRemovalsOverflowed;
-    
+
     public WorldTag Tag { get; }
-    
+
+	public int Id { get; }
+
     public World(WorldTag tag)
     {
         Tag = tag;
+		Id = Interlocked.Increment(ref _nextId);
     }
 
     public Entity CreateEntity() => _entities.Create();
@@ -295,6 +299,12 @@ public class World
         AddTransform(entity, new LocalTransform(transform));
     }
 
+    /// <summary>Adds a transform from an already decomposed pose, skipping the matrix decomposition.</summary>
+    public void AddTransform(Entity entity, Vector3 localPosition, Quaternion localRotation, Vector3 localScale)
+    {
+        AddTransform(entity, new LocalTransform(localPosition, localRotation, localScale));
+    }
+
     public void SetParent(Entity child, Entity parent)
     {
         if (!parent.IsValid)
@@ -459,6 +469,7 @@ public class World
     public void SetLocalPosition(Entity e, Vector3 position)
     {
         ref var localTransform = ref GetComponent<LocalTransform>(e);
+        if (localTransform.LocalPosition == position) return;
         localTransform.LocalPosition = position;
         MarkDirty(e);
     }
@@ -466,6 +477,7 @@ public class World
     public void SetLocalRotation(Entity e, Quaternion rotation)
     {
         ref var localTransform = ref GetComponent<LocalTransform>(e);
+        if (localTransform.LocalRotation == rotation) return;
         localTransform.LocalRotation = rotation;
         MarkDirty(e);
     }
@@ -473,8 +485,22 @@ public class World
     public void SetLocalScale(Entity e, Vector3 scale)
     {
         ref var localTransform = ref GetComponent<LocalTransform>(e);
+        if (localTransform.LocalScale == scale) return;
         localTransform.LocalScale = scale;
         MarkDirty(e);
+    }
+
+    /// <summary>Updates a complete local pose and dirties its subtree only when it changes.</summary>
+    public bool SetLocalTransform(Entity e, Vector3 position, Quaternion rotation, Vector3 scale)
+    {
+        ref var localTransform = ref GetComponent<LocalTransform>(e);
+        if (localTransform.LocalPosition == position && localTransform.LocalRotation == rotation && localTransform.LocalScale == scale)
+            return false;
+        localTransform.LocalPosition = position;
+        localTransform.LocalRotation = rotation;
+        localTransform.LocalScale = scale;
+        MarkDirty(e);
+        return true;
     }
 
     public void SetWorldPosition(Entity e, Vector3 position)
@@ -535,7 +561,8 @@ public class World
         return TryGetCurrentWorldMatrix(parent, out var parentWorld) && Matrix4x4.Invert(parentWorld, out parentWorldToLocal);
     }
 
-    private bool TryGetCurrentWorldMatrix(Entity entity, out Matrix4x4 worldMatrix)
+    /// <summary>Computes the current hierarchy transform before the pre-render transform pass runs.</summary>
+    public bool TryGetCurrentWorldMatrix(Entity entity, out Matrix4x4 worldMatrix)
     {
         worldMatrix = Matrix4x4.Identity;
         if (HasComponent<LocalTransform>(entity) == false || HasComponent<WorldTransform>(entity) == false)

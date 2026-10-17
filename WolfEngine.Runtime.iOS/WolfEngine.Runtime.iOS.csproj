@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0-ios</TargetFramework>
+		<OutputType>Exe</OutputType>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<SupportedOSPlatformVersion>17.0</SupportedOSPlatformVersion>
+		<ApplicationId>com.wolfengine.runtime</ApplicationId>
+		<ApplicationTitle>WolfEngine</ApplicationTitle>
+		<PublishAot>true</PublishAot>
+		<TrimMode>full</TrimMode>
+		<NoWarn>$(NoWarn);CA1416</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
+		<ProjectReference Include="..\WolfEngine.Runtime\WolfEngine.Runtime.csproj" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(WolfGameContent)' != ''">
+		<BundleResource Include="$(WolfGameContent)/**/*" LogicalName="Content/%(RecursiveDir)%(Filename)%(Extension)" />
+	</ItemGroup>
+
+	<Target Name="RequireWolfGameContent" BeforeTargets="PrepareForBuild">
+		<Error
+			Condition="'$(WolfGameContent)' == '' Or Exists('$(WolfGameContent)/bootstrap.wolfmanifest') == false"
+			Text="Set WolfGameContent to a cooked ios-arm64 build's Content folder (build_game with target ios-arm64), for example -p:WolfGameContent=/path/to/build/Content." />
+	</Target>
+
+	<ItemGroup>
+		<RuntimeHostConfigurationOption Include="System.IO.DisableFileLocking" Value="true" Trim="true" />
+	</ItemGroup>
+
+</Project>

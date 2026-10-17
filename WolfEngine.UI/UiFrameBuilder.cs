@@ -14,6 +14,8 @@ internal sealed class UiFrameBuilder
 		PixelsRgba = [255, 255, 255, 255]
 	};
 	private readonly UiGeometryBuilder _geometry = new();
+	private readonly UiTextService _text;
+	public UiFrameBuilder(UiTextService? text = null) => _text = text ?? new UiTextService();
 
 	/// <summary>
 	/// Turns a laid-out tree into geometry.
@@ -31,7 +33,7 @@ internal sealed class UiFrameBuilder
 		_geometry.Prepare();
 		try
 		{
-			Append(_geometry, root, 1, scale);
+			Append(_geometry, root, 1, scale, new Vector4(0, 0, outputWidth, outputHeight));
 			return _geometry.BuildFrame(outputWidth, outputHeight, WhiteAtlas);
 		}
 		catch
@@ -41,9 +43,10 @@ internal sealed class UiFrameBuilder
 		}
 	}
 
-	private static void Append(UiGeometryBuilder geometry, UiNode node, float inheritedOpacity, float scale)
+	private void Append(UiGeometryBuilder geometry, UiNode node, float inheritedOpacity, float scale, Vector4 clip)
 	{
-		if (!node.Style.Display) return;
+		if (!node.Style.Display || clip.Z <= clip.X || clip.W <= clip.Y) return;
+		geometry.SetClip(clip);
 		var opacity = inheritedOpacity * node.Style.Opacity;
 		if (!node.IsText && node.Width > 0 && node.Height > 0 && node.Style.Background.A * opacity > 0.001f)
 		{
@@ -55,10 +58,31 @@ internal sealed class UiFrameBuilder
 		}
 		if (node.IsText && !string.IsNullOrEmpty(node.Text))
 		{
-			BitmapFont.Draw(geometry, new Vector2(node.Left, node.Top) * scale, node.Style.FontSize * scale,
-				Pack(WithOpacity(node.Style.Color, opacity)), node.Text!);
+			var text = node.TextLayout ?? _text.Layout(node.Text!, node.Style, node.Width);
+			if (text.Font is { } font)
+			{
+				var size = node.Style.FontSize;
+				var color = Pack(WithOpacity(node.Style.Color, opacity));
+				foreach (var placement in text.Glyphs)
+				{
+					var glyph = placement.Glyph;
+					var offset = text.LineOffset(placement.Line,
+						node.Width - node.ResolvedPadding.Left - node.ResolvedPadding.Right, node.Style.TextAlign);
+					var origin = new Vector2(node.Left + offset, node.Top) + placement.Origin;
+					geometry.AddGlyph((origin + new Vector2(glyph.Left, -glyph.Top) * size) * scale,
+						(origin + new Vector2(glyph.Right, -glyph.Bottom) * size) * scale,
+						new Vector2(glyph.AtlasX / (float)font.Atlas.Width, glyph.AtlasY / (float)font.Atlas.Height),
+						new Vector2((glyph.AtlasX + glyph.AtlasWidth) / (float)font.Atlas.Width, (glyph.AtlasY + glyph.AtlasHeight) / (float)font.Atlas.Height),
+						color, font.Atlas, font.Data.Metrics.DistanceRange);
+				}
+			}
 		}
-		for (var i = 0; i < node.Children.Count; i++) Append(geometry, node.Children[i], opacity, scale);
+		if (node.Style.ClipOverflow)
+		{
+			clip = new Vector4(MathF.Max(clip.X, node.Left * scale), MathF.Max(clip.Y, node.Top * scale),
+				MathF.Min(clip.Z, (node.Left + node.Width) * scale), MathF.Min(clip.W, (node.Top + node.Height) * scale));
+		}
+		for (var i = 0; i < node.Children.Count; i++) Append(geometry, node.Children[i], opacity, scale, clip);
 	}
 
 	private static uint Pack(ColorRGBA value)
@@ -79,12 +103,16 @@ internal sealed class UiGeometryBuilder : IDisposable
 {
 	private const int InitialVertexCapacity = 4096;
 	private const int InitialIndexCapacity = 6144;
-	private static readonly Vector2 WhiteUv = new(0.5f, 0.5f);
+	// A negative UV marks solid vertices, allowing backgrounds and glyphs to share a font batch.
+	private static readonly Vector2 WhiteUv = new(-1, -1);
 	private UiVertex[] _vertices = ArrayPool<UiVertex>.Shared.Rent(InitialVertexCapacity);
 	private uint[] _indices = ArrayPool<uint>.Shared.Rent(InitialIndexCapacity);
 	private int _vertexCount;
 	private int _indexCount;
 	private bool _transferred;
+	private readonly List<(Texture? Atlas, float Range, Vector4? Clip, int Start)> _batches = [];
+	private Vector4? _clip;
+	public void SetClip(Vector4 clip) => _clip = clip;
 
 	/// <summary>Starts another build after the previous buffers were transferred to a frame.</summary>
 	public void Prepare()
@@ -99,12 +127,15 @@ internal sealed class UiGeometryBuilder : IDisposable
 		_indices = ArrayPool<uint>.Shared.Rent(InitialIndexCapacity);
 		_vertexCount = 0;
 		_indexCount = 0;
+		_batches.Clear();
+		_clip = null;
 		_transferred = false;
 	}
 
 	public void AddFilledRect(Vector2 min, Vector2 max, uint color, float radius = 0)
 	{
-		if (max.X <= min.X || max.Y <= min.Y) return;
+		if (max.X <= min.X || max.Y <= min.Y || OutsideClip(min, max)) return;
+		BeginBatch(_batches.Count == 0 ? null : _batches[^1].Atlas, _batches.Count == 0 ? 0 : _batches[^1].Range);
 		var clampedRadius = MathF.Min(MathF.Max(radius, 0), MathF.Min(max.X - min.X, max.Y - min.Y) * 0.5f);
 		if (clampedRadius < 0.5f)
 		{
@@ -154,6 +185,29 @@ internal sealed class UiGeometryBuilder : IDisposable
 		_indices[_indexCount++] = first + 3;
 	}
 
+	private void BeginBatch(Texture? atlas, float range)
+	{
+		if (_batches.Count > 0 && ReferenceEquals(_batches[^1].Atlas, atlas) && _batches[^1].Range == range && _batches[^1].Clip == _clip) return;
+		_batches.Add((atlas, range, _clip, _indexCount));
+	}
+
+	public void AddGlyph(Vector2 min, Vector2 max, Vector2 uvMin, Vector2 uvMax, uint color, Texture atlas, float range)
+	{
+		if (OutsideClip(min, max)) return;
+		BeginBatch(atlas, range);
+		EnsureVertices(4); EnsureIndices(6);
+		var first = (uint)_vertexCount;
+		_vertices[_vertexCount++] = new UiVertex(min, uvMin, color);
+		_vertices[_vertexCount++] = new UiVertex(new Vector2(max.X, min.Y), new Vector2(uvMax.X, uvMin.Y), color);
+		_vertices[_vertexCount++] = new UiVertex(max, uvMax, color);
+		_vertices[_vertexCount++] = new UiVertex(new Vector2(min.X, max.Y), new Vector2(uvMin.X, uvMax.Y), color);
+		_indices[_indexCount++] = first; _indices[_indexCount++] = first + 1; _indices[_indexCount++] = first + 2;
+		_indices[_indexCount++] = first; _indices[_indexCount++] = first + 2; _indices[_indexCount++] = first + 3;
+	}
+
+	private bool OutsideClip(Vector2 min, Vector2 max) => _clip is { } clip &&
+		(max.X <= clip.X || max.Y <= clip.Y || min.X >= clip.Z || min.Y >= clip.W);
+
 	private void AddCorner(Vector2 center, float radius, float startAngle, float endAngle, int segments, uint color)
 	{
 		for (var i = 0; i <= segments; i++)
@@ -167,16 +221,17 @@ internal sealed class UiGeometryBuilder : IDisposable
 	public UiFrameData BuildFrame(int width, int height, UiTextureAtlas whiteAtlas)
 	{
 		ObjectDisposedException.ThrowIf(_transferred, this);
-		var commands = ArrayPool<UiDrawCommand>.Shared.Rent(1);
-		var commandCount = _indexCount > 0 ? 1 : 0;
-		if (commandCount > 0)
+		var commandCount = _batches.Count;
+		var commands = ArrayPool<UiDrawCommand>.Shared.Rent(Math.Max(1, commandCount));
+		for (var i = 0; i < commandCount; i++)
 		{
-			commands[0] = new UiDrawCommand(
-				_indexCount,
+			var batch = _batches[i];
+			commands[i] = new UiDrawCommand(
+				(i + 1 < commandCount ? _batches[i + 1].Start : _indexCount) - batch.Start,
+				batch.Start,
 				0,
-				0,
-				new Vector4(0, 0, width, height),
-				UiTextureIds.FontAtlas);
+				batch.Clip ?? new Vector4(0, 0, width, height),
+				UiTextureIds.FontAtlas, batch.Atlas, batch.Range, solid: batch.Atlas is null);
 		}
 
 		_transferred = true;
@@ -221,7 +276,7 @@ internal sealed class UiGeometryBuilder : IDisposable
 	{
 		if (frame.Vertices.Length > 0) ArrayPool<UiVertex>.Shared.Return(frame.Vertices, clearArray: false);
 		if (frame.Indices.Length > 0) ArrayPool<uint>.Shared.Return(frame.Indices, clearArray: false);
-		if (frame.Commands.Length > 0) ArrayPool<UiDrawCommand>.Shared.Return(frame.Commands, clearArray: false);
+		if (frame.Commands.Length > 0) ArrayPool<UiDrawCommand>.Shared.Return(frame.Commands, clearArray: true);
 	}
 
 	public void Dispose()

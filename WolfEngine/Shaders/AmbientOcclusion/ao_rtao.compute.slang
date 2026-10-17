@@ -159,6 +159,7 @@ float3 TracePrimaryAlbedo(uint2 pixel, uint2 fullSize)
 
     uint materialIndex = GetHandleIndex(instanceData.materialHandle);
     GpuMaterialData material = g_MaterialTable[materialIndex];
+    hitUv = hitUv * material.uvOffsetScale.zw + material.uvOffsetScale.xy;
     return max(material.baseColor.rgb * GetTexture(material.albedoHandle).SampleLevel(
         GetSampler(material.samplerHandle), hitUv, 0.0f).rgb, 0.0f.xxx);
 }

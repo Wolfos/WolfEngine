@@ -69,6 +69,12 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 		_size = Int2.Zero;
 	}
 
+	public void Release(IGfxDevice? device)
+	{
+		ReleaseCurrent(device);
+		_size = Int2.Zero;
+	}
+
 	public void Dispose()
 	{
 		Reset();

@@ -89,6 +89,59 @@ public sealed class EditorPlaySessionTests
 		Assert.That(authoringScene.World.GetComponent<TestPlayComponent>(FindEntityByName(authoringScene.World, "Player")).Count, Is.EqualTo(1));
 	}
 
+	[TestCase(EditorPlayState.Playing)]
+	[TestCase(EditorPlayState.Paused)]
+	public void SceneReplacement_PreservesAuthoringSceneAndPlayState(EditorPlayState state)
+	{
+		var manager = new WorldManager();
+		var factory = Substitute.For<IEditorSceneFactory>();
+		var workspace = new EditorSceneWorkspace(factory, manager);
+		var reload = new EditorSceneReloadService(new TestTypeResolver());
+		var play = new EditorPlaySession(workspace, reload, manager);
+		var authoring = CreateAuthoringScene(manager);
+		workspace.Initialize(authoring);
+		play.EnterPlay();
+		if (state == EditorPlayState.Paused) play.Pause();
+		var oldWorld = play.RuntimeScene!.World;
+		var assetId = Guid.NewGuid();
+		var source = CreateAuthoringScene(new WorldManager());
+		factory.Load(assetId).Returns(source);
+		var next = play.PrepareSceneLoad(assetId);
+		Assert.That(play.RuntimeScene!.World, Is.SameAs(oldWorld), "preparation does not replace the running world");
+		World? unloading = null;
+		play.RuntimeSceneUnloading += world =>
+		{
+			unloading = world;
+			Assert.That(play.RuntimeScene!.World, Is.SameAs(world), "unloading fires while the old scene is still active");
+		};
+		play.ReplaceRuntimeScene(next);
+		Assert.That(unloading, Is.SameAs(oldWorld));
+		Assert.That(play.State, Is.EqualTo(state));
+		Assert.That(next.World.Tag, Is.EqualTo(WorldTag.Game));
+		Assert.That(next.World, Is.Not.SameAs(source.World));
+		Assert.That(manager.RemoveWorld(oldWorld), Is.False);
+		Assert.That(workspace.CurrentScene, Is.SameAs(authoring));
+		play.Stop();
+		Assert.That(play.ActiveScene, Is.SameAs(authoring));
+		Assert.That(manager.RemoveWorld(next.World), Is.False);
+	}
+
+	[Test]
+	public void FailedScenePreparation_PreservesRuntimeScene()
+	{
+		var manager = new WorldManager();
+		var factory = Substitute.For<IEditorSceneFactory>();
+		var workspace = new EditorSceneWorkspace(factory, manager);
+		workspace.Initialize(CreateAuthoringScene(manager));
+		var play = new EditorPlaySession(workspace, new EditorSceneReloadService(new TestTypeResolver()), manager);
+		play.EnterPlay();
+		var current = play.RuntimeScene;
+		factory.Load(Arg.Any<Guid>()).Returns(_ => throw new InvalidOperationException("missing scene"));
+		Assert.Throws<InvalidOperationException>(() => play.PrepareSceneLoad(Guid.NewGuid()));
+		Assert.That(play.RuntimeScene, Is.SameAs(current));
+		play.Stop();
+	}
+
 	private static EditorScene CreateAuthoringScene(WorldManager manager)
 	{
 		var world = manager.CreateWorld(WorldTag.Authoring);

@@ -8,7 +8,7 @@ public sealed record CreatedEntity(Guid EntityId, string Name);
 /// </summary>
 public sealed class EditorProcessController : IAsyncDisposable
 {
-	private sealed record StartRequest(string ProjectPath, TaskCompletionSource Ready);
+	private sealed record StartRequest(string ProjectPath, TaskCompletionSource Ready, global::WolfEngine.Mathematics.Int2? WindowSize);
 
 	private readonly object _sync = new();
 	private readonly SemaphoreSlim _startSignal = new(0);
@@ -16,9 +16,11 @@ public sealed class EditorProcessController : IAsyncDisposable
 	private EditorApplication? _application;
 	private EditorRemoteAutomationController? _editor;
 
-	public async Task StartAsync(string projectPath, CancellationToken cancellationToken)
+	public async Task StartAsync(string projectPath, CancellationToken cancellationToken, int width = 0, int height = 0)
 	{
 		if (string.IsNullOrWhiteSpace(projectPath)) throw new InvalidOperationException("project_path is required.");
+		if (width < 0 || height < 0 || (width == 0) != (height == 0))
+			throw new ArgumentOutOfRangeException(nameof(width), "Specify both positive window dimensions, or omit both.");
 		var fullProjectPath = Path.GetFullPath(projectPath);
 		if (Directory.Exists(fullProjectPath) == false) throw new InvalidOperationException($"Project directory '{fullProjectPath}' does not exist.");
 
@@ -26,7 +28,7 @@ public sealed class EditorProcessController : IAsyncDisposable
 		lock (_sync)
 		{
 			if (_application is not null || _pendingStart is not null) throw new InvalidOperationException("WolfEngine Editor is already running.");
-			_pendingStart = new StartRequest(fullProjectPath, ready);
+			_pendingStart = new StartRequest(fullProjectPath, ready, width > 0 ? new(width, height) : null);
 			_startSignal.Release();
 		}
 
@@ -67,11 +69,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 					else if (task.IsCanceled) request.Ready.TrySetCanceled();
 					else request.Ready.TrySetResult();
 				}, TaskScheduler.Default);
-				application.Run(automationController: editor);
+				application.Run(automationController: editor, windowSize: request.WindowSize);
 				if (editor.Ready.IsCompleted == false) request.Ready.TrySetException(new InvalidOperationException("Editor stopped before it became ready."));
 			}
 			catch (Exception exception)
 			{
+                Console.Error.WriteLine($"Editor automation run failed: {exception}");
 				request.Ready.TrySetException(exception);
 			}
 			finally
@@ -86,6 +89,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 			}
 		}
 	}
+
+	public Task SetEditorCameraAsync(System.Numerics.Vector3 position, System.Numerics.Vector3 target, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEditorCameraAsync(position, target, cancellationToken);
 
 	public async Task<CreatedEntity> CreateEntityAsync(string? name, CancellationToken cancellationToken)
 	{
@@ -116,8 +122,30 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<AnimationStateResult> GetAnimationStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetAnimationStateAsync(cancellationToken);
 
+	public Task<int> SelectEntitiesAsync(IReadOnlyList<string> entityIds, CancellationToken cancellationToken)
+	{
+		var parsed = new List<Guid>(entityIds.Count);
+		foreach (var entityId in entityIds)
+		{
+			if (Guid.TryParse(entityId, out var parsedId) == false)
+			{
+				throw new InvalidOperationException($"entity_id '{entityId}' must be a GUID.");
+			}
+
+			parsed.Add(parsedId);
+		}
+
+		return GetRunningEditor().SelectEntitiesAsync(parsed, cancellationToken);
+	}
+
 	public Task<SceneLoadResult> LoadSceneAsync(string scenePath, CancellationToken cancellationToken) =>
 		GetRunningEditor().LoadSceneAsync(scenePath, cancellationToken);
+
+	public Task<global::WolfEngine.Build.GameBuildResult> BuildGameAsync(string outputPath, bool debug, string? target, CancellationToken cancellationToken) =>
+		GetRunningEditor().BuildGameAsync(outputPath, debug, target, cancellationToken);
+
+	public Task<SceneLoadResult> LoadPlaySceneAsync(string scenePath, CancellationToken cancellationToken) =>
+		GetRunningEditor().LoadPlaySceneAsync(scenePath, cancellationToken);
 
 	public Task<PlayModeStateResult> EnterPlayModeAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().EnterPlayModeAsync(cancellationToken);
@@ -131,6 +159,11 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetInputButtonAsync(binding, pressed, cancellationToken);
 
+	public Task SetScenePointerAsync(System.Numerics.Vector2 position, bool? pressed, CancellationToken cancellationToken, bool? focused = null) =>
+		GetRunningEditor().SetScenePointerAsync(position, pressed, cancellationToken, focused);
+
+	public Task<string> GetScenePointerStateAsync(CancellationToken cancellationToken) => GetRunningEditor().GetScenePointerStateAsync(cancellationToken);
+
 	public Task SetInputAxis2DAsync(
 		string binding,
 		System.Numerics.Vector2 value,
@@ -142,6 +175,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 
 	public Task<EditorWorkspaceStateResult> GetWorkspaceStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetWorkspaceStateAsync(cancellationToken);
+
+	public Task<EditorUiStateResult> GetEditorUiStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetEditorUiStateAsync(cancellationToken);
 
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		GetRunningEditor().CreateWorkspaceAsync(name, cancellationToken);
@@ -197,14 +233,33 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetSceneDebugViewAsync(debugViewId, cancellationToken);
 
+	public Task<string> SetRenderEffectsAsync(bool ambientOcclusion, bool reflections, bool diffuseGlobalIllumination,
+		bool volumetricFog, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetRenderEffectsAsync(ambientOcclusion, reflections, diffuseGlobalIllumination, volumetricFog, cancellationToken);
+
+	public Task<string> SetShadowCasterCullingAsync(bool enabled, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetShadowCasterCullingAsync(enabled, cancellationToken);
+
+	public Task<string> SetShadowVertexWeldingAsync(bool enabled, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetShadowVertexWeldingAsync(enabled, cancellationToken);
+
 	public Task<string> SetDdgiRelocationAsync(bool enabled, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetDdgiRelocationAsync(enabled, cancellationToken);
+
+	public Task SetEntityScaleAsync(Guid entityId, System.Numerics.Vector3 scale, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEntityScaleAsync(entityId, scale, cancellationToken);
 
 	public Task SetEntityRotationAsync(Guid entityId, System.Numerics.Vector3 eulerDegrees, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetEntityRotationAsync(entityId, eulerDegrees, cancellationToken);
 
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureFrameAsync(outputPath, cancellationToken);
+
+	public Task<string> SelectAssetAsync(Guid assetId, CancellationToken cancellationToken) =>
+		GetRunningEditor().SelectAssetAsync(assetId, cancellationToken);
+
+	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
+		GetRunningEditor().CaptureEditorWindowAsync(outputPath, cancellationToken);
 
 	public Task<GameplayFrameCaptureResult> CaptureGameplayFrameAsync(
 		string outputPath,
@@ -240,4 +295,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 		_startSignal.Dispose();
 		return ValueTask.CompletedTask;
 	}
+    public Task<AnimationGraphInspectionResult> ConfigureAnimationPreviewAsync(Guid asset, Guid model, Guid set, CancellationToken token) => GetRunningEditor().ConfigureAnimationPreviewAsync(asset, model, set, token);
+    public Task<AnimationGraphInspectionResult> AnimationPreviewTransportAsync(bool playing, float? seek, float? step, CancellationToken token) => GetRunningEditor().AnimationPreviewTransportAsync(playing, seek, step, token);
+    public Task<AnimationGraphInspectionResult> GetAnimationGraphAsync(Guid? entity, CancellationToken token) => GetRunningEditor().GetAnimationGraphAsync(entity, token);
+    public Task<AnimationGraphInspectionResult> SetAnimationParameterAsync(Guid? entity, string name, float value, CancellationToken token) => GetRunningEditor().SetAnimationParameterAsync(entity, name, value, token);
+    public Task<bool> SetSkinningForceUpdatesAsync(bool forced, CancellationToken token) => GetRunningEditor().SetSkinningForceUpdatesAsync(forced, token);
+    public Task<AnimationGraphInspectionResult> EditAnimationGraphAsync(string operation, Guid nodeId, int inputIndex, Guid inputId, CancellationToken token) => GetRunningEditor().EditAnimationGraphAsync(operation, nodeId, inputIndex, inputId, token);
+    public Task<FrameCaptureResult> CaptureAnimationPreviewAsync(string path, CancellationToken token) => GetRunningEditor().CaptureAnimationPreviewAsync(path, token);
+
 }

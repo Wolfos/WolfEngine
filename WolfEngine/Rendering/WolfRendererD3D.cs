@@ -153,6 +153,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	private Vector2 _imguiMouseWheel;
 	private readonly object _frameCaptureSync = new();
 	private TaskCompletionSource<FrameCapture>? _pendingFrameCapture;
+	private FrameCaptureTarget _pendingFrameCaptureTarget;
 	private DescriptorHandle _defaultMaterialSamplerHandle = DescriptorHandle.Invalid;
 	private static readonly Guid DxgiDebugAll = new("e48ae283-da80-490b-87e6-43e9a9cfda08");
 
@@ -187,6 +188,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		var window = _window ?? throw new InvalidOperationException("Window was not initialised.");
 
 		window.Load += OnWindowLoad;
+		window.FocusChanged += OnWindowFocusChanged;
 		window.Update += OnWindowUpdate;
 		window.Render += OnWindowRender;
 		window.FramebufferResize += OnWindowFramebufferResize;
@@ -218,7 +220,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		_height = size.Y;
 	}
 
-	public Task<FrameCapture> CaptureNextFrameAsync(CancellationToken cancellationToken = default)
+	public Task<FrameCapture> CaptureNextFrameAsync(FrameCaptureTarget target, CancellationToken cancellationToken = default)
 	{
 		var completion = new TaskCompletionSource<FrameCapture>(TaskCreationOptions.RunContinuationsAsynchronously);
 		lock (_frameCaptureSync)
@@ -229,6 +231,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			}
 
 			_pendingFrameCapture = completion;
+			_pendingFrameCaptureTarget = target;
 		}
 
 		if (cancellationToken.CanBeCanceled)
@@ -239,9 +242,13 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		return completion.Task;
 	}
 
-	public void CompletePendingFrameCapture(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle sceneColor)
+	public void CompletePendingFrameCapture(
+		RenderGraphResourceRegistry resourceRegistry,
+		RenderGraphResourceHandle sceneColor,
+		RenderGraphResourceHandle windowColor)
 	{
 		TaskCompletionSource<FrameCapture>? completion;
+		FrameCaptureTarget target;
 		lock (_frameCaptureSync)
 		{
 			completion = _pendingFrameCapture;
@@ -250,12 +257,14 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 				return;
 			}
 
+			target = _pendingFrameCaptureTarget;
 			_pendingFrameCapture = null;
 		}
 
+		var captureColor = target == FrameCaptureTarget.Window ? windowColor : sceneColor;
 		try
 		{
-			var texture = resourceRegistry.GetTexture(sceneColor);
+			var texture = resourceRegistry.GetTexture(captureColor);
 			if (texture is not ID3D12BackendTexture d3dTexture)
 			{
 				throw new InvalidOperationException("The automation capture color target was not created by the Direct3D12 backend.");
@@ -276,7 +285,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			var rowPitch = BufferAlignment.AlignUp((ulong)width * 4, D3D12.TextureDataPitchAlignment);
 			using var readbackBuffer = _gfxDevice.CreateBuffer(new BufferDescriptor(rowPitch * (ulong)height, BufferUsage.Staging)) as D3D12Buffer
 				?? throw new InvalidOperationException("Direct3D12 did not create a readable frame-capture buffer.");
-			var priorState = resourceRegistry.GetResourceState(sceneColor);
+			var priorState = resourceRegistry.GetResourceState(captureColor);
 			var commandList = _gfxDevice.BeginGraphics();
 			try
 			{
@@ -433,6 +442,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		_isInitialized = false;
 	}
 
+	private void OnWindowFocusChanged(bool focused) => _inputSystem.SetPointerFocus(focused);
+
 	private void HookKeyboards()
 	{
 		_keyboards.Clear();
@@ -526,6 +537,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 	private void HandleMouseDown(IMouse mouse, MouseButton button)
 	{
+		_inputSystem.SetAxis2D(InputActionBinding.MousePosition, new(mouse.Position.X, mouse.Position.Y));
+		_imguiInputSink.SetMousePosition(new(mouse.Position.X, mouse.Position.Y));
 		if (TryMapMouseButton(button, out var binding))
 		{
 			_inputSystem.SetButton(binding, true);
@@ -539,6 +552,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 	private void HandleMouseUp(IMouse mouse, MouseButton button)
 	{
+		_inputSystem.SetAxis2D(InputActionBinding.MousePosition, new(mouse.Position.X, mouse.Position.Y));
+		_imguiInputSink.SetMousePosition(new(mouse.Position.X, mouse.Position.Y));
 		if (TryMapMouseButton(button, out var binding))
 		{
 			_inputSystem.SetButton(binding, false);
@@ -1705,10 +1720,10 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
 		var vertexDataSize = (ulong)vertexStride * (uint)vertexCount;
-		var indexDataSize = (ulong)sizeof(uint) * (uint)mesh.Indices.Length;
 		var vertexOffsetBytes = BufferAlignment.AlignUp(_packedVertexBufferUsedBytes, vertexStride);
 		var indexOffsetBytes = BufferAlignment.AlignUp(_packedIndexBufferUsedBytes, sizeof(uint));
-		if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexDataSize, indexOffsetBytes + indexDataSize) == false)
+		var shadowIndices = new ShadowIndexBuffers(mesh, indexOffsetBytes);
+		if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexDataSize, shadowIndices.EndOffsetBytes) == false)
 		{
 			// Past the growth ceiling the mesh gets a zero-index proxy instead of an exception: one scene
 			// too large for the cap should cost its geometry, not the whole frame. The cap breach is
@@ -1720,6 +1735,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			mesh.IndexCount = 0;
 			mesh.PackedVertexOffsetBytes = 0;
 			mesh.PackedIndexOffsetBytes = 0;
+			mesh.PackedShadowOpaqueIndexOffsetBytes = 0;
+			mesh.PackedShadowAlphaTestIndexOffsetBytes = 0;
 			mesh.PackedBaseVertex = 0;
 			return new MeshResources(0, 0, 0, 0);
 		}
@@ -1734,17 +1751,17 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		}
 
 		writableVertexBuffer.Write<VertexData>(vertices, vertexOffsetBytes / vertexStride);
-		writableIndexBuffer.Write<uint>(mesh.Indices, indexOffsetBytes / sizeof(uint));
+		shadowIndices.Upload(writableIndexBuffer);
 
 		mesh.VertexBuffer = vertexBuffer;
 		mesh.IndexBuffer = indexBuffer;
 		mesh.StrideInBytes = vertexStride;
 		mesh.IndexCount = (uint)mesh.Indices.Length;
 		mesh.PackedVertexOffsetBytes = vertexOffsetBytes;
-		mesh.PackedIndexOffsetBytes = indexOffsetBytes;
+		shadowIndices.AssignOffsets(mesh);
 		mesh.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStride));
 		_packedVertexBufferUsedBytes = vertexOffsetBytes + vertexDataSize;
-		_packedIndexBufferUsedBytes = indexOffsetBytes + indexDataSize;
+		_packedIndexBufferUsedBytes = shadowIndices.EndOffsetBytes;
 
 		return new MeshResources(vertexOffsetBytes, indexOffsetBytes, mesh.PackedBaseVertex, mesh.IndexCount);
 	}
@@ -1759,6 +1776,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 		resources = CreateMeshResources(mesh);
 		_meshResources.Add(mesh, resources);
+		mesh.ReleaseCpuGeometryAfterUpload();
 	}
 
 	public void EnsureSkinnedInstanceResources(Mesh skinnedInstance)
@@ -1783,7 +1801,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 		EnsurePackedGeometryBuffers();
 		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
-		var vertexCount = skinnedInstance.Vertices.Length;
+		var vertexCount = skinnedInstance.VertexCount;
 		var vertexRangeBytes = (ulong)vertexStride * (uint)vertexCount;
 
 		if (_skinnedInstanceVertexAllocator.TryReuse(vertexRangeBytes, out var vertexOffsetBytes) == false)
@@ -1828,6 +1846,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		skinnedInstance.IndexCount = source.IndexCount;
 		skinnedInstance.PackedVertexOffsetBytes = vertexOffsetBytes;
 		skinnedInstance.PackedIndexOffsetBytes = source.PackedIndexOffsetBytes;
+		skinnedInstance.PackedShadowOpaqueIndexOffsetBytes = source.PackedShadowOpaqueIndexOffsetBytes;
+		skinnedInstance.PackedShadowAlphaTestIndexOffsetBytes = source.PackedShadowAlphaTestIndexOffsetBytes;
 		skinnedInstance.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStride));
 
 		_meshResources.Add(skinnedInstance, new MeshResources(
@@ -1836,6 +1856,12 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			skinnedInstance.PackedBaseVertex,
 			source.IndexCount));
 	}
+
+    public SkinnedGeometryResourceStatistics GetSkinnedGeometryResourceStatistics()
+    {
+        var meshes = _meshResources.Keys.Where(mesh => mesh.IsSkinnedInstance);
+        return new(meshes.Count(), (ulong)meshes.Sum(mesh => (long)mesh.VertexCount * Marshal.SizeOf<VertexData>()));
+    }
 
 	public void ReleaseMeshResources(Mesh mesh)
 	{
@@ -1849,7 +1875,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		{
 			_skinnedInstanceVertexAllocator.Release(
 				mesh.PackedVertexOffsetBytes,
-				(ulong)mesh.Vertices.Length * (uint)Unsafe.SizeOf<VertexData>());
+				(ulong)mesh.VertexCount * (uint)Unsafe.SizeOf<VertexData>());
 		}
 
 		mesh.VertexBuffer = null;
@@ -1858,6 +1884,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		mesh.IndexCount = 0;
 		mesh.PackedVertexOffsetBytes = 0;
 		mesh.PackedIndexOffsetBytes = 0;
+		mesh.PackedShadowOpaqueIndexOffsetBytes = 0;
+		mesh.PackedShadowAlphaTestIndexOffsetBytes = 0;
 		mesh.PackedBaseVertex = 0;
 	}
 
@@ -2441,6 +2469,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			// Unhooked before DetachWindow, not after: restoring the default chrome calls SetWindowPos, which
 			// synchronously drives GLFW's resize callback back into this instance while these are still live.
 			_window.Load -= OnWindowLoad;
+			_window.FocusChanged -= OnWindowFocusChanged;
 			_window.Update -= OnWindowUpdate;
 			_window.Render -= OnWindowRender;
 			_window.FramebufferResize -= OnWindowFramebufferResize;

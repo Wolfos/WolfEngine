@@ -22,8 +22,10 @@ public sealed class CopyToFinalPass
 
 	public CopyToFinalPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
-		IGfxDevice device)
+		RenderViewResources resources,
+		RenderFrameSharedResources sharedResources,
+		IGfxDevice device,
+		bool writeFinalOutput = true)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
@@ -32,8 +34,10 @@ public sealed class CopyToFinalPass
 		_bindlessRegistry.EnsureInitialized(device);
 		// DisplayLinearSceneColor aliases tonemapping when CAS is disabled.
 		var input = context.GetTexture(resources.DisplayLinearSceneColor);
-		var output = context.GetTexture(resources.FinalColor);
 		var encodedSceneOutput = context.GetTexture(resources.EncodedSceneColor);
+		// A view that does not own the presentation never touches the shared final target; the shader skips the
+		// write, and the handle only has to be a valid binding.
+		var output = writeFinalOutput ? context.GetTexture(sharedResources.FinalColor) : encodedSceneOutput;
 
 		return new CopyToFinalPassConfig
 		{
@@ -41,7 +45,8 @@ public sealed class CopyToFinalPass
 			InputHandle = _bindlessRegistry.GetTextureHandle(input),
 			OutputHandle = _bindlessRegistry.RegisterRwTexture(output),
 			EncodedSceneOutputHandle = _bindlessRegistry.RegisterRwTexture(encodedSceneOutput),
-			RenderSize = resources.FramebufferSize
+			RenderSize = resources.FramebufferSize,
+			WriteFinalOutput = writeFinalOutput
 		};
 	}
 
@@ -67,6 +72,7 @@ public sealed class CopyToFinalPass
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("renderSizeX", (uint)Math.Max(config.RenderSize.X, 1));
 		settingsWriter.SetUInt("renderSizeY", (uint)Math.Max(config.RenderSize.Y, 1));
+		settingsWriter.SetUInt("writeFinalOutput", config.WriteFinalOutput ? 1u : 0u);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var threadGroupSize = _threadGroupSize

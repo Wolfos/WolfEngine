@@ -104,8 +104,15 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 		{
             _pendingRemovedComponentType = null;
             DrawEntityControls(scene, EditorGui.SelectedEntity);
+            Draw(scene, EditorGui.SelectedEntity, typeof(NameComponent));
+            Draw(scene, EditorGui.SelectedEntity, typeof(LocalTransform));
             foreach (var componentType in EditorGui.SelectedComponentTypes)
             {
+                if (componentType == typeof(NameComponent) || componentType == typeof(LocalTransform))
+                {
+                    continue;
+                }
+
                 Draw(scene, EditorGui.SelectedEntity, componentType);
                 if (_pendingRemovedComponentType is not null)
                 {

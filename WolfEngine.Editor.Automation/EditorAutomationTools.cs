@@ -13,10 +13,19 @@ public sealed class EditorAutomationTools
 	[McpServerTool(Name = "start_editor"), Description("Start WolfEngine Editor for a project and wait until it is ready for automation.")]
 	public async Task<string> StartEditor(
 		[Description("Absolute or relative path to a WolfEngine project folder.")] string projectPath,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		[Description("Optional initial renderer window width; specify together with height.")] int width = 0,
+		[Description("Optional initial renderer window height; specify together with width.")] int height = 0)
 	{
-		await _controller.StartAsync(projectPath, cancellationToken).ConfigureAwait(false);
+		await _controller.StartAsync(projectPath, cancellationToken, width, height).ConfigureAwait(false);
 		return "WolfEngine Editor is ready.";
+	}
+
+	[McpServerTool(Name = "set_editor_camera"), Description("Move the primary editor camera to a position looking at a target, in memory only. Wait for render frames after loading a scene before calling this.")]
+	public async Task<string> SetEditorCamera(float x, float y, float z, float targetX, float targetY, float targetZ, CancellationToken cancellationToken)
+	{
+		await _controller.SetEditorCameraAsync(new(x, y, z), new(targetX, targetY, targetZ), cancellationToken);
+		return "Editor camera updated in memory.";
 	}
 
 	[McpServerTool(Name = "create_entity"), Description("Create an entity in the running editor's authoring scene without saving the scene.")]
@@ -51,11 +60,34 @@ public sealed class EditorAutomationTools
 	public Task<AnimationStateResult> GetAnimationState(CancellationToken cancellationToken) =>
 		_controller.GetAnimationStateAsync(cancellationToken);
 
+	[McpServerTool(Name = "select_entities"), Description("Set the editor's entity selection by persistent GUID, through the same selection path as clicking in the viewport or the entity hierarchy. Pass no ids to clear the selection.")]
+	public async Task<string> SelectEntities(
+		[Description("Persistent entity GUIDs to select. Empty clears the selection.")] string[]? entityIds = null,
+		CancellationToken cancellationToken = default)
+	{
+		var selected = await _controller
+			.SelectEntitiesAsync(entityIds ?? Array.Empty<string>(), cancellationToken)
+			.ConfigureAwait(false);
+		return selected == 0 ? "Cleared the entity selection." : $"Selected {selected} entities.";
+	}
+
 	[McpServerTool(Name = "load_scene"), Description("Load a scene from the open project's asset database through the editor's normal scene-replacement path. The persistent editor and renderer remain running until the scene load has completed.")]
 	public Task<SceneLoadResult> LoadScene(
 		[Description("Absolute or project-relative path of a .scene.json asset.")] string scenePath,
 		CancellationToken cancellationToken) =>
 		_controller.LoadSceneAsync(scenePath, cancellationToken);
+
+	[McpServerTool(Name = "build_game"), Description("Build the open project into a runnable game in the output folder, through the same path as the editor's Build menu: compile gameplay, cook content and publish the runtime. Returns the output path and cooked asset count.")]
+	public Task<global::WolfEngine.Build.GameBuildResult> BuildGame(
+		[Description("Folder to write the game to. Write builds below Artifacts/ and do not commit them.")] string outputPath,
+		CancellationToken cancellationToken,
+		[Description("Keep debug symbols and build gameplay unoptimized.")] bool debug = false,
+		[Description("Runtime identifier to build for, such as ios-arm64 for the content an iOS app bundles. Omit to build for this machine.")] string? target = null) =>
+		_controller.BuildGameAsync(outputPath, debug, target, cancellationToken);
+
+	[McpServerTool(Name = "load_play_scene"), Description("Replace the active Play-mode scene through the gameplay scene-load service. Leaves the authoring scene unchanged and waits for lifecycle completion.")]
+	public Task<SceneLoadResult> LoadPlayScene(string scenePath, CancellationToken cancellationToken) =>
+		_controller.LoadPlaySceneAsync(scenePath, cancellationToken);
 
 	[McpServerTool(Name = "enter_play_mode"), Description("Enter Play mode from the current authoring scene. Play mode creates an isolated runtime scene without saving or mutating the authoring scene.")]
 	public Task<PlayModeStateResult> EnterPlayMode(CancellationToken cancellationToken) =>
@@ -79,6 +111,17 @@ public sealed class EditorAutomationTools
 		return $"Input binding '{binding}' is now {(pressed ? "pressed" : "released")}.";
 	}
 
+	[McpServerTool(Name = "set_scene_pointer"), Description("Move the mouse in Scene viewport logical points and optionally press/release its primary button. Delivers independent input to gameplay and editor ImGui. Works in authoring, running and paused modes to validate routing.")]
+	public async Task<string> SetScenePointer(float x, float y, CancellationToken cancellationToken, bool? pressed = null,
+		[Description("Optional synthetic native focus state, for deterministic background-window and focus-loss tests.")] bool? focused = null)
+	{
+		await _controller.SetScenePointerAsync(new(x, y), pressed, cancellationToken, focused).ConfigureAwait(false);
+		return $"Scene pointer at ({x}, {y}); primary button: {pressed?.ToString() ?? "unchanged"}.";
+	}
+
+	[McpServerTool(Name = "get_scene_pointer_state"), Description("Read the Scene viewport pointer availability, capture, focus, logical origin and size after completed render frames.")]
+	public Task<string> GetScenePointerState(CancellationToken cancellationToken) => _controller.GetScenePointerStateAsync(cancellationToken);
+
 	[McpServerTool(Name = "set_input_axis_2d"), Description("Set one named two-dimensional input binding in a running Play-mode scene, through the same input system used by gameplay.")]
 	public async Task<string> SetInputAxis2D(
 		[Description("InputActionBinding name, such as MouseDelta or GamepadLeftStick.")] string binding,
@@ -100,6 +143,10 @@ public sealed class EditorAutomationTools
 	[McpServerTool(Name = "get_workspace_state"), Description("Return all editor workspaces, their stable ids, open windows, active workspace, and saved docking-layout size.")]
 	public Task<EditorWorkspaceStateResult> GetWorkspaceState(CancellationToken cancellationToken) =>
 		_controller.GetWorkspaceStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "get_editor_ui_state"), Description("Report every editor panel as of the last drawn frame: whether it is open, which dock node it sits in, whether it is that node's selected tab, whether it is focused or hovered, and its position and size in ImGui points. Dock nodes are also grouped, so tab selection can be asserted without reading a screenshot. Wait for render frames after a change before reading this.")]
+	public Task<EditorUiStateResult> GetEditorUiState(CancellationToken cancellationToken) =>
+		_controller.GetEditorUiStateAsync(cancellationToken);
 
 	[McpServerTool(Name = "create_workspace"), Description("Create and activate an empty editor workspace.")]
 	public Task<EditorWorkspaceStateResult> CreateWorkspace(string name, CancellationToken cancellationToken) =>
@@ -180,9 +227,29 @@ public sealed class EditorAutomationTools
 			: $"Scene viewport pinned to debug view '{debugViewId}'.";
 	}
 
+	[McpServerTool(Name = "set_render_effects"), Description("Set AO, reflections, diffuse GI and volumetric fog enabled states in memory without saving the render config. Disable temporal effects to isolate geometry and direct shadows for deterministic image comparisons.")]
+	public Task<string> SetRenderEffects(bool ambientOcclusion, bool reflections, bool diffuseGlobalIllumination,
+		bool volumetricFog, CancellationToken cancellationToken) =>
+		_controller.SetRenderEffectsAsync(ambientOcclusion, reflections, diffuseGlobalIllumination, volumetricFog, cancellationToken);
+
+	[McpServerTool(Name = "set_shadow_caster_culling"), Description("Enable or disable tighter shadow-caster culling in memory without saving the render config. Use for identical-scene capture and GPU timing comparisons.")]
+	public Task<string> SetShadowCasterCulling(bool enabled, CancellationToken cancellationToken) =>
+		_controller.SetShadowCasterCullingAsync(enabled, cancellationToken);
+
+	[McpServerTool(Name = "set_shadow_vertex_welding"), Description("Enable or disable lossless shadow vertex welding in memory without saving the render config. Use for identical-scene capture and GPU timing comparisons.")]
+	public Task<string> SetShadowVertexWelding(bool enabled, CancellationToken cancellationToken) =>
+		_controller.SetShadowVertexWeldingAsync(enabled, cancellationToken);
+
 	[McpServerTool(Name = "set_ddgi_relocation"), Description("Enable or disable DDGI probe relocation in the active scene's render config in memory, without saving the asset. Works in authoring and Play mode.")]
 	public Task<string> SetDdgiRelocation(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetDdgiRelocationAsync(enabled, cancellationToken);
+
+	[McpServerTool(Name = "set_entity_scale"), Description("Set an entity's local scale in the active authoring or Play-mode scene without saving. Supports per-axis negative scales for mirrored-geometry validation.")]
+	public async Task<string> SetEntityScale(string entityId, float x, float y, float z, CancellationToken cancellationToken)
+	{
+		await _controller.SetEntityScaleAsync(Guid.Parse(entityId), new System.Numerics.Vector3(x, y, z), cancellationToken);
+		return $"Entity {entityId}: scale ({x}, {y}, {z}). Changed in memory only.";
+	}
 
 	[McpServerTool(Name = "set_entity_rotation"), Description("Set an entity's local Euler rotation in degrees in the active authoring or Play-mode scene, without saving. Uses the same transform setter as the inspector.")]
 	public async Task<string> SetEntityRotation(string entityId, float pitch, float yaw, float roll, CancellationToken cancellationToken)
@@ -197,6 +264,16 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.CaptureFrameAsync(outputPath, cancellationToken);
 
+	[McpServerTool(Name = "select_asset"), Description("Select an asset by its persistent GUID through the editor's normal asset-selection path and focus the Asset Editor. The selection is in memory only.")]
+	public Task<string> SelectAsset(string assetId, CancellationToken cancellationToken) =>
+		_controller.SelectAssetAsync(Guid.Parse(assetId), cancellationToken);
+
+	[McpServerTool(Name = "capture_editor_window"), Description("Capture a PNG of the whole editor window, including the ImGui panels, dock tabs and menus. Use this instead of capture_frame whenever the editor UI itself is what needs to be verified.")]
+	public Task<FrameCaptureResult> CaptureEditorWindow(
+		[Description("Absolute or project-relative PNG output path.")] string outputPath,
+		CancellationToken cancellationToken) =>
+		_controller.CaptureEditorWindowAsync(outputPath, cancellationToken);
+
 	[McpServerTool(Name = "capture_gameplay_frame"), Description("Enter or resume Play mode, verify that an enabled gameplay Camera is driving the viewport, wait for gameplay startup frames, and capture a PNG from that camera. Fails instead of silently falling back to the authoring camera.")]
 	public Task<GameplayFrameCaptureResult> CaptureGameplayFrame(
 		[Description("Absolute or project-relative PNG output path.")] string outputPath,
@@ -210,4 +287,24 @@ public sealed class EditorAutomationTools
 		await _controller.ShutdownAsync(cancellationToken).ConfigureAwait(false);
 		return "WolfEngine Editor has shut down.";
 	}
+    [McpServerTool(Name = "configure_animation_preview"), Description("Open a graph or authored clip in the Animation workspace using an isolated model or prefab preview.")]
+    public Task<AnimationGraphInspectionResult> ConfigureAnimationPreview(string assetId, string modelId, string? clipSetId = null, CancellationToken cancellationToken = default) =>
+        _controller.ConfigureAnimationPreviewAsync(Guid.Parse(assetId), Guid.Parse(modelId), clipSetId is null ? Guid.Empty : Guid.Parse(clipSetId), cancellationToken);
+    [McpServerTool(Name = "animation_preview_transport"), Description("Play, pause, scrub or step the isolated animation preview. Seeking suppresses markers.")]
+    public Task<AnimationGraphInspectionResult> AnimationPreviewTransport(bool playing, float? seekSeconds = null, float? stepSeconds = null, CancellationToken cancellationToken = default) =>
+        _controller.AnimationPreviewTransportAsync(playing, seekSeconds, stepSeconds, cancellationToken);
+    [McpServerTool(Name = "get_animation_graph"), Description("Inspect contributing clips, states, curves and markers. Omit entityId to inspect the isolated preview.")]
+    public Task<AnimationGraphInspectionResult> GetAnimationGraph(string? entityId = null, CancellationToken cancellationToken = default) =>
+        _controller.GetAnimationGraphAsync(entityId is null ? null : Guid.Parse(entityId), cancellationToken);
+    [McpServerTool(Name = "set_animation_parameter"), Description("Set a typed graph parameter; omit entityId to modify the isolated preview. Bool values are 0 or 1.")]
+    public Task<AnimationGraphInspectionResult> SetAnimationParameter(string name, float value, string? entityId = null, CancellationToken cancellationToken = default) =>
+        _controller.SetAnimationParameterAsync(entityId is null ? null : Guid.Parse(entityId), name, value, cancellationToken);
+    [McpServerTool(Name = "set_skinning_force_updates"), Description("Force skinning dispatches and BLAS updates for reference-image comparisons, or restore pose-generation scheduling.")]
+    public Task<bool> SetSkinningForceUpdates(bool forced, CancellationToken cancellationToken = default) => _controller.SetSkinningForceUpdatesAsync(forced, cancellationToken);
+    [McpServerTool(Name = "edit_animation_graph"), Description("Edit an input connection in the open animation document, or undo/redo it. Edits are unsaved; invalid edits retain the last valid preview.")]
+    public Task<AnimationGraphInspectionResult> EditAnimationGraph(string operation, string? nodeId = null, int inputIndex = 0, string? inputId = null, CancellationToken cancellationToken = default) =>
+        _controller.EditAnimationGraphAsync(operation, nodeId is null ? Guid.Empty : Guid.Parse(nodeId), inputIndex, inputId is null ? Guid.Empty : Guid.Parse(inputId), cancellationToken);
+    [McpServerTool(Name = "capture_animation_preview"), Description("Capture the isolated animation preview render view without editor UI. Keep the Animation window visible.")]
+    public Task<FrameCaptureResult> CaptureAnimationPreview(string outputPath, CancellationToken cancellationToken) => _controller.CaptureAnimationPreviewAsync(outputPath, cancellationToken);
+
 }
