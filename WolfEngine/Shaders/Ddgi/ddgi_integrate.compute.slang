@@ -71,7 +71,7 @@ void DdgiVisibilityIntegrateCS(
 
     if (g_UpdateActive != 0u)
     {
-        uint rayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
+        uint rayCount = DdgiVisibilityRaySampleCount(visibilityTileInteriorSize);
         if (groupIndex < rayCount)
         {
             uint2 samplePixel = DdgiRaySamplePixel(
@@ -87,7 +87,9 @@ void DdgiVisibilityIntegrateCS(
 
         float3 texelDirection = DdgiOctDecode(
             DdgiInteriorUv(interiorPixel, visibilityTileInteriorSize));
-        float filterExponent = clamp(float(rayCount) / 6.0f - 1.0f, 8.0f, 32.0f);
+        // Sharpen the lobe as ray density allows. A wide lobe mixes wall and
+        // far-side depths at edges and grazing angles, which reads as variance.
+        float filterExponent = clamp(float(rayCount) / 4.0f, 12.0f, 50.0f);
         float2 moments = 0.0f.xx;
         float2 hitMoments = 0.0f.xx;
         float weightSum = 0.0f;

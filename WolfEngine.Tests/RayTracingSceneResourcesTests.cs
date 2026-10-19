@@ -680,8 +680,8 @@ public sealed class RayTracingSceneResourcesTests
 			Is.EqualTo(expectedRayCount));
 	}
 
-	[TestCase(1, DdgiUtilities.FullVisibilityTileInteriorSize, 2)]
-	[TestCase(64, DdgiUtilities.FullVisibilityTileInteriorSize, 128)]
+	[TestCase(1, DdgiUtilities.FullVisibilityTileInteriorSize, 129)]
+	[TestCase(64, DdgiUtilities.FullVisibilityTileInteriorSize, 192)]
 	[TestCase(256, DdgiUtilities.FullVisibilityTileInteriorSize, 320)]
 	[TestCase(256, DdgiUtilities.HalfVisibilityTileInteriorSize, 128)]
 	public void DdgiProbeTraceInvocationCountIncludesVisibilityAndIrradianceRays(
@@ -1131,7 +1131,38 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(1.0f), Is.EqualTo(1.0f));
 		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.9f), Is.LessThan(0.04f));
 		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.5f), Is.LessThan(1e-8f));
-		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.9f, 64), Is.GreaterThan(0.3f));
+		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.9f, 64), Is.GreaterThan(0.15f));
+	}
+
+	[TestCase(1, DdgiUtilities.FullVisibilityTileInteriorSize, 128)]
+	[TestCase(200, DdgiUtilities.FullVisibilityTileInteriorSize, 200)]
+	[TestCase(1024, DdgiUtilities.FullVisibilityTileInteriorSize, 256)]
+	[TestCase(1, DdgiUtilities.HalfVisibilityTileInteriorSize, 32)]
+	public void DdgiVisibilityTracesAtLeastHalfTheTileTexels(
+		int requestedRayCount,
+		int tileInteriorSize,
+		int expectedRayCount)
+	{
+		Assert.That(
+			DdgiUtilities.GetVisibilityRaySampleCount(requestedRayCount, tileInteriorSize),
+			Is.EqualTo(expectedRayCount));
+	}
+
+	[Test]
+	public void DdgiProbeWeightCrushingSuppressesFaintProbes()
+	{
+		Assert.That(DdgiUtilities.CrushProbeWeight(1.0f), Is.EqualTo(1.0f));
+		Assert.That(DdgiUtilities.CrushProbeWeight(0.2f), Is.EqualTo(0.2f));
+		Assert.That(DdgiUtilities.CrushProbeWeight(0.1f), Is.EqualTo(0.025f).Within(1e-6f));
+		Assert.That(DdgiUtilities.CrushProbeWeight(0.01f), Is.LessThan(1e-4f));
+	}
+
+	[Test]
+	public void DdgiSampleConfidenceFadesWhenAlmostAllWeightIsRejected()
+	{
+		Assert.That(DdgiUtilities.GetProbeSampleConfidence(0.25f, 1.0f), Is.EqualTo(1.0f));
+		Assert.That(DdgiUtilities.GetProbeSampleConfidence(0.01f, 1.0f), Is.EqualTo(1.0f));
+		Assert.That(DdgiUtilities.GetProbeSampleConfidence(0.0004f, 1.0f), Is.LessThan(0.05f));
 	}
 
 	[Test]
@@ -1422,9 +1453,10 @@ public sealed class RayTracingSceneResourcesTests
 			maxRelocationDistance: 2.0f,
 			maxRayDistance: 10.0f);
 
+		// Step just past keepDistance (0.2 - 0.05) plus a half-keep margin.
 		AssertVector3(
 			result.Offset,
-			Vector3.Normalize(new Vector3(-0.2f, 1.0f, 0.0f)));
+			Vector3.Normalize(new Vector3(-0.2f, 1.0f, 0.0f)) * 0.25f);
 		Assert.That(result.State, Is.EqualTo(DdgiProbeState.Stable));
 		Assert.That(result.Decision, Is.EqualTo(DdgiProbeRelocationDecision.FrontfaceSeparation));
 	}
@@ -1467,7 +1499,8 @@ public sealed class RayTracingSceneResourcesTests
 			maxRayDistance: 10.0f,
 			previousOffset: previousOffset);
 
-		AssertVector3(result.Offset, previousOffset - Vector3.UnitX);
+		// Separation is capped at half the open space (1.0 * 0.5).
+		AssertVector3(result.Offset, previousOffset - Vector3.UnitX * 0.5f);
 		Assert.That(result.State, Is.EqualTo(DdgiProbeState.Stable));
 		Assert.That(result.Decision, Is.EqualTo(DdgiProbeRelocationDecision.FrontfaceSeparation));
 	}
@@ -1559,7 +1592,7 @@ public sealed class RayTracingSceneResourcesTests
 			maxRelocationDistance: 1.0f,
 			maxRayDistance: 0.2f);
 
-		AssertVector3(result.Offset, -Vector3.UnitX * 0.2f);
+		AssertVector3(result.Offset, -Vector3.UnitX * 0.1f);
 		Assert.That(result.State, Is.EqualTo(DdgiProbeState.Stable));
 		Assert.That(result.Decision, Is.EqualTo(DdgiProbeRelocationDecision.FrontfaceSeparation));
 	}
@@ -1574,7 +1607,7 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
-	public void DdgiRelocationRejectsCandidateOutsideDistanceLimitWithoutBlocking()
+	public void DdgiRelocationDisablesProbeThatCannotEscapeGeometry()
 	{
 		var hits = CreateRelocationMisses();
 		for (var index = 0; index < 5; index++)
@@ -1590,7 +1623,28 @@ public sealed class RayTracingSceneResourcesTests
 			previousOffset: new Vector3(0.5f, 0.0f, 0.0f));
 
 		AssertVector3(result.Offset, new Vector3(0.5f, 0.0f, 0.0f));
+		Assert.That(result.State, Is.EqualTo(DdgiProbeState.Disabled));
+		Assert.That(DdgiUtilities.CanProbeContribute(result.State, enabled: true), Is.False);
+	}
+
+	[Test]
+	public void DdgiRelocationClampsFrontfaceSeparationToDistanceLimit()
+	{
+		var hits = CreateRelocationMisses();
+		hits[0] = new DdgiRelocationHit(Vector3.UnitX, 0.05f);
+		hits[1] = new DdgiRelocationHit(-Vector3.UnitX, 10.0f);
+
+		var result = DdgiUtilities.SolveProbeRelocation(
+			hits,
+			keepDistance: 0.2f,
+			maxRelocationDistance: 0.5f,
+			maxRayDistance: 10.0f,
+			previousOffset: new Vector3(-0.4f, 0.0f, 0.0f));
+
+		Assert.That(result.Offset.X, Is.LessThan(-0.4f));
+		Assert.That(result.Offset.Length(), Is.LessThan(0.5f));
 		Assert.That(result.State, Is.EqualTo(DdgiProbeState.Stable));
+		Assert.That(result.Decision, Is.EqualTo(DdgiProbeRelocationDecision.FrontfaceSeparation));
 	}
 
 	[Test]

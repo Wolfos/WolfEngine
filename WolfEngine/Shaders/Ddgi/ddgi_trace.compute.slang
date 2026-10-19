@@ -9,6 +9,7 @@ import "../Terrain/terrain_layer_blend.slang";
 #define WOLF_MAX_MATERIAL_COUNT 65535
 #define WOLF_DRAW_KIND_TERRAIN 2u
 static const uint DDGI_STATIC_GEOMETRY_MASK = 0x02u;
+static const float DDGI_BACKFACE_VISIBILITY_DISTANCE_SCALE = 0.2f;
 
 RaytracingAccelerationStructure sceneTlas : register(t3);
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t4);
@@ -529,7 +530,9 @@ DdgiTraceResult DdgiTraceRay(
     // measured during sampling, which falsely occluded surfaces close to a probe.
     ray.Origin = originPosition;
     ray.Direction = rayDirection;
-    ray.TMin = max(normalBias, 0.001f);
+    // Match the geometry rays. A TMin of normalBias let irradiance rays skip a
+    // wall within that distance of the probe while visibility still saw it.
+    ray.TMin = 0.001f;
     ray.TMax = maxRayDistance;
 
     WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
@@ -669,7 +672,7 @@ void DdgiProbeTraceCS(
         return;
     }
 
-    uint visibilityRayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
+    uint visibilityRayCount = DdgiVisibilityRaySampleCount(visibilityTileInteriorSize);
     uint irradianceRayCount = DdgiRaySampleCount(irradianceTileInteriorSize);
     float3 probePosition = DdgiCurrentProbePosition(probeIndex);
     RWTexture2D<float4> visibilityTarget = GetRWTexture(traceVisibilityHandle);
@@ -681,8 +684,11 @@ void DdgiProbeTraceCS(
         // Visibility rays only need geometry. Keep stochastic, shaded irradiance
         // rays separate even when the two sets contain the same number of rays.
         DdgiTraceResult result = DdgiTraceGeometryRay(probePosition, direction);
+        // Backface hits mean the probe sees the inside of geometry. Record them
+        // much closer than they are so the Chebyshev test rejects such a probe
+        // for receivers outside that geometry.
         float visibilityDistance = result.backfaceHit
-            ? result.hitDistance * 0.9f
+            ? result.hitDistance * DDGI_BACKFACE_VISIBILITY_DISTANCE_SCALE
             : result.hitDistance;
         float normalizedDistance = saturate(visibilityDistance / max(maxRayDistance, 0.001f));
         uint2 visibilityPixel = DdgiRaySamplePixel(

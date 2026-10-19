@@ -20,6 +20,8 @@ public static class DdgiUtilities
 	private const float ShBasisL1 = 0.48860251190f;
 	private const float ShDirectionalLimit = 0.95f;
 	private const float VisibilityVarianceFloor = 0.000001f;
+	private const float ProbeWeightCrushThreshold = 0.2f;
+	private const float MinConfidentProbeWeightRatio = 0.01f;
 	private const float MaxProbeRelocationDistanceFactor = 0.45f;
 	private const float RelocationMinimumTolerance = 0.001f;
 
@@ -172,9 +174,16 @@ public static class DdgiUtilities
 		return Math.Clamp(requestedRayCount, 1, tileCapacity);
 	}
 
+	/// <summary>Visibility traces at least half the tile's texels so its filter lobe can stay narrow.</summary>
+	public static int GetVisibilityRaySampleCount(int requestedRayCount, int visibilityTileInteriorSize)
+	{
+		var tileCapacity = checked(visibilityTileInteriorSize * visibilityTileInteriorSize);
+		return GetRaySampleCount(Math.Max(requestedRayCount, tileCapacity / 2), visibilityTileInteriorSize);
+	}
+
 	internal static int GetProbeTraceInvocationCount(int requestedRayCount, int visibilityTileInteriorSize)
 	{
-		var visibilityRayCount = GetRaySampleCount(requestedRayCount, visibilityTileInteriorSize);
+		var visibilityRayCount = GetVisibilityRaySampleCount(requestedRayCount, visibilityTileInteriorSize);
 		var irradianceRayCount = GetRaySampleCount(requestedRayCount, IrradianceTileInteriorSize);
 		return checked(visibilityRayCount + irradianceRayCount);
 	}
@@ -319,8 +328,20 @@ public static class DdgiUtilities
 
 	public static float GetVisibilityDirectionalWeight(float directionDot, int rayCount)
 	{
-		var exponent = Math.Clamp(rayCount / 6.0f - 1.0f, 8.0f, 32.0f);
+		var exponent = Math.Clamp(rayCount / 4.0f, 12.0f, 50.0f);
 		return MathF.Pow(Math.Clamp(directionDot, 0.0f, 1.0f), exponent);
+	}
+
+	public static float CrushProbeWeight(float weight)
+	{
+		return weight < ProbeWeightCrushThreshold
+			? weight * weight * weight / (ProbeWeightCrushThreshold * ProbeWeightCrushThreshold)
+			: weight;
+	}
+
+	public static float GetProbeSampleConfidence(float weightSum, float baseWeightSum)
+	{
+		return Math.Clamp(weightSum / MathF.Max(baseWeightSum * MinConfidentProbeWeightRatio, 1e-5f), 0.0f, 1.0f);
 	}
 
 	public static float GetProbeNormalWeight(float normalDotDirectionToProbe)
@@ -455,7 +476,10 @@ public static class DdgiUtilities
 		{
 			if (Vector3.Dot(closestFrontfaceDirection, farthestFrontfaceDirection) <= 0.0f)
 			{
-				target += farthestFrontfaceDirection * Math.Min(farthestFrontfaceDistance, 1.0f);
+				var separation = MathF.Min(
+					keepDistance - closestFrontfaceDistance + keepDistance * 0.5f,
+					farthestFrontfaceDistance * 0.5f);
+				target += farthestFrontfaceDirection * separation;
 				decision = DdgiProbeRelocationDecision.FrontfaceSeparation;
 				hasCandidate = true;
 			}
@@ -464,13 +488,27 @@ public static class DdgiUtilities
 		// lattice position is safe. Retain a clear offset to avoid a limit cycle.
 
 		var acceptanceRadius = Math.Max(maxRelocationDistance, 0.0f);
-		if (!hasCandidate || target.LengthSquared() >= acceptanceRadius * acceptanceRadius)
+		var state = DdgiProbeState.Stable;
+		if (!hasCandidate)
 		{
 			target = previousOffset;
 		}
+		else if (target.LengthSquared() >= acceptanceRadius * acceptanceRadius)
+		{
+			if (inside)
+			{
+				// A partial escape leaves the probe inside geometry; disable it instead.
+				target = previousOffset;
+				state = DdgiProbeState.Disabled;
+			}
+			else
+			{
+				target *= acceptanceRadius * (1.0f - 1e-3f) / MathF.Max(target.Length(), 1e-5f);
+			}
+		}
 		return new DdgiRelocationResult(
 			target,
-			DdgiProbeState.Stable,
+			state,
 			decision,
 			backfaceCount);
 	}

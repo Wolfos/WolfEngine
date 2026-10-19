@@ -195,8 +195,12 @@ void DdgiRelocationSolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         if (dot(closestFrontfaceDirection, farthestFrontfaceDirection) <= 0.0f)
         {
-            targetOffset += farthestFrontfaceDirection *
-                min(farthestFrontfaceDistance, 1.0f);
+            // Step just past the keep distance, with the same half-keep margin as
+            // a backface escape. Never cover more than half the open space.
+            float separation = min(
+                keepDistance - closestFrontfaceDistance + keepDistance * 0.5f,
+                farthestFrontfaceDistance * 0.5f);
+            targetOffset += farthestFrontfaceDirection * separation;
             decision = 2u;
             hasCandidate = true;
         }
@@ -208,12 +212,28 @@ void DdgiRelocationSolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float acceptanceRadius = min(
         max(probeMaxRelocationDistance, 0.0f),
         max(probeSpacing, 0.001f) * 0.45f);
-    if (!hasCandidate ||
-        dot(targetOffset, targetOffset) >= acceptanceRadius * acceptanceRadius)
+    uint resultStatus = DDGI_PROBE_STATE_STABLE;
+    if (!hasCandidate)
     {
         targetOffset = previousOffset;
     }
-    uint resultStatus = DDGI_PROBE_STATE_STABLE;
+    else if (dot(targetOffset, targetOffset) >= acceptanceRadius * acceptanceRadius)
+    {
+        if (insideGeometry)
+        {
+            // A partial escape still leaves the probe inside geometry, where it
+            // poisons receivers on both sides. Disable it; relocation keeps
+            // retrying every frame, so it recovers if the geometry moves.
+            targetOffset = previousOffset;
+            resultStatus = DDGI_PROBE_STATE_DISABLED;
+        }
+        else
+        {
+            // Moving part of the way still increases clearance.
+            float targetLength = length(targetOffset);
+            targetOffset *= acceptanceRadius * (1.0f - 1e-3f) / max(targetLength, 1e-5f);
+        }
+    }
     stateWriteTex[statePixel] = float4(targetOffset, float(resultStatus));
     float3 decisionColor =
         decision == 1u ? float3(1.0f, 0.0f, 0.0f) :

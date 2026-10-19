@@ -312,7 +312,7 @@ DdgiShSample SampleDdgiSh(
                 float meanDistance = moments.x;
                 float meanDistanceSquared = moments.y;
                 float visibility = DdgiEvaluateVisibility(meanDistance, meanDistanceSquared, normalizedDistance);
-                float probeWeight = weight * visibility;
+                float probeWeight = trilinearWeight * DdgiCrushProbeWeight(nWeight * visibility);
                 baseWeightSum += weight;
                 if (probeDebugEnabled != 0u && probeWeight > dominantProbeWeight)
                 {
@@ -370,10 +370,11 @@ DdgiShSample SampleDdgiSh(
         debug.probeRelocation = float3(0.5f, signedVerticalRelocation, 0.5f);
         debug.probeRelocationDecision = relocationDecisionDebugSum * inverseWeight;
     }
-    result.coefficientL0 = coefficientL0 * inverseWeight;
-    result.coefficientLy = coefficientLy * inverseWeight;
-    result.coefficientLz = coefficientLz * inverseWeight;
-    result.coefficientLx = coefficientLx * inverseWeight;
+    float coefficientScale = inverseWeight * DdgiSampleConfidence(weightSum, baseWeightSum);
+    result.coefficientL0 = coefficientL0 * coefficientScale;
+    result.coefficientLy = coefficientLy * coefficientScale;
+    result.coefficientLz = coefficientLz * coefficientScale;
+    result.coefficientLx = coefficientLx * coefficientScale;
     result.valid = 1u;
     return result;
 }

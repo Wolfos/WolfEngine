@@ -1,4 +1,24 @@
 static const float DDGI_VISIBILITY_VARIANCE_FLOOR = 0.000001f;
+static const float DDGI_WEIGHT_CRUSH_THRESHOLD = 0.2f;
+static const float DDGI_MIN_CONFIDENT_WEIGHT_RATIO = 0.01f;
+
+/// Drives small backface/visibility weights toward zero so a probe that is
+/// mostly rejected cannot contribute faint light (Majercik et al. 2019).
+float DdgiCrushProbeWeight(float weight)
+{
+    const float threshold = DDGI_WEIGHT_CRUSH_THRESHOLD;
+    return weight < threshold
+        ? weight * weight * weight / (threshold * threshold)
+        : weight;
+}
+
+/// Normalising by the surviving weight scales a few barely-visible probes up to
+/// full intensity. When almost all of the unoccluded weight was rejected, fade
+/// the blend out instead of trusting what leaked through.
+float DdgiSampleConfidence(float weightSum, float baseWeightSum)
+{
+    return saturate(weightSum / max(baseWeightSum * DDGI_MIN_CONFIDENT_WEIGHT_RATIO, 1e-5f));
+}
 
 float2 DdgiBlendVisibilityMoments(float2 allMoments, float2 hitMoments, float hitCoverage)
 {

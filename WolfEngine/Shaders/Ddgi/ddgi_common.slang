@@ -247,6 +247,15 @@ uint DdgiRaySampleCount(uint interiorSize)
     return min(max(raysPerProbe, 1u), interiorSize * interiorSize);
 }
 
+// Visibility needs more directions than irradiance: too few rays force a wide
+// filter lobe, whose blended depths inflate the variance and let the Chebyshev
+// test accept probes across thin walls. Trace at least half the tile's texels.
+uint DdgiVisibilityRaySampleCount(uint interiorSize)
+{
+    uint tileCapacity = interiorSize * interiorSize;
+    return min(max(max(raysPerProbe, tileCapacity / 2u), 1u), tileCapacity);
+}
+
 bool DdgiIsProbeScheduled(uint probeIndex)
 {
     uint updateFrames = max(probeUpdateFrames, 1u);
@@ -398,6 +407,7 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
     float3 coefficientLy = 0.0f.xxx;
     float3 coefficientLz = 0.0f.xxx;
     float3 coefficientLx = 0.0f.xxx;
+    float baseWeightSum = 0.0f;
     float weightSum = 0.0f;
     for (uint z = 0u; z <= 1u; z++)
     {
@@ -429,7 +439,8 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
                 float2 moments = visibilityTex.SampleLevel(linearSampler, visibilityUv, 0.0f).rg;
                 float normalizedDistance = saturate(distanceToProbe / max(maxRayDistance, 0.001f));
                 float visibility = DdgiEvaluateVisibility(moments.x, moments.y, normalizedDistance);
-                float probeWeight = trilinearWeight * normalWeight * visibility;
+                float probeWeight = trilinearWeight * DdgiCrushProbeWeight(normalWeight * visibility);
+                baseWeightSum += trilinearWeight * normalWeight;
                 uint2 coefficientPixel = DdgiProbeStatePixel(probeIndex);
                 coefficientL0 += irradianceL0Tex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
                 coefficientLy += irradianceLyTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
@@ -445,11 +456,11 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
         return 0.0f.xxx;
     }
 
-    float inverseWeight = rcp(weightSum);
-    coefficientL0 *= inverseWeight;
-    coefficientLy *= inverseWeight;
-    coefficientLz *= inverseWeight;
-    coefficientLx *= inverseWeight;
+    float coefficientScale = rcp(weightSum) * DdgiSampleConfidence(weightSum, baseWeightSum);
+    coefficientL0 *= coefficientScale;
+    coefficientLy *= coefficientScale;
+    coefficientLz *= coefficientScale;
+    coefficientLx *= coefficientScale;
 
     float3 dc = max(coefficientL0 * DDGI_HISTORY_SH_BASIS_L0, 0.0f.xxx);
     // Irradiance integration already cosine-filters incident radiance and divides
