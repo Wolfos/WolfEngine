@@ -64,6 +64,7 @@ public struct DeferredLightingPassConfig
 	public required float ShadowCascadeBlendDistance { get; init; }
 	public required int ShadowedDirectionalLightIndex { get; init; }
 	public required Vector3 ShadowDepthBiases { get; init; }
+	public required Vector3 ShadowNormalOffsets { get; init; }
 	public required float ShadowStrength { get; init; }
 	public required bool ShadowsEnabled { get; init; }
 	public required float ShadowMaxDistance { get; init; }

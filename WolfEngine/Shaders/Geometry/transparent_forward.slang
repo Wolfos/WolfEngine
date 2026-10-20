@@ -71,6 +71,7 @@ cbuffer LightingParams : register(b3)
     float4 shadowSplitsBlend;
     float4 shadowTexelSizeBiasStrength;
     float4 shadowDepthBiases;
+    float4 shadowNormalOffsets;
     float shadowMaxDistance;
     float _lightingPadding1;
     float _lightingPadding2;
@@ -217,6 +218,7 @@ TransparentOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFa
         shadowLightIndex,
         shadowTexelSizeBiasStrength.xy,
         shadowDepthBiases.xyz,
+        shadowNormalOffsets.xyz,
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
         shadowMaxDistance);

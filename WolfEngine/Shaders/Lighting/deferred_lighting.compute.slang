@@ -65,6 +65,7 @@ cbuffer LightingParams : register(b2)
     float4 shadowSplitsBlend;
     float4 shadowTexelSizeBiasStrength;
     float4 shadowDepthBiases;
+    float4 shadowNormalOffsets;
     float3 ddgiOrigin;
     float ddgiProbeSpacing;
     int ddgiStorageOffsetX;
@@ -243,6 +244,7 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         shadowLightIndex,
         shadowTexelSizeBiasStrength.xy,
         shadowDepthBiases.xyz,
+        shadowNormalOffsets.xyz,
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
         shadowMaxDistance);

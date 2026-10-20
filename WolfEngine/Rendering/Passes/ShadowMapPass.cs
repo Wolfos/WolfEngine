@@ -13,7 +13,8 @@ public sealed class ShadowMapPass
 	public const float DefaultDepthBias = 0.05f;
 	public const float DefaultCascadeBlendDistance = 2.0f;
 
-	private const float DefaultDepthBiasTexelScale = 5.0f;
+	private const float DepthBiasTexelScale = 1.0f;
+	private const float NormalOffsetTexelScale = 1.5f;
 	private const float DefaultStrength = 1.0f;
 	private const float CasterPaddingNear = 96.0f;
 	private const float CasterPaddingFar = 24.0f;
@@ -69,6 +70,7 @@ public sealed class ShadowMapPass
 				maxDistance: resolvedConfig.MaxDistance,
 				shadowedDirectionalLightIndex: shadowedLightIndex,
 				depthBiases: ComputeCascadeDepthBiases(splits, resolvedConfig),
+				normalOffsets: ComputeCascadeNormalOffsets(splits, resolvedConfig),
 				strength: DefaultStrength,
 				mapResolution: resolvedConfig.CascadeResolution);
 			return;
@@ -423,6 +425,7 @@ public sealed class ShadowMapPass
 		maxDistance: config.MaxDistance,
 		shadowedDirectionalLightIndex: -1,
 		depthBiases: ComputeDefaultCascadeDepthBiases(config),
+		normalOffsets: ComputeDefaultCascadeNormalOffsets(config),
 		strength: DefaultStrength,
 		mapResolution: config.CascadeResolution);
 
@@ -431,6 +434,13 @@ public sealed class ShadowMapPass
 		Span<float> splits = stackalloc float[MaxCascadeCount];
 		BuildConfiguredCascadeSplits(splits, config);
 		return ComputeCascadeDepthBiases(splits, config);
+	}
+
+	private static Vector3 ComputeDefaultCascadeNormalOffsets(in ResolvedShadowMapConfig config)
+	{
+		Span<float> splits = stackalloc float[MaxCascadeCount];
+		BuildConfiguredCascadeSplits(splits, config);
+		return ComputeCascadeNormalOffsets(splits, config);
 	}
 
 	private static bool TryBuildShadowCascades(
@@ -583,10 +593,25 @@ public sealed class ShadowMapPass
 
 	private static float ComputeCascadeDepthBias(float receiverRadius, in ResolvedShadowMapConfig config)
 	{
-		var worldUnitsPerTexel = MathF.Max((receiverRadius * 2.0f) / config.CascadeResolution, 1e-6f);
-		var worldBias = config.DepthBias + (worldUnitsPerTexel * DefaultDepthBiasTexelScale);
+		var worldBias = config.DepthBias + (ComputeWorldUnitsPerTexel(receiverRadius, config) * DepthBiasTexelScale);
 		return worldBias / ComputeCascadeDepthSpan(receiverRadius);
 	}
+
+	private static Vector3 ComputeCascadeNormalOffsets(ReadOnlySpan<float> cascadeSplits, in ResolvedShadowMapConfig config)
+	{
+		if (cascadeSplits.Length < MaxCascadeCount)
+		{
+			throw new ArgumentException("Cascade split span must contain all cascade splits.", nameof(cascadeSplits));
+		}
+
+		return new Vector3(
+			ComputeWorldUnitsPerTexel(cascadeSplits[0], config) * NormalOffsetTexelScale,
+			ComputeWorldUnitsPerTexel(cascadeSplits[1], config) * NormalOffsetTexelScale,
+			ComputeWorldUnitsPerTexel(cascadeSplits[2], config) * NormalOffsetTexelScale);
+	}
+
+	private static float ComputeWorldUnitsPerTexel(float receiverRadius, in ResolvedShadowMapConfig config) =>
+		MathF.Max((receiverRadius * 2.0f) / config.CascadeResolution, 1e-6f);
 
 	private static float ComputeCascadeDepthSpan(float receiverRadius) =>
 		MathF.Max((receiverRadius * 2.0f) + CasterPaddingNear + CasterPaddingFar, 1.0f);

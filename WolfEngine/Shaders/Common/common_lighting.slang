@@ -119,42 +119,103 @@ float BurleyDiffuse(float NdotV, float NdotL, float LdotH, float roughness)
     return lightScatter * viewScatter;
 }
 
-float ShadowCompare(Texture2D<float4> shadowMap, int2 texel, int2 shadowMapSize, float receiverDepth)
+// Clamp on the receiver slope (tan of the angle between surface normal and light) used for the
+// receiver-plane depth. Past this the surface is lit at under ~6 degrees and N.L has all but
+// removed the light, so letting the plane depth run away there would only trade acne for leaks.
+static const float ShadowMaxReceiverSlope = 10.0f;
+
+// Depth of the receiver's own surface at the centre of each shadow-map texel, so that a texel is
+// compared against the plane the receiver lies on rather than against the receiver's centre depth.
+struct ShadowReceiverPlane
+{
+    float depth;
+    float2 uv;
+    // d(depth)/d(uv) of the receiver plane in shadow-map space.
+    float2 depthGradient;
+};
+
+float ShadowCompare(Texture2D<float4> shadowMap, int2 texel, int2 shadowMapSize, ShadowReceiverPlane receiver)
 {
     if (texel.x < 0 || texel.y < 0 || texel.x >= shadowMapSize.x || texel.y >= shadowMapSize.y)
     {
         return 1.0f;
     }
 
+    float2 texelCenterUv = (float2(texel) + 0.5f) / float2(shadowMapSize);
+    float receiverDepth = receiver.depth + dot(receiver.depthGradient, texelCenterUv - receiver.uv);
     float depth = shadowMap.Load(int3(texel, 0)).r;
     return receiverDepth <= depth ? 1.0f : 0.0f;
 }
 
-float SampleShadowBilinearPCF(Texture2D<float4> shadowMap, float2 sampleUV, int2 shadowMapSize, float receiverDepth)
+float SampleShadowBilinearPCF(Texture2D<float4> shadowMap, float2 sampleUV, int2 shadowMapSize, ShadowReceiverPlane receiver)
 {
     float2 texelPos = sampleUV * float2(shadowMapSize) - 0.5f;
     int2 texel00 = int2(floor(texelPos));
     float2 fracPos = saturate(texelPos - float2(texel00));
 
-    float s00 = ShadowCompare(shadowMap, texel00, shadowMapSize, receiverDepth);
-    float s10 = ShadowCompare(shadowMap, texel00 + int2(1, 0), shadowMapSize, receiverDepth);
-    float s01 = ShadowCompare(shadowMap, texel00 + int2(0, 1), shadowMapSize, receiverDepth);
-    float s11 = ShadowCompare(shadowMap, texel00 + int2(1, 1), shadowMapSize, receiverDepth);
+    float s00 = ShadowCompare(shadowMap, texel00, shadowMapSize, receiver);
+    float s10 = ShadowCompare(shadowMap, texel00 + int2(1, 0), shadowMapSize, receiver);
+    float s01 = ShadowCompare(shadowMap, texel00 + int2(0, 1), shadowMapSize, receiver);
+    float s11 = ShadowCompare(shadowMap, texel00 + int2(1, 1), shadowMapSize, receiver);
 
     float sx0 = lerp(s00, s10, fracPos.x);
     float sx1 = lerp(s01, s11, fracPos.x);
     return lerp(sx0, sx1, fracPos.y);
 }
 
+// The receiver plane's depth gradient in shadow-map UV space, derived from the surface normal.
+// Deferred lighting runs in compute and has no screen-space derivatives to take it from, and
+// the normal gives the same answer for a flat receiver without the edge noise derivatives have.
+float2 ComputeShadowReceiverDepthGradient(float3 normal, float3 lightDirection, float4x4 shadowViewProjection)
+{
+    float cosTheta = abs(dot(normal, lightDirection));
+    float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
+    if (sinTheta <= 1e-4f)
+    {
+        return 0.0f.xx;
+    }
+
+    float3 tangent = normalize(cross(normal, abs(normal.y) < 0.99f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f)));
+    float3 bitangent = cross(normal, tangent);
+    float3 tangentClip = mul(float4(tangent, 0.0f), shadowViewProjection).xyz;
+    float3 bitangentClip = mul(float4(bitangent, 0.0f), shadowViewProjection).xyz;
+    // Clip XY to UV: u = x/2 + 1/2, v = 1/2 - y/2.
+    float2 tangentUv = float2(0.5f, -0.5f) * tangentClip.xy;
+    float2 bitangentUv = float2(0.5f, -0.5f) * bitangentClip.xy;
+
+    // Solve dot(gradient, tangentUv) = tangentClip.z and dot(gradient, bitangentUv) = bitangentClip.z.
+    float determinant = tangentUv.x * bitangentUv.y - tangentUv.y * bitangentUv.x;
+    if (abs(determinant) <= 1e-20f)
+    {
+        return 0.0f.xx;
+    }
+
+    float2 gradient = float2(
+        tangentClip.z * bitangentUv.y - tangentUv.y * bitangentClip.z,
+        tangentUv.x * bitangentClip.z - tangentClip.z * bitangentUv.x) / determinant;
+    // The gradient's magnitude is proportional to tan(theta); clamp that slope.
+    float slope = sinTheta / max(cosTheta, 1e-4f);
+    return gradient * min(1.0f, ShadowMaxReceiverSlope / slope);
+}
+
 float ComputeDirectionalShadow(
     float3 worldPos,
+    float3 receiverNormal,
+    float3 lightDirection,
     float4x4 shadowViewProjection,
     uint shadowMapHandle,
     uint shadowSamplerHandle,
     float2 shadowTexelSize,
-    float depthBias)
+    float depthBias,
+    float normalOffset)
 {
-    float4 shadowPosH = mul(float4(worldPos, 1.0f), shadowViewProjection);
+    // Normal offset: look the receiver up slightly off its surface, by more the more grazing the
+    // light. This replaces most of a depth bias without moving the shadow away from its caster,
+    // which a depth bias does by depthBias / tan(theta) along the receiver.
+    float nDotL = dot(receiverNormal, lightDirection);
+    float3 shadowWorldPos = worldPos + receiverNormal * (normalOffset * saturate(1.0f - nDotL));
+
+    float4 shadowPosH = mul(float4(shadowWorldPos, 1.0f), shadowViewProjection);
     if (shadowPosH.w <= 0.0f)
     {
         return 1.0f;
@@ -197,7 +258,10 @@ float ComputeDirectionalShadow(
     float v1 = (3.0f + s.y) / vw1;
     float v2 = s.y / vw2 + 2.0f;
 
-    float receiverDepth = shadowPos.z - depthBias + shadowSamplerCompat;
+    ShadowReceiverPlane receiver;
+    receiver.depth = shadowPos.z - depthBias + shadowSamplerCompat;
+    receiver.uv = uv;
+    receiver.depthGradient = ComputeShadowReceiverDepthGradient(receiverNormal, lightDirection, shadowViewProjection);
     float visibility = 0.0f;
 
     float2 sampleUV00 = (baseTexel + float2(u0, v0) - 0.5f) * shadowTexelSize;
@@ -220,15 +284,15 @@ float ComputeDirectionalShadow(
     float w12 = uw1 * vw2;
     float w22 = uw2 * vw2;
 
-    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV00, shadowMapSizeInt, receiverDepth) * w00;
-    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV10, shadowMapSizeInt, receiverDepth) * w10;
-    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV20, shadowMapSizeInt, receiverDepth) * w20;
-    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV01, shadowMapSizeInt, receiverDepth) * w01;
-    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV11, shadowMapSizeInt, receiverDepth) * w11;
-    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV21, shadowMapSizeInt, receiverDepth) * w21;
-    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV02, shadowMapSizeInt, receiverDepth) * w02;
-    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV12, shadowMapSizeInt, receiverDepth) * w12;
-    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV22, shadowMapSizeInt, receiverDepth) * w22;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV00, shadowMapSizeInt, receiver) * w00;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV10, shadowMapSizeInt, receiver) * w10;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV20, shadowMapSizeInt, receiver) * w20;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV01, shadowMapSizeInt, receiver) * w01;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV11, shadowMapSizeInt, receiver) * w11;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV21, shadowMapSizeInt, receiver) * w21;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV02, shadowMapSizeInt, receiver) * w02;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV12, shadowMapSizeInt, receiver) * w12;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV22, shadowMapSizeInt, receiver) * w22;
 
     float weightSum = w00 + w10 + w20 + w01 + w11 + w21 + w02 + w12 + w22;
     return weightSum > 0.0f ? visibility / weightSum : 1.0f;
@@ -236,6 +300,8 @@ float ComputeDirectionalShadow(
 
 float SampleDirectionalShadowCascade(
     float3 worldPos,
+    float3 receiverNormal,
+    float3 lightDirection,
     uint cascadeIndex,
     float4x4 shadowViewProjection0,
     float4x4 shadowViewProjection1,
@@ -246,25 +312,22 @@ float SampleDirectionalShadowCascade(
     uint shadowSamplerHandle,
     float2 shadowTexelSize,
     float3 shadowDepthBiases,
-    float receiverSlopeBiasScale)
+    float3 shadowNormalOffsets)
 {
     if (cascadeIndex == 0u)
     {
-        return ComputeDirectionalShadow(worldPos, shadowViewProjection0, shadowMapHandle0, shadowSamplerHandle, shadowTexelSize, shadowDepthBiases.x * receiverSlopeBiasScale);
+        return ComputeDirectionalShadow(worldPos, receiverNormal, lightDirection, shadowViewProjection0, shadowMapHandle0,
+            shadowSamplerHandle, shadowTexelSize, shadowDepthBiases.x, shadowNormalOffsets.x);
     }
 
     if (cascadeIndex == 1u)
     {
-        return ComputeDirectionalShadow(worldPos, shadowViewProjection1, shadowMapHandle1, shadowSamplerHandle, shadowTexelSize, shadowDepthBiases.y * receiverSlopeBiasScale);
+        return ComputeDirectionalShadow(worldPos, receiverNormal, lightDirection, shadowViewProjection1, shadowMapHandle1,
+            shadowSamplerHandle, shadowTexelSize, shadowDepthBiases.y, shadowNormalOffsets.y);
     }
 
-    return ComputeDirectionalShadow(worldPos, shadowViewProjection2, shadowMapHandle2, shadowSamplerHandle, shadowTexelSize, shadowDepthBiases.z * receiverSlopeBiasScale);
-}
-
-float ComputeReceiverSlopeBiasScale(float3 normal, float3 lightDirection)
-{
-    float nDotL = saturate(dot(normalize(normal), normalize(lightDirection)));
-    return lerp(1.75f, 1.0f, nDotL);
+    return ComputeDirectionalShadow(worldPos, receiverNormal, lightDirection, shadowViewProjection2, shadowMapHandle2,
+        shadowSamplerHandle, shadowTexelSize, shadowDepthBiases.z, shadowNormalOffsets.z);
 }
 
 float ComputeCascadedDirectionalShadow(
@@ -282,7 +345,8 @@ float ComputeCascadedDirectionalShadow(
     float3 shadowSplits,
     float shadowCascadeBlendDistance,
     float2 shadowTexelSize,
-    float3 shadowDepthBiases)
+    float3 shadowDepthBiases,
+    float3 shadowNormalOffsets)
 {
     uint cascadeIndex = 2u;
     if (receiverDistance <= shadowSplits.x)
@@ -293,10 +357,13 @@ float ComputeCascadedDirectionalShadow(
     {
         cascadeIndex = 1u;
     }
-    float receiverSlopeBiasScale = ComputeReceiverSlopeBiasScale(receiverNormal, lightDirection);
+    float3 normal = normalize(receiverNormal);
+    float3 light = normalize(lightDirection);
 
     float primary = SampleDirectionalShadowCascade(
         worldPos,
+        normal,
+        light,
         cascadeIndex,
         shadowViewProjection0,
         shadowViewProjection1,
@@ -307,7 +374,7 @@ float ComputeCascadedDirectionalShadow(
         shadowSamplerHandle,
         shadowTexelSize,
         shadowDepthBiases,
-        receiverSlopeBiasScale);
+        shadowNormalOffsets);
 
     if (shadowCascadeBlendDistance <= 0.0f)
     {
@@ -321,6 +388,8 @@ float ComputeCascadedDirectionalShadow(
         {
             float nextShadow = SampleDirectionalShadowCascade(
                 worldPos,
+                normal,
+                light,
                 cascadeIndex + 1u,
                 shadowViewProjection0,
                 shadowViewProjection1,
@@ -331,7 +400,7 @@ float ComputeCascadedDirectionalShadow(
                 shadowSamplerHandle,
                 shadowTexelSize,
                 shadowDepthBiases,
-                receiverSlopeBiasScale);
+                shadowNormalOffsets);
             float blendRange = max(shadowCascadeBlendDistance * 2.0f, 1e-6f);
             float t = saturate((receiverDistance - (boundary - shadowCascadeBlendDistance)) / blendRange);
             return lerp(primary, nextShadow, t);
@@ -387,6 +456,7 @@ float3 EvaluateDirectionalLights(
     uint shadowLightIndex,
     float2 shadowTexelSize,
     float3 shadowDepthBiases,
+    float3 shadowNormalOffsets,
     float shadowStrength,
     uint shadowsEnabled,
     float shadowMaxDistance)
@@ -421,7 +491,8 @@ float3 EvaluateDirectionalLights(
                     shadowSplits,
                     shadowCascadeBlendDistance,
                     shadowTexelSize,
-                    shadowDepthBiases);
+                    shadowDepthBiases,
+                    shadowNormalOffsets);
                 shadow = lerp(1.0f, pcf, saturate(shadowStrength));
             }
         }

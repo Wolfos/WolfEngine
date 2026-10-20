@@ -47,6 +47,7 @@ public readonly struct ShadowFrameData
 		float maxDistance,
 		int shadowedDirectionalLightIndex,
 		Vector3 depthBiases,
+		Vector3 normalOffsets,
 		float strength,
 		int mapResolution)
 	{
@@ -62,6 +63,7 @@ public readonly struct ShadowFrameData
 		MaxDistance = maxDistance;
 		ShadowedDirectionalLightIndex = shadowedDirectionalLightIndex;
 		DepthBiases = depthBiases;
+		NormalOffsets = normalOffsets;
 		Strength = strength;
 		MapResolution = mapResolution;
 	}
@@ -77,7 +79,13 @@ public readonly struct ShadowFrameData
 	public float CascadeBlendDistance { get; }
 	public float MaxDistance { get; }
 	public int ShadowedDirectionalLightIndex { get; }
+	/// <summary>Per-cascade constant receiver depth bias, in shadow-map depth units.</summary>
 	public Vector3 DepthBiases { get; }
+	/// <summary>
+	/// Per-cascade distance, in world units, a receiver is pushed along its normal before the shadow
+	/// lookup. Scaled in the shader by how grazing the light is.
+	/// </summary>
+	public Vector3 NormalOffsets { get; }
 	public float Strength { get; }
 	public int MapResolution { get; }
 

@@ -351,7 +351,7 @@ public sealed class VolumetricFogTests
 
 	private static ShadowFrameData Shadow(int shadowedIndex) => new(
 		shadowedIndex >= 0, 3, Matrix4x4.Identity, Matrix4x4.Identity, Matrix4x4.Identity,
-		10.0f, 30.0f, 100.0f, 2.0f, 100.0f, shadowedIndex, Vector3.Zero, 1.0f, 2048);
+		10.0f, 30.0f, 100.0f, 2.0f, 100.0f, shadowedIndex, Vector3.Zero, Vector3.Zero, 1.0f, 2048);
 
 	private static SceneDrawData Scene(params FogVolumePacket[] volumes) => Scene(volumes, []);
 
