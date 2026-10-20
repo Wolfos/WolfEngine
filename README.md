@@ -27,7 +27,7 @@ The engine features a fully integrated editor, runtime, and renderer, with an ar
 | WebGPU | Undesired as lagging feature support would hold back other platforms |
 
 ## Current status
-WolfEngine is **NOT** production-ready. While it's certainly capable enough to ship a small game, the engine is still under heavy development and the API is simply not yet stable. 
+WolfEngine is **NOT** production-ready for third parties. It is currently being used to create games internally. Documentation is scarce and major features are still missing.
 
 ## The vision
 WolfEngine aims to fill the gap between Unity and Unreal: a game engine built specifically for PC and current-generation console development. It aims to extract maximum performance from modern hardware, rather than being developed for the constraints posed by low-end mobile devices or web browsers.
