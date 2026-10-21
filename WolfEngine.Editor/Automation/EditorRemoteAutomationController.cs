@@ -296,6 +296,26 @@ public sealed class EditorRemoteAutomationController
 			return $"DDGI relocation: {enabled}. Changed in memory only.";
 		}, cancellationToken);
 
+	public Task<string> SetDdgiFinalGatherAsync(bool enabled, string resolution, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (Enum.TryParse<DdgiFinalGatherResolution>(resolution, ignoreCase: true, out var parsedResolution) == false)
+				throw new ArgumentException($"Unknown DDGI final gather resolution '{resolution}'. Use Full, Half or Quarter.", nameof(resolution));
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			var settings = config.DiffuseGlobalIllumination;
+			var finalGather = settings.FinalGather;
+			finalGather.Enabled = enabled;
+			finalGather.Resolution = parsedResolution;
+			settings.FinalGather = finalGather;
+			config.DiffuseGlobalIllumination = settings;
+			return $"DDGI final gather: {enabled} at {parsedResolution} resolution. Changed in memory only.";
+		}, cancellationToken);
+
 	public Task<string> SetIndirectLightMinimumAsync(float minimum, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{

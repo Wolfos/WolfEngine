@@ -30,13 +30,35 @@ public sealed class ReflectionsUpsamplePass
 		RenderViewResources resources,
 		IGfxDevice device)
 	{
+		return BuildConfig(
+			context,
+			resources,
+			device,
+			resources.ReflectionsTrace,
+			resources.ReflectionsRadiance,
+			resources.Config.Reflections.RayTracedSettings.UpsampleSharpness);
+	}
+
+	/// <summary>
+	/// Builds an upsample of any reduced-resolution source that follows the same contract: one sample per trace
+	/// pixel, taken at the full-resolution pixel nearest that trace pixel's center. The DDGI final gather reuses
+	/// it this way.
+	/// </summary>
+	public ReflectionsUpsamplePassConfig BuildConfig(
+		RenderGraphContext context,
+		RenderViewResources resources,
+		IGfxDevice device,
+		RenderGraphResourceHandle sourceHandle,
+		RenderGraphResourceHandle outputHandle,
+		float sharpness)
+	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
 
 		var pipeline = EnsurePipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
-		var source = context.GetTexture(resources.ReflectionsTrace);
-		var output = context.GetTexture(resources.ReflectionsRadiance);
+		var source = context.GetTexture(sourceHandle);
+		var output = context.GetTexture(outputHandle);
 		return new ReflectionsUpsamplePassConfig
 		{
 			Pipeline = pipeline,
@@ -46,7 +68,7 @@ public sealed class ReflectionsUpsamplePass
 			OutputHandle = _bindlessRegistry.RegisterRwTexture(output),
 			FullResolution = resources.SceneFramebufferSize,
 			TraceResolution = new(source.Descriptor.Width, source.Descriptor.Height),
-			Sharpness = Math.Max(resources.Config.Reflections.RayTracedSettings.UpsampleSharpness, 0.001f)
+			Sharpness = Math.Max(sharpness, 0.001f)
 		};
 	}
 

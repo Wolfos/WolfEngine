@@ -94,6 +94,12 @@ public readonly struct RenderViewResources
 	public RenderGraphResourceHandle DdgiProbeRelocationDecisionDebug { get; init; }
 	public bool WriteDdgiFinalContributionDebug { get; init; }
 	public bool WriteDdgiProbeDebug { get; init; }
+	/// <summary>
+	/// One traced diffuse sample per trace pixel, at the final gather's own resolution. The same handle as
+	/// <see cref="DdgiFinalGatherIrradiance"/> when tracing at full resolution.
+	/// </summary>
+	public RenderGraphResourceHandle DdgiFinalGatherTrace { get; init; }
+	public RenderGraphResourceHandle DdgiFinalGatherIrradiance { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth0 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
@@ -173,6 +179,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly VolumetricFogPass _volumetricFogPass;
 	private readonly ReflectionsPass _reflectionsPass;
 	private readonly ReflectionsUpsamplePass _reflectionsUpsamplePass;
+	private readonly DdgiFinalGatherPass _ddgiFinalGatherPass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
@@ -239,6 +246,8 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _volumetricFogIntegrateExecute;
 	private readonly Action<RenderGraphContext> _reflectionsExecute;
 	private readonly Action<RenderGraphContext> _reflectionsUpsampleExecute;
+	private readonly Action<RenderGraphContext> _ddgiFinalGatherExecute;
+	private readonly Action<RenderGraphContext> _ddgiFinalGatherUpsampleExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
@@ -294,6 +303,7 @@ internal sealed class RenderGraphFrameBuilder
 		_volumetricFogPass = passSet.VolumetricFogPass;
 		_reflectionsPass = passSet.ReflectionsPass;
 		_reflectionsUpsamplePass = passSet.ReflectionsUpsamplePass;
+		_ddgiFinalGatherPass = passSet.DdgiFinalGatherPass;
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
 		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
 		_transparentForwardPass = passSet.TransparentForwardPass;
@@ -331,6 +341,8 @@ internal sealed class RenderGraphFrameBuilder
 		_volumetricFogIntegrateExecute = context => ExecuteVolumetricFog(context, VolumetricFogStage.Integrate);
 		_reflectionsExecute = ExecuteReflections;
 		_reflectionsUpsampleExecute = ExecuteReflectionsUpsample;
+		_ddgiFinalGatherExecute = ExecuteDdgiFinalGather;
+		_ddgiFinalGatherUpsampleExecute = ExecuteDdgiFinalGatherUpsample;
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
 		_transparentForwardExecute = ExecuteTransparentForward;
@@ -577,6 +589,8 @@ internal sealed class RenderGraphFrameBuilder
 		var ddgiProbeRelocationDebugHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeRelocationDecisionHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeRelocationDecisionDebugHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherTraceHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherIrradianceHandle = default(RenderGraphResourceHandle);
 		var resolvedSceneColorHandle = default(RenderGraphResourceHandle);
 		var historyColorReadHandle = default(RenderGraphResourceHandle);
 		var historyColorWriteHandle = default(RenderGraphResourceHandle);
@@ -1047,6 +1061,28 @@ internal sealed class RenderGraphFrameBuilder
 						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 						new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
 					ddgiProbeRelocationDecisionDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+					if (DdgiUtilities.IsFinalGatherEnabled(config))
+					{
+						ddgiFinalGatherIrradianceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+							sceneFramebufferSize.X,
+							sceneFramebufferSize.Y,
+							TextureFormat.Rgba16Float,
+							TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+							new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+						var finalGatherTraceSize = DdgiUtilities.GetFinalGatherTraceSize(
+							sceneFramebufferSize,
+							ddgiConfig.FinalGather);
+						ddgiFinalGatherTraceHandle =
+							finalGatherTraceSize.X == sceneFramebufferSize.X &&
+							finalGatherTraceSize.Y == sceneFramebufferSize.Y
+								? ddgiFinalGatherIrradianceHandle
+								: _resources.CreateTransientTexture(new TextureDescriptor(
+									finalGatherTraceSize.X,
+									finalGatherTraceSize.Y,
+									TextureFormat.Rgba16Float,
+									TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+									new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+					}
 				}
 				else
 				{
@@ -1164,6 +1200,8 @@ internal sealed class RenderGraphFrameBuilder
 				ddgiProbeRelocationDebugHandle.IsValid &&
 				ddgiProbeRelocationDecisionDebugHandle.IsValid &&
 				IsDdgiProbeDebugView(_view.RequestedSceneDebugViewId),
+			DdgiFinalGatherTrace = ddgiFinalGatherTraceHandle,
+			DdgiFinalGatherIrradiance = ddgiFinalGatherIrradianceHandle,
 			ShadowMapDepth0 = shadowMapHandle0,
 			ShadowMapDepth1 = shadowMapHandle1,
 			ShadowMapDepth2 = shadowMapHandle2,
@@ -1236,6 +1274,11 @@ internal sealed class RenderGraphFrameBuilder
 			if (ddgiFinalContributionHandle.IsValid)
 			{
 				RegisterSceneDebugView(SceneDebugViewIds.DdgiFinalContribution, "DDGI Final Contribution", ddgiFinalContributionHandle, SceneDebugViewKind.Color);
+			}
+			if (ddgiFinalGatherTraceHandle.IsValid)
+			{
+				// Alpha holds hit distance, not coverage.
+				RegisterSceneDebugView(SceneDebugViewIds.DdgiFinalGatherRaw, "DDGI Final Gather (Raw Trace)", ddgiFinalGatherTraceHandle, SceneDebugViewKind.ColorIgnoreAlpha);
 			}
 			if (ddgiProbeBaseWeightDebugHandle.IsValid)
 			{
@@ -1577,6 +1620,34 @@ internal sealed class RenderGraphFrameBuilder
 					.ReadTexture(_view.FrameResources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
 					.WriteTexture(_view.FrameResources.DdgiVisibilityHistoryWrite, ResourceState.UnorderedAccess)
 					.SetExecute(_ddgiVisibilityIntegrateExecute);
+
+				if (_view.FrameResources.DdgiFinalGatherTrace.IsValid)
+				{
+					var finalGatherBuilder = graph.AddPass("DDGI Final Gather", PassKind.Compute)
+						.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.GBufferNormal, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiIrradianceL0HistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiIrradianceLyHistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiIrradianceLzHistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiIrradianceLxHistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiVisibilityHistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiProbeStateWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiProbeActivity, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiProbeRelocationDecision, ResourceState.ShaderResource)
+						.WriteTexture(_view.FrameResources.DdgiFinalGatherTrace, ResourceState.UnorderedAccess);
+					ReadSkyboxTextures(finalGatherBuilder);
+					finalGatherBuilder.SetExecute(_ddgiFinalGatherExecute);
+
+					if (_view.FrameResources.DdgiFinalGatherTrace.Id != _view.FrameResources.DdgiFinalGatherIrradiance.Id)
+					{
+						graph.AddPass("DDGI Final Gather Upsample", PassKind.Compute)
+							.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
+							.ReadTexture(_view.FrameResources.GBufferNormal, ResourceState.ShaderResource)
+							.ReadTexture(_view.FrameResources.DdgiFinalGatherTrace, ResourceState.ShaderResource)
+							.WriteTexture(_view.FrameResources.DdgiFinalGatherIrradiance, ResourceState.UnorderedAccess)
+							.SetExecute(_ddgiFinalGatherUpsampleExecute);
+					}
+				}
 			}
 
 			graph.AddPass("Clustered Lighting Build", PassKind.Compute)
@@ -1633,6 +1704,10 @@ internal sealed class RenderGraphFrameBuilder
 			if (_view.FrameResources.ReflectionsRadiance.IsValid)
 			{
 				deferredLightingBuilder.ReadTexture(_view.FrameResources.ReflectionsRadiance, ResourceState.ShaderResource);
+			}
+			if (_view.FrameResources.DdgiFinalGatherIrradiance.IsValid)
+			{
+				deferredLightingBuilder.ReadTexture(_view.FrameResources.DdgiFinalGatherIrradiance, ResourceState.ShaderResource);
 			}
 			if (_view.FrameResources.FogIntegrated.IsValid)
 			{
@@ -2563,6 +2638,34 @@ internal sealed class RenderGraphFrameBuilder
 			context,
 			_view.FrameResources,
 			_renderer.GetGfxDevice());
+		_reflectionsUpsamplePass.Record(context, in config, context.SceneData);
+	}
+
+	private void ExecuteDdgiFinalGather(RenderGraphContext context)
+	{
+		var config = _ddgiFinalGatherPass.BuildConfig(
+			context,
+			_view.FrameResources,
+			_sharedResources,
+			_renderer.GetGfxDevice(),
+			_renderer,
+			_gpuDrawResources,
+			_rayTracingSceneResources,
+			context.SceneData);
+		_ddgiFinalGatherPass.Record(context, in config, context.SceneData);
+	}
+
+	private void ExecuteDdgiFinalGatherUpsample(RenderGraphContext context)
+	{
+		// The reflection upsample's depth- and normal-aware reconstruction suits any one-sample-per-trace-pixel
+		// signal. Its pipeline is shared; only the handles differ.
+		var config = _reflectionsUpsamplePass.BuildConfig(
+			context,
+			_view.FrameResources,
+			_renderer.GetGfxDevice(),
+			_view.FrameResources.DdgiFinalGatherTrace,
+			_view.FrameResources.DdgiFinalGatherIrradiance,
+			_view.FrameResources.Config.DiffuseGlobalIllumination.FinalGather.UpsampleSharpness);
 		_reflectionsUpsamplePass.Record(context, in config, context.SceneData);
 	}
 

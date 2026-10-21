@@ -203,6 +203,47 @@ public struct DdgiProbeCounts
 	public int Z { get; set; } = 16;
 }
 
+/// <summary>
+/// Per-axis resolution of the DDGI final gather rays. Half traces one quarter as many rays; quarter traces one
+/// sixteenth as many. The result is reconstructed against full-resolution depth and normals.
+/// </summary>
+public enum DdgiFinalGatherResolution
+{
+	Full = 0,
+	Half = 1,
+	Quarter = 2
+}
+
+/// <summary>
+/// Higher quality DDGI shading. Instead of interpolating probes at the visible surface, each pixel traces its first
+/// diffuse bounce and samples the probes where that ray lands. Visibility at the shading point is then exact, which
+/// removes most light bleeding through walls and adds contact detail the probe grid is too coarse to hold. Specular
+/// still samples the probes directly. One ray per pixel is noisy; there is no denoiser yet.
+/// </summary>
+public struct DdgiFinalGatherSettings
+{
+	public DdgiFinalGatherSettings()
+	{
+	}
+
+	public bool Enabled { get; set; } = false;
+	public DdgiFinalGatherResolution Resolution { get; set; } = DdgiFinalGatherResolution.Half;
+
+	/// <summary>
+	/// World-space length of the gather rays. A ray that reaches it without hitting anything takes the probe
+	/// radiance at its end point instead, so this only needs to cover the range where probe interpolation leaks.
+	/// </summary>
+	public float MaxRayDistance { get; set; } = 4.0f;
+	public float Bias { get; set; } = 0.03f;
+
+	/// <summary>
+	/// Luminance ceiling for a single gather sample. Rare rays that hit a sunlit or emissive surface otherwise
+	/// flash as isolated bright pixels. Zero disables the clamp.
+	/// </summary>
+	public float FireflyClamp { get; set; } = 8.0f;
+	public float UpsampleSharpness { get; set; } = 16.0f;
+}
+
 public struct DiffuseGlobalIlluminationConfig
 {
 	public DiffuseGlobalIlluminationConfig()
@@ -225,6 +266,7 @@ public struct DiffuseGlobalIlluminationConfig
 	public float IrradianceTemporalBlendSpeed { get; set; } = 0.08f;
 	public float Hysteresis { get; set; } = 0.95f;
 	public float RecursiveBounceEnergy { get; set; } = DdgiUtilities.DefaultRecursiveBounceEnergy;
+	public DdgiFinalGatherSettings FinalGather { get; set; } = new();
 	public bool ProbeRelocationEnabled { get; set; } = true;
 	public float ProbeMinFrontfaceDistance { get; set; } = 0.2f;
 	public float ProbeBackfaceThreshold { get; set; } = 0.25f;

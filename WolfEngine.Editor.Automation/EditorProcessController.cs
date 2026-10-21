@@ -246,6 +246,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<string> SetDdgiRelocationAsync(bool enabled, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetDdgiRelocationAsync(enabled, cancellationToken);
 
+	public Task<string> SetDdgiFinalGatherAsync(bool enabled, string resolution, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetDdgiFinalGatherAsync(enabled, resolution, cancellationToken);
+
 	public Task<string> SetIndirectLightMinimumAsync(float minimum, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetIndirectLightMinimumAsync(minimum, cancellationToken);
 

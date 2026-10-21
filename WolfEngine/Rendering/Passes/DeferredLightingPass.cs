@@ -66,6 +66,9 @@ public sealed class DeferredLightingPass
 		var reflections = resources.ReflectionsRadiance.IsValid
 			? context.GetTexture(resources.ReflectionsRadiance)
 			: null;
+		var ddgiFinalGather = resources.DdgiFinalGatherIrradiance.IsValid
+			? context.GetTexture(resources.DdgiFinalGatherIrradiance)
+			: null;
 		var ddgiIrradianceL0 = resources.DdgiIrradianceL0HistoryWrite.IsValid
 			? context.GetTexture(resources.DdgiIrradianceL0HistoryWrite)
 			: null;
@@ -155,6 +158,7 @@ public sealed class DeferredLightingPass
 			GBufferDepth = _bindlessRegistry.GetTextureHandle(depth),
 			AmbientOcclusion = ambientOcclusionHandle,
 			Reflections = _bindlessRegistry.GetTextureHandle(reflections),
+			DdgiFinalGather = _bindlessRegistry.GetTextureHandle(ddgiFinalGather),
 			DdgiIrradianceL0 = _bindlessRegistry.GetTextureHandle(ddgiIrradianceL0),
 			DdgiIrradianceLy = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLy),
 			DdgiIrradianceLz = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLz),
@@ -221,6 +225,7 @@ public sealed class DeferredLightingPass
 			ShadowTexelSizeY = 1.0f / shadowResolution,
 			AoEnabled = resources.AmbientOcclusionFinal.IsValid,
 			ReflectionsEnabled = reflections is not null,
+			DdgiFinalGatherEnabled = ddgiEnabled && ddgiFinalGather is not null,
 			DiffuseIndirectMultiplier = Math.Max(resources.Config.Lighting.DiffuseIndirectMultiplier, 0.0f),
 			SpecularIndirectMultiplier = Math.Max(resources.Config.Lighting.SpecularIndirectMultiplier, 0.0f),
 			IndirectLightMinimum = Math.Max(resources.Config.Lighting.IndirectLightMinimum, 0.0f),
@@ -294,6 +299,7 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("shadowMapHandle2", config.ShadowMapDepth2.Value);
 		bindlessWriter.SetUInt("shadowSamplerHandle", config.ShadowSampler.Value);
 		bindlessWriter.SetUInt("fogIntegratedHandle", config.FogIntegrated.Value);
+		bindlessWriter.SetUInt("ddgiFinalGatherHandle", config.DdgiFinalGather.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var cameraWriter = _cameraWriter
@@ -367,6 +373,7 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetFloat("diffuseIndirectMultiplier", config.DiffuseIndirectMultiplier);
 		lightingWriter.SetFloat("specularIndirectMultiplier", config.SpecularIndirectMultiplier);
 		lightingWriter.SetFloat("indirectLightMinimum", config.IndirectLightMinimum);
+		lightingWriter.SetUInt("ddgiFinalGatherEnabled", config.DdgiFinalGatherEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiEnabled", config.DdgiEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiFinalContributionDebugEnabled", config.DdgiFinalContributionDebugEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiProbeDebugEnabled", config.DdgiProbeDebugEnabled ? 1u : 0u);

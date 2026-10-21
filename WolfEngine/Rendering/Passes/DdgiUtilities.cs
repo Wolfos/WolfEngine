@@ -29,6 +29,26 @@ public static class DdgiUtilities
 		       config.DiffuseGlobalIllumination.Mode == DiffuseGlobalIlluminationMode.RayTracedDdgi;
 	}
 
+	public static bool IsFinalGatherEnabled(RenderConfig config)
+	{
+		return IsRayTracedDdgiEnabled(config) &&
+		       config.DiffuseGlobalIllumination.FinalGather.Enabled;
+	}
+
+	public static Int2 GetFinalGatherTraceSize(Int2 fullSize, DdgiFinalGatherSettings settings)
+	{
+		var divisor = settings.Resolution switch
+		{
+			DdgiFinalGatherResolution.Full => 1,
+			DdgiFinalGatherResolution.Half => 2,
+			DdgiFinalGatherResolution.Quarter => 4,
+			_ => 2
+		};
+		return new Int2(
+			Math.Max((fullSize.X + divisor - 1) / divisor, 1),
+			Math.Max((fullSize.Y + divisor - 1) / divisor, 1));
+	}
+
 	public static DdgiGridShape GetGridShape(DiffuseGlobalIlluminationConfig config)
 	{
 		var countX = Math.Max(1, config.ProbeCounts.X);

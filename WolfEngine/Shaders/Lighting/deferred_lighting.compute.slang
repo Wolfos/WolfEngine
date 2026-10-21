@@ -40,6 +40,7 @@ cbuffer BindlessHandles : register(b0)
     uint shadowMapHandle2;
     uint shadowSamplerHandle;
     uint fogIntegratedHandle;
+    uint ddgiFinalGatherHandle;
 };
 
 cbuffer CameraParams : register(b1)
@@ -98,6 +99,7 @@ cbuffer LightingParams : register(b2)
     uint fogSliceCount;
     float fogMaxDistance;
     float indirectLightMinimum;
+    uint ddgiFinalGatherEnabled;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
@@ -177,6 +179,7 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 emissive = gbufferEmissive.SampleLevel(linearSampler, uv, 0.0f).rgb;
 
     float occlusion = material.r;
+    float materialOcclusion = occlusion;
     float roughness = material.g;
     float metallic = material.b;
     if (aoEnabled != 0u)
@@ -321,6 +324,16 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         skyDiffuseContribution,
         ddgiContribution,
         ddgiGridInfluence);
+    if (ddgiFinalGatherEnabled != 0u)
+    {
+        // The final gather already traced the first bounce, so it finds the occluders screen-space AO
+        // approximates; applying that AO as well would darken every contact twice. Only the material's
+        // baked occlusion, which covers detail below the geometry, still applies. The trace also fell
+        // back to the sky itself wherever the probe grid ends, so no grid blend is needed here.
+        ddgiDiffuseIrradiance = GetTexture(ddgiFinalGatherHandle).Load(int3(dispatchThreadId.xy, 0)).rgb;
+        ddgiGridInfluence = 1.0f;
+        diffuseIndirectContribution = ddgiDiffuseIrradiance * diffuseEnergy * albedo * materialOcclusion;
+    }
     diffuseIndirectContribution *= diffuseIndirectMultiplier;
     specularContribution *= specularIndirectMultiplier;
     if (indirectLightMinimum > 0.0f)

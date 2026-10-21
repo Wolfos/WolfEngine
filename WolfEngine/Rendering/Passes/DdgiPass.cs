@@ -552,7 +552,7 @@ public sealed class DdgiPass
 		return new Vector3(values[offset], values[offset + 1], values[offset + 2]);
 	}
 
-	private static (Vector3 Direction, Vector3 ColorIntensity) GetPrimaryDirectionalLight(SceneDrawData sceneData)
+	internal static (Vector3 Direction, Vector3 ColorIntensity) GetPrimaryDirectionalLight(SceneDrawData sceneData)
 	{
 		for (var i = 0; i < sceneData.Lights.Count; i++)
 		{

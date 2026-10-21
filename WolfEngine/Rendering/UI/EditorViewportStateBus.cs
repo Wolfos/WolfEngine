@@ -21,6 +21,7 @@ public static class SceneDebugViewIds
 	public const string DdgiProbeRelocationDecision = "ddgi-probe-relocation-decision";
 	public const string DdgiVisibility = "ddgi-visibility";
 	public const string DdgiFinalContribution = "ddgi-final-contribution";
+	public const string DdgiFinalGatherRaw = "ddgi-final-gather-raw";
 	public const string GBufferAlbedo = "gbuffer-albedo";
 	public const string GBufferNormal = "gbuffer-normal";
 	public const string GBufferMaterial = "gbuffer-material";
