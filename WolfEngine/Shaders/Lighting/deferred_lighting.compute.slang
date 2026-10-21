@@ -96,7 +96,7 @@ cbuffer LightingParams : register(b2)
     uint fogEnabled;
     uint fogSliceCount;
     float fogMaxDistance;
-    float _fogPadding;
+    float indirectLightMinimum;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
@@ -319,8 +319,24 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         skyDiffuseContribution,
         ddgiContribution,
         ddgiGridInfluence);
-    color += diffuseIndirectContribution * diffuseIndirectMultiplier +
-        specularContribution * specularIndirectMultiplier;
+    diffuseIndirectContribution *= diffuseIndirectMultiplier;
+    specularContribution *= specularIndirectMultiplier;
+    if (indirectLightMinimum > 0.0f)
+    {
+        // Floor the incoming light rather than the final contribution, so albedo and occlusion
+        // still shape the lifted result instead of greying out dark or saturated materials.
+        diffuseIndirectContribution = max(
+            diffuseIndirectContribution,
+            indirectLightMinimum * diffuseEnergy * albedo * occlusion);
+        float3 minimumSpecularContribution = EvaluateSpecularImageBasedLightingFromRadiance(
+            surface,
+            viewDir,
+            indirectLightMinimum.xxx,
+            brdfLutHandle,
+            samplerHandle);
+        specularContribution = max(specularContribution, minimumSpecularContribution);
+    }
+    color += diffuseIndirectContribution + specularContribution;
     if (ddgiFinalContributionDebugEnabled != 0u)
     {
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);

@@ -296,6 +296,21 @@ public sealed class EditorRemoteAutomationController
 			return $"DDGI relocation: {enabled}. Changed in memory only.";
 		}, cancellationToken);
 
+	public Task<string> SetIndirectLightMinimumAsync(float minimum, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			var settings = config.Lighting;
+			settings.IndirectLightMinimum = minimum;
+			config.Lighting = settings;
+			return $"Indirect light minimum: {minimum}. Changed in memory only.";
+		}, cancellationToken);
+
 	public Task SetEntityRotationAsync(Guid entityId, Vector3 eulerDegrees, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
