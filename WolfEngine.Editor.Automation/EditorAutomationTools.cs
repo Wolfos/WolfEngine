@@ -244,6 +244,12 @@ public sealed class EditorAutomationTools
 	public Task<string> SetDdgiRelocation(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetDdgiRelocationAsync(enabled, cancellationToken);
 
+	[McpServerTool(Name = "set_indirect_light_minimum"), Description("Set the render config's indirect light minimum in memory, without saving the asset: the uniform ambient radiance that diffuse and specular indirect lighting never fall below. Zero disables it. Works in authoring and Play mode.")]
+	public Task<string> SetIndirectLightMinimum(
+		[Description("Minimum indirect radiance; zero disables the floor.")] float minimum,
+		CancellationToken cancellationToken) =>
+		_controller.SetIndirectLightMinimumAsync(minimum, cancellationToken);
+
 	[McpServerTool(Name = "set_entity_scale"), Description("Set an entity's local scale in the active authoring or Play-mode scene without saving. Supports per-axis negative scales for mirrored-geometry validation.")]
 	public async Task<string> SetEntityScale(string entityId, float x, float y, float z, CancellationToken cancellationToken)
 	{

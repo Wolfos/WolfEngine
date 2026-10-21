@@ -1,6 +1,8 @@
 # WolfEngine
 
-WolfEngine is a bespoke, C# game engine for building large, seamless open-world games. It is in active development: a working editor, runtime, and renderer already exist, while the engine continues to grow toward production-scale world building.
+WolfEngine is a modern, 3D game engine built around a simple philosophy: the obvious way should be the right way. It prioritizes intuitive workflows, predictable behavior, and powerful tools that stay out of the developer's way.
+
+The engine features a fully integrated editor, runtime, and renderer, with an architecture designed to scale from small games to large, seamless worlds. WolfEngine is under active development.
 
 ## Features
 
@@ -25,7 +27,7 @@ WolfEngine is a bespoke, C# game engine for building large, seamless open-world 
 | WebGPU | Undesired as lagging feature support would hold back other platforms |
 
 ## Current status
-WolfEngine is **NOT** production-ready. While it's certainly capable enough to ship a small game, the engine is still under heavy development and the API is simply not yet stable. 
+WolfEngine is **NOT** production-ready for third parties. It is currently being used to create games internally. Documentation is scarce and major features are still missing. The current plan is to start testing with third party developers in the second half of 2027.
 
 ## The vision
 WolfEngine aims to fill the gap between Unity and Unreal: a game engine built specifically for PC and current-generation console development. It aims to extract maximum performance from modern hardware, rather than being developed for the constraints posed by low-end mobile devices or web browsers.

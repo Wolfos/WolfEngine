@@ -223,6 +223,7 @@ public sealed class DeferredLightingPass
 			ReflectionsEnabled = reflections is not null,
 			DiffuseIndirectMultiplier = Math.Max(resources.Config.Lighting.DiffuseIndirectMultiplier, 0.0f),
 			SpecularIndirectMultiplier = Math.Max(resources.Config.Lighting.SpecularIndirectMultiplier, 0.0f),
+			IndirectLightMinimum = Math.Max(resources.Config.Lighting.IndirectLightMinimum, 0.0f),
 			DdgiEnabled = ddgiEnabled,
 			DdgiOrigin = resources.DdgiRuntimeOrigin,
 			DdgiStorageOffset = resources.DdgiStorageOffset,
@@ -365,6 +366,7 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetUInt("reflectionsEnabled", config.ReflectionsEnabled ? 1u : 0u);
 		lightingWriter.SetFloat("diffuseIndirectMultiplier", config.DiffuseIndirectMultiplier);
 		lightingWriter.SetFloat("specularIndirectMultiplier", config.SpecularIndirectMultiplier);
+		lightingWriter.SetFloat("indirectLightMinimum", config.IndirectLightMinimum);
 		lightingWriter.SetUInt("ddgiEnabled", config.DdgiEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiFinalContributionDebugEnabled", config.DdgiFinalContributionDebugEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiProbeDebugEnabled", config.DdgiProbeDebugEnabled ? 1u : 0u);

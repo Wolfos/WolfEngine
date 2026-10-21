@@ -1140,13 +1140,15 @@ public sealed class RayTracingSceneResourcesTests
 		var defaults = new RenderConfig().Lighting;
 		Assert.That(defaults.DiffuseIndirectMultiplier, Is.EqualTo(1.0f));
 		Assert.That(defaults.SpecularIndirectMultiplier, Is.EqualTo(1.0f));
+		Assert.That(defaults.IndirectLightMinimum, Is.EqualTo(0.0f));
 
 		var config = new RenderConfig
 		{
 			Lighting = new LightingConfig
 			{
 				DiffuseIndirectMultiplier = 0.4f,
-				SpecularIndirectMultiplier = 1.6f
+				SpecularIndirectMultiplier = 1.6f,
+				IndirectLightMinimum = 0.02f
 			}
 		};
 		var roundTripped = JsonSerializer.Deserialize<RenderConfig>(
@@ -1155,6 +1157,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		Assert.That(roundTripped.Lighting.DiffuseIndirectMultiplier, Is.EqualTo(0.4f));
 		Assert.That(roundTripped.Lighting.SpecularIndirectMultiplier, Is.EqualTo(1.6f));
+		Assert.That(roundTripped.Lighting.IndirectLightMinimum, Is.EqualTo(0.02f));
 	}
 
 	[Test]

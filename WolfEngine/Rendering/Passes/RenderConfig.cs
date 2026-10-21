@@ -73,6 +73,9 @@ public struct LightingConfig
 
 	/// <summary>Multiplier for the complete indirect specular contribution, including reflections.</summary>
 	public float SpecularIndirectMultiplier { get; set; } = 1.0f;
+
+	/// <summary>Artistic floor for indirect light</summary>
+	public float IndirectLightMinimum { get; set; } = 0.0f;
 }
 
 public enum ReflectionMode
