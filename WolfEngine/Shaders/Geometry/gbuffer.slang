@@ -164,10 +164,12 @@ float2 ClipToPixel(float4 clipPosition, uint2 frameSize)
         (-ndc.y * 0.5f + 0.5f) * frameSize.y);
 }
 
-float ClipToDepth(float4 clipPosition)
+/// View-space depth of a clip position: clip w, for a left-handed perspective projection. The velocity
+/// target is a half float, so it stores the previous frame's view depth rather than device depth: view depth
+/// keeps its relative precision at any distance, where device depth near 1 cannot tell surfaces metres apart.
+float ClipToViewDepth(float4 clipPosition)
 {
-    float invW = abs(clipPosition.w) > 1e-5f ? rcp(clipPosition.w) : 0.0f;
-    return clipPosition.z * invW;
+    return clipPosition.w;
 }
 
 PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
@@ -180,7 +182,7 @@ PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
         output.normal = float4(0.5f, 0.5f, 1.0f, 1.0f);
         output.material = float4(0.0f, 1.0f, 1.0f, 1.0f);
         output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
-        output.velocity = float4(0.0f, 0.0f, 1.0f, 1.0f);
+        output.velocity = float4(0.0f, 0.0f, ClipToViewDepth(input.currentClip), 1.0f);
         return output;
     }
 
@@ -245,8 +247,8 @@ PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
     uint2 frameSize = uint2(max(frameSizeX, 1u), max(frameSizeY, 1u));
     float2 currentPixel = ClipToPixel(input.currentClip, frameSize);
     float2 previousPixel = ClipToPixel(input.previousClip, frameSize);
-    float previousDepth = ClipToDepth(input.previousClip);
-    output.velocity = float4(previousPixel - currentPixel, previousDepth, 1.0f);
+    float previousViewDepth = ClipToViewDepth(input.previousClip);
+    output.velocity = float4(previousPixel - currentPixel, previousViewDepth, 1.0f);
 
     return output;
 }

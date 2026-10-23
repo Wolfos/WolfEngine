@@ -30,8 +30,6 @@ cbuffer TaaSettings : register(b1)
     float alphaTestHistoryScale;
     float currentProjectionZBias;
     float currentProjectionZScale;
-    float previousProjectionZBias;
-    float previousProjectionZScale;
     float staticClampExpansion;
     float clampExpansionMotionPixels;
     row_major float4x4 inverseUnjitteredViewProjection;
@@ -373,12 +371,12 @@ void TaaResolveCS(
         int2 historyBasePixel = int2(floor(historyPixelPosition));
         uint matchingTapCount = 0u;
         uint matchingFootprintTapCount = 0u;
+        // Both sides of the depth test are view depth: the g-buffer stores this surface's previous view
+        // depth in velocity.z, and the history store keeps view depth, zero for sky. Both are half floats,
+        // which hold view depth to about 0.1% at any distance; device depth would lose it past a few metres.
         float expectedPreviousViewDepth = background
             ? 0.0f
-            : ReconstructViewDepth(
-                velocity.z,
-                previousProjectionZScale,
-                previousProjectionZBias);
+            : velocity.z;
         float rejectionThreshold = DepthThreshold(expectedPreviousViewDepth);
 
         // Between two frames the jitter moves the raster grid by up to a pixel, so the
@@ -407,20 +405,17 @@ void TaaResolveCS(
                     continue;
                 }
 
-                float historyDepth =
+                float historyViewDepth =
                     historyDepthTexture.Load(int3(historyPixel, 0)).r;
+                bool historyBackground = historyViewDepth <= 0.0f;
                 bool tapMatches = false;
                 float depthError = 0.0f;
                 if (background)
                 {
-                    tapMatches = IsBackground(historyDepth);
+                    tapMatches = historyBackground;
                 }
-                else if (!IsBackground(historyDepth))
+                else if (!historyBackground)
                 {
-                    float historyViewDepth = ReconstructViewDepth(
-                        historyDepth,
-                        previousProjectionZScale,
-                        previousProjectionZBias);
                     depthError = abs(historyViewDepth - expectedPreviousViewDepth);
                     tapMatches = depthError <= rejectionThreshold;
                 }

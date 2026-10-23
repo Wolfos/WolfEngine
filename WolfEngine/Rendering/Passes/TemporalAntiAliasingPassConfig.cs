@@ -23,8 +23,6 @@ public readonly struct TemporalAntiAliasingPassConfig
 	public required Matrix4x4 PreviousViewProjection { get; init; }
 	public required float CurrentProjectionZBias { get; init; }
 	public required float CurrentProjectionZScale { get; init; }
-	public required float PreviousProjectionZBias { get; init; }
-	public required float PreviousProjectionZScale { get; init; }
 	public required TemporalAntiAliasingConfig Settings { get; init; }
 	public required bool HistoryValid { get; init; }
 	public required bool ResetHistory { get; init; }

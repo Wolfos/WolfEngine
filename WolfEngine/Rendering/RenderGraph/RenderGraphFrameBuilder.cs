@@ -3709,12 +3709,13 @@ internal sealed class RenderGraphFrameBuilder
 				TextureFormat.Rgba16Float,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+			// TAA stores view depth here, zero for sky; FSR3 reuses the texture as its luma history.
 			_view.HistoryDepthTextures[i] = device.CreateTexture(new TextureDescriptor(
 				sceneFramebufferSize.X,
 				sceneFramebufferSize.Y,
 				TextureFormat.Rgba16Float,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
+				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 			if (mode == AntiAliasingMode.Fsr3)
 			{
 				_view.Fsr3CurrentLumaTextures[i] = device.CreateTexture(new TextureDescriptor(

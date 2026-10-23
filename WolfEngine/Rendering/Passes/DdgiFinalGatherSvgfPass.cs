@@ -143,9 +143,6 @@ public sealed class DdgiFinalGatherSvgfPass
 
 		var settingsWriter = stagePipeline.SettingsWriter;
 		settingsWriter.Clear();
-		settingsWriter.SetMatrix4x4("invViewProjection", sceneData.InverseViewProjection);
-		settingsWriter.SetMatrix4x4("previousViewProjection", sceneData.PreviousViewProjection);
-		settingsWriter.SetVector3("cameraMotion", sceneData.CameraOrigin - sceneData.PreviousCameraOrigin);
 		settingsWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.FramebufferSize.X, 1));
 		settingsWriter.SetUInt("framebufferSizeY", (uint)Math.Max(config.FramebufferSize.Y, 1));
 		settingsWriter.SetUInt("traceSizeX", (uint)Math.Max(config.TraceSize.X, 1));

@@ -11,4 +11,6 @@ public readonly struct TemporalHistoryStorePassConfig
 	public required DescriptorHandle HistoryColorHandle { get; init; }
 	public required DescriptorHandle HistoryDepthHandle { get; init; }
 	public required Int2 RenderSize { get; init; }
+	public required float ProjectionZBias { get; init; }
+	public required float ProjectionZScale { get; init; }
 }

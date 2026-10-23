@@ -38,10 +38,6 @@ cbuffer BindlessHandles : register(b0)
 
 cbuffer SvgfSettings : register(b1)
 {
-    row_major float4x4 invViewProjection;
-    row_major float4x4 previousViewProjection;
-    float3 cameraMotion;
-    float _settingsPadding;
     uint framebufferSizeX;
     uint framebufferSizeY;
     uint traceSizeX;
@@ -138,21 +134,6 @@ float3 OctDecode(float2 encoded)
     n.x += n.x >= 0.0f ? -t : t;
     n.y += n.y >= 0.0f ? -t : t;
     return normalize(n);
-}
-
-/// Linear view depth the surface at a full-resolution pixel had last frame, assuming it did not move: its
-/// position through last frame's camera. Left-handed perspective, so view depth is clip w. The g-buffer's
-/// motion vectors carry a previous depth too, but only at half precision, which near 1 cannot tell surfaces
-/// metres apart. cameraMotion is this frame's camera origin minus last frame's; the matrices are
-/// camera-relative.
-float PreviousLinearDepth(uint2 pixel, float deviceDepth)
-{
-    float2 uv = (float2(pixel) + 0.5f) / float2(framebufferSizeX, framebufferSizeY);
-    float4 clip = float4(uv.x * 2.0f - 1.0f, -(uv.y * 2.0f - 1.0f), deviceDepth, 1.0f);
-    float4 positionH = mul(clip, invViewProjection);
-    float3 cameraRelative = positionH.xyz / positionH.w;
-    float4 previousClip = mul(float4(cameraRelative + cameraMotion, 1.0f), previousViewProjection);
-    return previousClip.w;
 }
 
 bool InsideTrace(int2 pixel)
@@ -280,7 +261,9 @@ void DdgiSvgfTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         float2 fullSize = float2(framebufferSizeX, framebufferSizeY);
         float2 previousFullPosition = float2(pixel) + 0.5f + velocity.xy;
         float2 previousTracePosition = previousFullPosition * float2(TraceSize()) / fullSize - 0.5f;
-        float expectedDepth = PreviousLinearDepth(pixel, deviceDepth);
+        // The view depth this surface had last frame, from the g-buffer's motion vectors, so a moving
+        // object is tested against where it was rather than where a static surface would have been.
+        float expectedDepth = velocity.z;
         float depthTolerance = expectedDepth * REPROJECTION_DEPTH_TOLERANCE + slope * 2.0f;
 
         Texture2D<float4> colorHistory = GetTexture(colorHistoryHandle);

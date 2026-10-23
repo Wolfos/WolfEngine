@@ -1,3 +1,4 @@
+import "../Common/common.slang";
 import "../Common/common_bindless.slang";
 
 cbuffer BindlessHandles : register(b0)
@@ -12,9 +13,27 @@ cbuffer CopySettings : register(b1)
 {
     uint renderSizeX;
     uint renderSizeY;
-    uint _copyPadding0;
-    uint _copyPadding1;
+    float projectionZBias;
+    float projectionZScale;
 };
+
+/// TAA keeps history depth as view depth, zero for sky: the history target is a half float, which holds view
+/// depth to about 0.1% at any distance but cannot resolve device depth near 1. projectionZBias and
+/// projectionZScale are this frame's projection M33 and M43.
+float HistoryViewDepth(float deviceDepth)
+{
+    if (IsBackgroundDepth(deviceDepth))
+    {
+        return 0.0f;
+    }
+
+    float denominator = deviceDepth - projectionZBias;
+    if (abs(denominator) < 1e-6f)
+    {
+        denominator = denominator < 0.0f ? -1e-6f : 1e-6f;
+    }
+    return projectionZScale / denominator;
+}
 
 [numthreads(8, 8, 1)]
 void TaaHistoryStoreCS(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -31,6 +50,6 @@ void TaaHistoryStoreCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     RWTexture2D<float4> historyDepth = GetRWTexture(historyDepthHandle);
 
     historyColor[pixel] = sourceColor.Load(int3(pixel, 0));
-    float depth = sourceDepth.Load(int3(pixel, 0)).r;
-    historyDepth[pixel] = float4(depth, depth, depth, 1.0f);
+    float viewDepth = HistoryViewDepth(sourceDepth.Load(int3(pixel, 0)).r);
+    historyDepth[pixel] = float4(viewDepth, viewDepth, viewDepth, 1.0f);
 }
