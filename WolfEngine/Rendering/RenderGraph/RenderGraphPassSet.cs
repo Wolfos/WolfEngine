@@ -33,6 +33,7 @@ internal sealed class RenderGraphPassSet
 		ReflectionsPass = new(shaderCompiler, bindlessResourceRegistry);
 		ReflectionsUpsamplePass = new(shaderCompiler, bindlessResourceRegistry);
 		DdgiFinalGatherPass = new(shaderCompiler, bindlessResourceRegistry);
+		DdgiFinalGatherSvgfPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalAntiAliasingPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalHistoryStorePass = new(shaderCompiler, bindlessResourceRegistry);
 		Fsr3ClearPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -77,6 +78,7 @@ internal sealed class RenderGraphPassSet
 	public ReflectionsPass ReflectionsPass { get; }
 	public ReflectionsUpsamplePass ReflectionsUpsamplePass { get; }
 	public DdgiFinalGatherPass DdgiFinalGatherPass { get; }
+	public DdgiFinalGatherSvgfPass DdgiFinalGatherSvgfPass { get; }
 	public TemporalAntiAliasingPass TemporalAntiAliasingPass { get; }
 	public TemporalHistoryStorePass TemporalHistoryStorePass { get; }
 	public Fsr3ClearPass Fsr3ClearPass { get; }

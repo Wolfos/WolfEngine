@@ -241,6 +241,24 @@ public struct DdgiFinalGatherSettings
 	/// flash as isolated bright pixels. Zero disables the clamp.
 	/// </summary>
 	public float FireflyClamp { get; set; } = 8.0f;
+
+	/// <summary>
+	/// Spatiotemporal variance-guided filtering (SVGF) of the gather at its trace resolution. Off shows the raw
+	/// one-sample trace, which is only useful for debugging.
+	/// </summary>
+	public bool Denoise { get; set; } = true;
+
+	/// <summary>
+	/// Weight of this frame's sample in the temporal moving average. Lower is smoother and slower to follow
+	/// lighting changes. The SVGF paper uses 0.2.
+	/// </summary>
+	public float TemporalAlpha { get; set; } = 0.2f;
+
+	/// <summary>
+	/// Levels of the a-trous wavelet filter, each doubling its reach. Five, as in the SVGF paper, covers 65x65
+	/// trace pixels.
+	/// </summary>
+	public int FilterIterations { get; set; } = 5;
 	public float UpsampleSharpness { get; set; } = 16.0f;
 }
 

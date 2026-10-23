@@ -22,6 +22,8 @@ public static class SceneDebugViewIds
 	public const string DdgiVisibility = "ddgi-visibility";
 	public const string DdgiFinalContribution = "ddgi-final-contribution";
 	public const string DdgiFinalGatherRaw = "ddgi-final-gather-raw";
+	public const string DdgiFinalGatherAccumulated = "ddgi-final-gather-accumulated";
+	public const string DdgiFinalGatherDenoised = "ddgi-final-gather-denoised";
 	public const string GBufferAlbedo = "gbuffer-albedo";
 	public const string GBufferNormal = "gbuffer-normal";
 	public const string GBufferMaterial = "gbuffer-material";

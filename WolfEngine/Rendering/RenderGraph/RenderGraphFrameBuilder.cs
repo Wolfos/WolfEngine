@@ -94,11 +94,32 @@ public readonly struct RenderViewResources
 	public RenderGraphResourceHandle DdgiProbeRelocationDecisionDebug { get; init; }
 	public bool WriteDdgiFinalContributionDebug { get; init; }
 	public bool WriteDdgiProbeDebug { get; init; }
-	/// <summary>
-	/// One traced diffuse sample per trace pixel, at the final gather's own resolution. The same handle as
-	/// <see cref="DdgiFinalGatherIrradiance"/> when tracing at full resolution.
-	/// </summary>
+	/// <summary>One traced diffuse sample per trace pixel, at the final gather's own resolution.</summary>
 	public RenderGraphResourceHandle DdgiFinalGatherTrace { get; init; }
+
+	/// <summary>
+	/// The SVGF history slots, indexed by <see cref="DdgiFinalGatherHistorySlot"/>; null when the denoiser is off.
+	/// </summary>
+	public RenderGraphResourceHandle[]? DdgiFinalGatherHistoryRead { get; init; }
+	public RenderGraphResourceHandle[]? DdgiFinalGatherHistoryWrite { get; init; }
+	public bool DdgiFinalGatherHistoryValid { get; init; }
+
+	/// <summary>Temporally accumulated irradiance / PI in rgb, history length in alpha.</summary>
+	public RenderGraphResourceHandle DdgiFinalGatherIntegrated { get; init; }
+
+	/// <summary>The accumulated irradiance with its luminance variance in alpha: the a-trous filter's input.</summary>
+	public RenderGraphResourceHandle DdgiFinalGatherFilterInput { get; init; }
+
+	/// <summary>Intermediate targets the a-trous levels after the first ping-pong between.</summary>
+	public RenderGraphResourceHandle DdgiFinalGatherFilterA { get; init; }
+	public RenderGraphResourceHandle DdgiFinalGatherFilterB { get; init; }
+	public int DdgiFinalGatherFilterIterations { get; init; }
+
+	/// <summary>
+	/// The finished trace-resolution result: the last a-trous level's output, or the raw trace when the denoiser
+	/// is off. The same handle as <see cref="DdgiFinalGatherIrradiance"/> when that needs no upsampling.
+	/// </summary>
+	public RenderGraphResourceHandle DdgiFinalGatherDenoised { get; init; }
 	public RenderGraphResourceHandle DdgiFinalGatherIrradiance { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth0 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
@@ -180,6 +201,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly ReflectionsPass _reflectionsPass;
 	private readonly ReflectionsUpsamplePass _reflectionsUpsamplePass;
 	private readonly DdgiFinalGatherPass _ddgiFinalGatherPass;
+	private readonly DdgiFinalGatherSvgfPass _ddgiFinalGatherSvgfPass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
@@ -247,6 +269,9 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _reflectionsExecute;
 	private readonly Action<RenderGraphContext> _reflectionsUpsampleExecute;
 	private readonly Action<RenderGraphContext> _ddgiFinalGatherExecute;
+	private readonly Action<RenderGraphContext> _ddgiFinalGatherTemporalExecute;
+	private readonly Action<RenderGraphContext> _ddgiFinalGatherVarianceExecute;
+	private readonly Action<RenderGraphContext>[] _ddgiFinalGatherFilterExecutes;
 	private readonly Action<RenderGraphContext> _ddgiFinalGatherUpsampleExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
@@ -304,6 +329,7 @@ internal sealed class RenderGraphFrameBuilder
 		_reflectionsPass = passSet.ReflectionsPass;
 		_reflectionsUpsamplePass = passSet.ReflectionsUpsamplePass;
 		_ddgiFinalGatherPass = passSet.DdgiFinalGatherPass;
+		_ddgiFinalGatherSvgfPass = passSet.DdgiFinalGatherSvgfPass;
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
 		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
 		_transparentForwardPass = passSet.TransparentForwardPass;
@@ -342,6 +368,17 @@ internal sealed class RenderGraphFrameBuilder
 		_reflectionsExecute = ExecuteReflections;
 		_reflectionsUpsampleExecute = ExecuteReflectionsUpsample;
 		_ddgiFinalGatherExecute = ExecuteDdgiFinalGather;
+		_ddgiFinalGatherTemporalExecute = context => ExecuteDdgiFinalGatherSvgf(context, DdgiFinalGatherSvgfPass.Stage.Temporal, 0);
+		_ddgiFinalGatherVarianceExecute = context => ExecuteDdgiFinalGatherSvgf(context, DdgiFinalGatherSvgfPass.Stage.Variance, 0);
+		_ddgiFinalGatherFilterExecutes = new Action<RenderGraphContext>[DdgiUtilities.MaxFinalGatherFilterIterations];
+		for (var iteration = 0; iteration < _ddgiFinalGatherFilterExecutes.Length; iteration++)
+		{
+			var capturedIteration = iteration;
+			_ddgiFinalGatherFilterExecutes[iteration] = context => ExecuteDdgiFinalGatherSvgf(
+				context,
+				DdgiFinalGatherSvgfPass.Stage.Filter,
+				capturedIteration);
+		}
 		_ddgiFinalGatherUpsampleExecute = ExecuteDdgiFinalGatherUpsample;
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
@@ -535,6 +572,10 @@ internal sealed class RenderGraphFrameBuilder
 		{
 			_view.ReleaseFogHistoryResources();
 		}
+		if (DdgiUtilities.IsFinalGatherDenoiseEnabled(config) == false || sceneEnabled == false)
+		{
+			_view.ReleaseFinalGatherHistoryResources();
+		}
 		_view.PreviousTaaEnabled = taaEnabled;
 		var lightingHandle = default(RenderGraphResourceHandle);
 		var reflectionsTraceHandle = default(RenderGraphResourceHandle);
@@ -590,6 +631,15 @@ internal sealed class RenderGraphFrameBuilder
 		var ddgiProbeRelocationDecisionHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeRelocationDecisionDebugHandle = default(RenderGraphResourceHandle);
 		var ddgiFinalGatherTraceHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherHistoryReadHandles = default(RenderGraphResourceHandle[]);
+		var ddgiFinalGatherHistoryWriteHandles = default(RenderGraphResourceHandle[]);
+		var ddgiFinalGatherHistoryValid = false;
+		var ddgiFinalGatherIntegratedHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherFilterInputHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherFilterAHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherFilterBHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherFilterIterations = 0;
+		var ddgiFinalGatherDenoisedHandle = default(RenderGraphResourceHandle);
 		var ddgiFinalGatherIrradianceHandle = default(RenderGraphResourceHandle);
 		var resolvedSceneColorHandle = default(RenderGraphResourceHandle);
 		var historyColorReadHandle = default(RenderGraphResourceHandle);
@@ -1063,25 +1113,55 @@ internal sealed class RenderGraphFrameBuilder
 					ddgiProbeRelocationDecisionDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
 					if (DdgiUtilities.IsFinalGatherEnabled(config))
 					{
-						ddgiFinalGatherIrradianceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-							sceneFramebufferSize.X,
-							sceneFramebufferSize.Y,
-							TextureFormat.Rgba16Float,
-							TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-							new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 						var finalGatherTraceSize = DdgiUtilities.GetFinalGatherTraceSize(
 							sceneFramebufferSize,
 							ddgiConfig.FinalGather);
-						ddgiFinalGatherTraceHandle =
+						var tracesAtFullResolution =
 							finalGatherTraceSize.X == sceneFramebufferSize.X &&
-							finalGatherTraceSize.Y == sceneFramebufferSize.Y
-								? ddgiFinalGatherIrradianceHandle
-								: _resources.CreateTransientTexture(new TextureDescriptor(
-									finalGatherTraceSize.X,
-									finalGatherTraceSize.Y,
-									TextureFormat.Rgba16Float,
-									TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-									new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+							finalGatherTraceSize.Y == sceneFramebufferSize.Y;
+						ddgiFinalGatherTraceHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+						ddgiFinalGatherDenoisedHandle = ddgiFinalGatherTraceHandle;
+
+						if (DdgiUtilities.IsFinalGatherDenoiseEnabled(config))
+						{
+							EnsureFinalGatherHistoryResources(_renderer.GetGfxDevice(), finalGatherTraceSize);
+							var finalGatherWriteIndex = 1 - _view.FinalGatherHistoryReadIndex;
+							ddgiFinalGatherHistoryReadHandles = new RenderGraphResourceHandle[DdgiFinalGatherHistorySlot.Count];
+							ddgiFinalGatherHistoryWriteHandles = new RenderGraphResourceHandle[DdgiFinalGatherHistorySlot.Count];
+							for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
+							{
+								ddgiFinalGatherHistoryReadHandles[slot] = _resources.ImportTexture(
+									_view.FinalGatherHistoryTextures[slot, _view.FinalGatherHistoryReadIndex]!,
+									takeOwnership: false,
+									initialState: _view.FinalGatherHistoryStates[slot, _view.FinalGatherHistoryReadIndex]);
+								ddgiFinalGatherHistoryWriteHandles[slot] = _resources.ImportTexture(
+									_view.FinalGatherHistoryTextures[slot, finalGatherWriteIndex]!,
+									takeOwnership: false,
+									initialState: _view.FinalGatherHistoryStates[slot, finalGatherWriteIndex]);
+							}
+							ddgiFinalGatherHistoryValid = _view.FinalGatherHistoryValid && frameShapeChanged == false;
+							ddgiFinalGatherIntegratedHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+							ddgiFinalGatherFilterInputHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+
+							// The first a-trous level writes the color history; later levels ping-pong between two
+							// intermediates and the last writes the finished target.
+							ddgiFinalGatherFilterIterations = DdgiUtilities.GetFinalGatherFilterIterations(ddgiConfig.FinalGather);
+							if (ddgiFinalGatherFilterIterations >= 3)
+							{
+								ddgiFinalGatherFilterAHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+							}
+							if (ddgiFinalGatherFilterIterations >= 4)
+							{
+								ddgiFinalGatherFilterBHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+							}
+							ddgiFinalGatherDenoisedHandle = ddgiFinalGatherFilterIterations > 1
+								? CreateFinalGatherTexture(finalGatherTraceSize)
+								: ddgiFinalGatherHistoryWriteHandles[DdgiFinalGatherHistorySlot.Color];
+						}
+
+						ddgiFinalGatherIrradianceHandle = tracesAtFullResolution
+							? ddgiFinalGatherDenoisedHandle
+							: CreateFinalGatherTexture(sceneFramebufferSize);
 					}
 				}
 				else
@@ -1201,6 +1281,15 @@ internal sealed class RenderGraphFrameBuilder
 				ddgiProbeRelocationDecisionDebugHandle.IsValid &&
 				IsDdgiProbeDebugView(_view.RequestedSceneDebugViewId),
 			DdgiFinalGatherTrace = ddgiFinalGatherTraceHandle,
+			DdgiFinalGatherHistoryRead = ddgiFinalGatherHistoryReadHandles,
+			DdgiFinalGatherHistoryWrite = ddgiFinalGatherHistoryWriteHandles,
+			DdgiFinalGatherHistoryValid = ddgiFinalGatherHistoryValid,
+			DdgiFinalGatherIntegrated = ddgiFinalGatherIntegratedHandle,
+			DdgiFinalGatherFilterInput = ddgiFinalGatherFilterInputHandle,
+			DdgiFinalGatherFilterA = ddgiFinalGatherFilterAHandle,
+			DdgiFinalGatherFilterB = ddgiFinalGatherFilterBHandle,
+			DdgiFinalGatherFilterIterations = ddgiFinalGatherFilterIterations,
+			DdgiFinalGatherDenoised = ddgiFinalGatherDenoisedHandle,
 			DdgiFinalGatherIrradiance = ddgiFinalGatherIrradianceHandle,
 			ShadowMapDepth0 = shadowMapHandle0,
 			ShadowMapDepth1 = shadowMapHandle1,
@@ -1277,8 +1366,21 @@ internal sealed class RenderGraphFrameBuilder
 			}
 			if (ddgiFinalGatherTraceHandle.IsValid)
 			{
-				// Alpha holds hit distance, not coverage.
+				// Alpha holds hit distance, history length or variance, not coverage.
 				RegisterSceneDebugView(SceneDebugViewIds.DdgiFinalGatherRaw, "DDGI Final Gather (Raw Trace)", ddgiFinalGatherTraceHandle, SceneDebugViewKind.ColorIgnoreAlpha);
+				if (ddgiFinalGatherIntegratedHandle.IsValid)
+				{
+					RegisterSceneDebugView(
+						SceneDebugViewIds.DdgiFinalGatherAccumulated,
+						"DDGI Final Gather (Accumulated)",
+						ddgiFinalGatherIntegratedHandle,
+						SceneDebugViewKind.ColorIgnoreAlpha);
+					RegisterSceneDebugView(
+						SceneDebugViewIds.DdgiFinalGatherDenoised,
+						"DDGI Final Gather (Denoised)",
+						ddgiFinalGatherDenoisedHandle,
+						SceneDebugViewKind.ColorIgnoreAlpha);
+				}
 			}
 			if (ddgiProbeBaseWeightDebugHandle.IsValid)
 			{
@@ -1638,12 +1740,17 @@ internal sealed class RenderGraphFrameBuilder
 					ReadSkyboxTextures(finalGatherBuilder);
 					finalGatherBuilder.SetExecute(_ddgiFinalGatherExecute);
 
-					if (_view.FrameResources.DdgiFinalGatherTrace.Id != _view.FrameResources.DdgiFinalGatherIrradiance.Id)
+					if (_view.FrameResources.DdgiFinalGatherHistoryWrite is not null)
+					{
+						AddFinalGatherSvgfPasses(graph);
+					}
+
+					if (_view.FrameResources.DdgiFinalGatherDenoised.Id != _view.FrameResources.DdgiFinalGatherIrradiance.Id)
 					{
 						graph.AddPass("DDGI Final Gather Upsample", PassKind.Compute)
 							.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
 							.ReadTexture(_view.FrameResources.GBufferNormal, ResourceState.ShaderResource)
-							.ReadTexture(_view.FrameResources.DdgiFinalGatherTrace, ResourceState.ShaderResource)
+							.ReadTexture(_view.FrameResources.DdgiFinalGatherDenoised, ResourceState.ShaderResource)
 							.WriteTexture(_view.FrameResources.DdgiFinalGatherIrradiance, ResourceState.UnorderedAccess)
 							.SetExecute(_ddgiFinalGatherUpsampleExecute);
 					}
@@ -2655,6 +2762,109 @@ internal sealed class RenderGraphFrameBuilder
 		_ddgiFinalGatherPass.Record(context, in config, context.SceneData);
 	}
 
+	private void AddFinalGatherSvgfPasses(RenderGraph graph)
+	{
+		var resources = _view.FrameResources;
+		var historyRead = resources.DdgiFinalGatherHistoryRead
+			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
+		var historyWrite = resources.DdgiFinalGatherHistoryWrite
+			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
+		var guideDepth = historyWrite[DdgiFinalGatherHistorySlot.Depth];
+		var guideNormal = historyWrite[DdgiFinalGatherHistorySlot.Normal];
+		var moments = historyWrite[DdgiFinalGatherHistorySlot.Moments];
+
+		graph.AddPass("DDGI Final Gather SVGF Temporal", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferVelocity, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiFinalGatherTrace, ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Color], ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Moments], ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Depth], ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Normal], ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiFinalGatherIntegrated, ResourceState.UnorderedAccess)
+			.WriteTexture(moments, ResourceState.UnorderedAccess)
+			.WriteTexture(guideDepth, ResourceState.UnorderedAccess)
+			.WriteTexture(guideNormal, ResourceState.UnorderedAccess)
+			.SetExecute(_ddgiFinalGatherTemporalExecute);
+
+		graph.AddPass("DDGI Final Gather SVGF Variance", PassKind.Compute)
+			.ReadTexture(resources.DdgiFinalGatherIntegrated, ResourceState.ShaderResource)
+			.ReadTexture(moments, ResourceState.ShaderResource)
+			.ReadTexture(guideDepth, ResourceState.ShaderResource)
+			.ReadTexture(guideNormal, ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiFinalGatherFilterInput, ResourceState.UnorderedAccess)
+			.SetExecute(_ddgiFinalGatherVarianceExecute);
+
+		for (var iteration = 0; iteration < resources.DdgiFinalGatherFilterIterations; iteration++)
+		{
+			var (source, output) = GetFinalGatherFilterTargets(iteration);
+			graph.AddPass($"DDGI Final Gather SVGF Filter {iteration}", PassKind.Compute)
+				.ReadTexture(guideDepth, ResourceState.ShaderResource)
+				.ReadTexture(guideNormal, ResourceState.ShaderResource)
+				.ReadTexture(source, ResourceState.ShaderResource)
+				.WriteTexture(output, ResourceState.UnorderedAccess)
+				.SetExecute(_ddgiFinalGatherFilterExecutes[iteration]);
+		}
+	}
+
+	private void ExecuteDdgiFinalGatherSvgf(RenderGraphContext context, DdgiFinalGatherSvgfPass.Stage stage, int iteration)
+	{
+		var source = default(RenderGraphResourceHandle);
+		var output = default(RenderGraphResourceHandle);
+		if (stage == DdgiFinalGatherSvgfPass.Stage.Variance)
+		{
+			output = _view.FrameResources.DdgiFinalGatherFilterInput;
+		}
+		else if (stage == DdgiFinalGatherSvgfPass.Stage.Filter)
+		{
+			(source, output) = GetFinalGatherFilterTargets(iteration);
+		}
+
+		var config = _ddgiFinalGatherSvgfPass.BuildConfig(
+			context,
+			_view.FrameResources,
+			_renderer.GetGfxDevice(),
+			stage,
+			source,
+			output,
+			iteration);
+		_ddgiFinalGatherSvgfPass.Record(context, in config, context.SceneData);
+	}
+
+	/// <summary>
+	/// The first a-trous level reads the variance pass's output and writes the color history the next frame
+	/// accumulates into; the last writes the finished target; the ones between alternate over two intermediates.
+	/// </summary>
+	private (RenderGraphResourceHandle Source, RenderGraphResourceHandle Output) GetFinalGatherFilterTargets(int iteration)
+	{
+		var resources = _view.FrameResources;
+		var historyWrite = resources.DdgiFinalGatherHistoryWrite
+			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
+		var colorHistory = historyWrite[DdgiFinalGatherHistorySlot.Color];
+		var lastIteration = resources.DdgiFinalGatherFilterIterations - 1;
+
+		var source = iteration == 0
+			? resources.DdgiFinalGatherFilterInput
+			: iteration == 1
+				? colorHistory
+				: GetFinalGatherFilterIntermediate(iteration - 1);
+		var output = iteration == 0
+			? colorHistory
+			: iteration == lastIteration
+				? resources.DdgiFinalGatherDenoised
+				: GetFinalGatherFilterIntermediate(iteration);
+		return (source, output);
+	}
+
+	/// <summary>Level 1 writes A, level 2 writes B, level 3 writes A again, and so on.</summary>
+	private RenderGraphResourceHandle GetFinalGatherFilterIntermediate(int iteration)
+	{
+		return iteration % 2 == 1
+			? _view.FrameResources.DdgiFinalGatherFilterA
+			: _view.FrameResources.DdgiFinalGatherFilterB;
+	}
+
 	private void ExecuteDdgiFinalGatherUpsample(RenderGraphContext context)
 	{
 		// The reflection upsample's depth- and normal-aware reconstruction suits any one-sample-per-trace-pixel
@@ -2663,7 +2873,7 @@ internal sealed class RenderGraphFrameBuilder
 			context,
 			_view.FrameResources,
 			_renderer.GetGfxDevice(),
-			_view.FrameResources.DdgiFinalGatherTrace,
+			_view.FrameResources.DdgiFinalGatherDenoised,
 			_view.FrameResources.DdgiFinalGatherIrradiance,
 			_view.FrameResources.Config.DiffuseGlobalIllumination.FinalGather.UpsampleSharpness);
 		_reflectionsUpsamplePass.Record(context, in config, context.SceneData);
@@ -3315,6 +3525,8 @@ internal sealed class RenderGraphFrameBuilder
 			_view.FogHistoryValid = false;
 		}
 
+		CommitFinalGatherHistory();
+
 		if (HasRayTracedDdgi(_view.FrameResources.Config) == false || _view.FrameResources.SceneEnabled == false)
 		{
 			_view.DdgiHistoryValid = false;
@@ -3383,6 +3595,71 @@ internal sealed class RenderGraphFrameBuilder
 		new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f),
 		dimension: TextureDimension.Texture3D,
 		depth: grid.Z);
+
+	private void CommitFinalGatherHistory()
+	{
+		var historyRead = _view.FrameResources.DdgiFinalGatherHistoryRead;
+		var historyWrite = _view.FrameResources.DdgiFinalGatherHistoryWrite;
+		if (historyRead is null || historyWrite is null)
+		{
+			_view.FinalGatherHistoryValid = false;
+			return;
+		}
+
+		var readIndex = _view.FinalGatherHistoryReadIndex;
+		var writeIndex = 1 - readIndex;
+		for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
+		{
+			_view.FinalGatherHistoryStates[slot, readIndex] = _resources.GetResourceState(historyRead[slot]);
+			_view.FinalGatherHistoryStates[slot, writeIndex] = _resources.GetResourceState(historyWrite[slot]);
+		}
+
+		_view.FinalGatherHistoryReadIndex = writeIndex;
+		_view.FinalGatherHistoryValid = true;
+	}
+
+	private void EnsureFinalGatherHistoryResources(IGfxDevice device, Int2 traceSize)
+	{
+		var changed = _view.FinalGatherHistoryDevice is not null &&
+		              (ReferenceEquals(_view.FinalGatherHistoryDevice, device) == false ||
+		               _view.FinalGatherHistoryBackendKind != device.BackendKind ||
+		               _view.FinalGatherHistorySize.X != traceSize.X ||
+		               _view.FinalGatherHistorySize.Y != traceSize.Y);
+		if (changed)
+		{
+			_view.ReleaseFinalGatherHistoryResources();
+		}
+		if (_view.FinalGatherHistoryTextures[0, 0] is not null) return;
+
+		for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
+		{
+			for (var i = 0; i < 2; i++)
+			{
+				_view.FinalGatherHistoryTextures[slot, i] = device.CreateTexture(new TextureDescriptor(
+					traceSize.X,
+					traceSize.Y,
+					DdgiFinalGatherHistorySlot.GetFormat(slot),
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+				_view.FinalGatherHistoryStates[slot, i] = ResourceState.UnorderedAccess;
+			}
+		}
+		_view.FinalGatherHistoryDevice = device;
+		_view.FinalGatherHistoryBackendKind = device.BackendKind;
+		_view.FinalGatherHistorySize = traceSize;
+		_view.FinalGatherHistoryReadIndex = 0;
+		_view.FinalGatherHistoryValid = false;
+	}
+
+	private RenderGraphResourceHandle CreateFinalGatherTexture(Int2 size)
+	{
+		return _resources.CreateTransientTexture(new TextureDescriptor(
+			size.X,
+			size.Y,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+	}
 
 	private void EnsureFogHistoryResources(IGfxDevice device, Int3 grid, float maxDistance)
 	{

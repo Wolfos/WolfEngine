@@ -56,6 +56,7 @@ internal sealed class RenderViewState
 		ReleaseFogHistoryResources();
 		ReleaseColorPyramidResources();
 		ReleaseDdgiHistoryResources();
+		ReleaseFinalGatherHistoryResources();
 		HasPreviousFrameShape = false;
 		HasPreviousResolvedProjection = false;
 		PreviousResolvedProjection = Matrix4x4.Identity;
@@ -227,6 +228,18 @@ internal sealed class RenderViewState
 	public bool CurrentDdgiConfigValid;
 
 	/// <summary>
+	/// Ping-pong history of the DDGI final gather's SVGF denoiser, at its trace resolution. Indexed
+	/// [slot, ping-pong index] with <see cref="DdgiFinalGatherHistorySlot"/>.
+	/// </summary>
+	public readonly IGfxTexture?[,] FinalGatherHistoryTextures = new IGfxTexture?[DdgiFinalGatherHistorySlot.Count, 2];
+	public readonly ResourceState[,] FinalGatherHistoryStates = new ResourceState[DdgiFinalGatherHistorySlot.Count, 2];
+	public IGfxDevice? FinalGatherHistoryDevice;
+	public GraphicsBackendKind? FinalGatherHistoryBackendKind;
+	public Int2 FinalGatherHistorySize;
+	public int FinalGatherHistoryReadIndex;
+	public bool FinalGatherHistoryValid;
+
+	/// <summary>
 	/// Retires every GPU resource this view holds. Called when the view closes; each release goes through the
 	/// device's retirement queue, so resources outlive any submission still referencing them.
 	/// </summary>
@@ -241,6 +254,7 @@ internal sealed class RenderViewState
 		ReleaseFogHistoryResources();
 		ReleaseColorPyramidResources();
 		ReleaseDdgiHistoryResources();
+		ReleaseFinalGatherHistoryResources();
 		SceneRenderTarget.Release(device);
 		SceneRenderSize = Int2.Zero;
 		PreviousJitterPhaseCount = 0;
@@ -328,6 +342,27 @@ internal sealed class RenderViewState
 		HistoryReadIndex = 0;
 		HistoryValid = false;
 		Fsr3FrameIndex = 0;
+	}
+
+	public void ReleaseFinalGatherHistoryResources()
+	{
+		for (var i = 0; i < 2; i++)
+		{
+			for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
+			{
+				if (FinalGatherHistoryTextures[slot, i] is IGfxTexture texture)
+				{
+					EnqueueTemporalRelease(FinalGatherHistoryDevice, texture, FinalGatherHistoryStates[slot, i]);
+				}
+				FinalGatherHistoryTextures[slot, i] = null;
+				FinalGatherHistoryStates[slot, i] = ResourceState.Common;
+			}
+		}
+		FinalGatherHistoryDevice = null;
+		FinalGatherHistoryBackendKind = null;
+		FinalGatherHistorySize = Int2.Zero;
+		FinalGatherHistoryReadIndex = 0;
+		FinalGatherHistoryValid = false;
 	}
 
 	public void ReleaseDdgiHistoryResources()

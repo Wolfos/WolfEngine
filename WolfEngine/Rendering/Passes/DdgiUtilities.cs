@@ -35,6 +35,20 @@ public static class DdgiUtilities
 		       config.DiffuseGlobalIllumination.FinalGather.Enabled;
 	}
 
+	public static bool IsFinalGatherDenoiseEnabled(RenderConfig config)
+	{
+		return IsFinalGatherEnabled(config) &&
+		       config.DiffuseGlobalIllumination.FinalGather.Denoise;
+	}
+
+	public const int MaxFinalGatherFilterIterations = 5;
+
+	public static int GetFinalGatherFilterIterations(DdgiFinalGatherSettings settings) =>
+		Math.Clamp(settings.FilterIterations, 1, MaxFinalGatherFilterIterations);
+
+	public static float GetFinalGatherTemporalAlpha(DdgiFinalGatherSettings settings) =>
+		Math.Clamp(settings.TemporalAlpha, 0.01f, 1.0f);
+
 	public static Int2 GetFinalGatherTraceSize(Int2 fullSize, DdgiFinalGatherSettings settings)
 	{
 		var divisor = settings.Resolution switch
@@ -775,3 +789,34 @@ public readonly record struct DdgiRelocationResult(
 	DdgiProbeState State,
 	DdgiProbeRelocationDecision Decision,
 	int BackfaceHitCount);
+
+/// <summary>
+/// The textures the DDGI final gather's SVGF denoiser carries from one frame to the next, each with a read and a
+/// write copy.
+/// </summary>
+public static class DdgiFinalGatherHistorySlot
+{
+	/// <summary>The first a-trous level's output: filtered irradiance / PI in rgb, its variance in alpha.</summary>
+	public const int Color = 0;
+
+	/// <summary>Accumulated luminance mean and second moment in rg, history length in frames in b.</summary>
+	public const int Moments = 1;
+
+	/// <summary>Linear view depth of the surface each trace pixel saw, zero for sky.</summary>
+	public const int Depth = 2;
+
+	/// <summary>Octahedral-encoded world normal of that surface.</summary>
+	public const int Normal = 3;
+
+	public const int Count = 4;
+
+	private static readonly TextureFormat[] Formats =
+	[
+		TextureFormat.Rgba16Float,
+		TextureFormat.Rgba16Float,
+		TextureFormat.R32Float,
+		TextureFormat.Rg16Float
+	];
+
+	public static TextureFormat GetFormat(int slot) => Formats[slot];
+}

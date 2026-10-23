@@ -47,6 +47,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId DdgiIrradianceIntegrate = Id("ddgi-irradiance-integrate");
 	public static readonly ShaderProgramId DdgiIntegrate = Id("ddgi-integrate");
 	public static readonly ShaderProgramId DdgiFinalGather = Id("ddgi-final-gather");
+	public static readonly ShaderProgramId DdgiFinalGatherSvgf = Id("ddgi-final-gather-svgf");
 	public static readonly ShaderProgramId AmbientOcclusionBlur = Id("ao-blur");
 	public static readonly ShaderProgramId AmbientOcclusionUpsample = Id("ao-upsample");
 	public static readonly ShaderProgramId TaaResolve = Id("taa-resolve");
@@ -124,6 +125,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.DdgiIrradianceIntegrate, "Ddgi/ddgi_irradiance_integrate.compute.slang"),
 			D(EngineShaderPrograms.DdgiIntegrate, "Ddgi/ddgi_integrate.compute.slang"),
 			D(EngineShaderPrograms.DdgiFinalGather, "Ddgi/ddgi_final_gather.compute.slang"),
+			D(EngineShaderPrograms.DdgiFinalGatherSvgf, "Ddgi/ddgi_final_gather_svgf.compute.slang"),
 			D(EngineShaderPrograms.AmbientOcclusionBlur, "AmbientOcclusion/ao_blur.compute.slang"),
 			D(EngineShaderPrograms.AmbientOcclusionUpsample, "AmbientOcclusion/ao_upsample.compute.slang"),
 			D(EngineShaderPrograms.TaaResolve, "Taa/taa_resolve.compute.slang"),
@@ -335,6 +337,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.DdgiIrradianceIntegrate) return ["DdgiIrradianceIntegrateCS"];
 		if (id == EngineShaderPrograms.DdgiIntegrate) return ["DdgiVisibilityIntegrateCS"];
 		if (id == EngineShaderPrograms.DdgiFinalGather) return ["DdgiFinalGatherCS"];
+		if (id == EngineShaderPrograms.DdgiFinalGatherSvgf) return ["DdgiSvgfTemporalCS", "DdgiSvgfVarianceCS", "DdgiSvgfFilterCS"];
 		if (id == EngineShaderPrograms.AmbientOcclusionBlur) return ["AmbientOcclusionBlurCS"];
 		if (id == EngineShaderPrograms.AmbientOcclusionUpsample) return ["AmbientOcclusionUpsampleCS"];
 		if (id == EngineShaderPrograms.TaaResolve) return ["TaaResolveCS"];
