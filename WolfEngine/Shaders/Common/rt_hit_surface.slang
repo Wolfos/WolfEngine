@@ -46,6 +46,16 @@ struct RtTerrainLayerSample
     float height;
 };
 
+/// Normalizes, or returns zero for a vector too short to have a direction. Plain normalize turns a
+/// degenerate triangle's zero-length cross product or cancelling vertex normals into NaN, and NaN slips
+/// past every later length check; one such hit used to poison whatever accumulated it. Callers test
+/// for the zero result and fall back.
+float3 RtSafeNormalize(float3 value)
+{
+    float lengthSquared = dot(value, value);
+    return lengthSquared > 1e-20f ? value * rsqrt(lengthSquared) : 0.0f.xxx;
+}
+
 uint RtResolveMaterialIndex(uint materialHandle)
 {
     if (!IsPackedHandleValid(materialHandle))
@@ -124,7 +134,7 @@ float3 RtComputeTerrainLocalNormal(float2 uv, GpuInstanceData instanceData, GpuT
     float spacingZ = terrainWorldSize.y / max(height - 1, 1);
     float3 tangentX = float3(max(spacingX * 2.0f, 0.001f), right - left, 0.0f);
     float3 tangentZ = float3(0.0f, up - down, max(spacingZ * 2.0f, 0.001f));
-    return normalize(cross(tangentZ, tangentX));
+    return RtSafeNormalize(cross(tangentZ, tangentX));
 }
 
 float3 RtGetTriplanarWeights(float3 worldNormal)
@@ -285,7 +295,11 @@ bool RtTryResolveTerrainHitSurface(
 
     float3 localNormal = RtComputeTerrainLocalNormal(surface.uv, instanceData, terrainData);
     surface.worldPosition = rayOrigin + rayDirection * fallbackRayT;
-    surface.worldNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
+    surface.worldNormal = RtSafeNormalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
+    if (length(surface.worldNormal) <= 1e-4f)
+    {
+        return false;
+    }
     surface.worldGeometricNormal = surface.worldNormal;
     surface.albedo = RtSampleTerrainAlbedo(tables, surface.uv, surface.worldPosition, surface.worldNormal, terrainData);
     surface.emissive = 0.0f.xxx;
@@ -342,7 +356,7 @@ bool RtTryResolveGeometricNormal(
         uint materialIndex = RtResolveMaterialIndex(instanceData.materialHandle);
         GpuTerrainMaterialData terrainData = tables.terrainMaterials[materialIndex];
         float3 localNormal = RtComputeTerrainLocalNormal(uv, instanceData, terrainData);
-        worldGeometricNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
+        worldGeometricNormal = RtSafeNormalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
         return length(worldGeometricNormal) > 1e-4f;
     }
 
@@ -373,7 +387,7 @@ bool RtTryResolveGeometricNormal(
         float4(GetPackedVertexPosition(tables.packedVertices[i1]), 1.0f), instanceData.world).xyz;
     float3 worldPosition2 = mul(
         float4(GetPackedVertexPosition(tables.packedVertices[i2]), 1.0f), instanceData.world).xyz;
-    worldGeometricNormal = normalize(cross(
+    worldGeometricNormal = RtSafeNormalize(cross(
         worldPosition1 - worldPosition0,
         worldPosition2 - worldPosition0));
     return length(worldGeometricNormal) > 1e-4f;
@@ -436,7 +450,7 @@ bool RtTryResolveHitSurface(
                 GetPackedVertexPosition(v0) * b0 +
                 GetPackedVertexPosition(v1) * b1 +
                 GetPackedVertexPosition(v2) * b2;
-            float3 localNormal = normalize(
+            float3 localNormal = RtSafeNormalize(
                 GetPackedVertexNormal(v0) * b0 +
                 GetPackedVertexNormal(v1) * b1 +
                 GetPackedVertexNormal(v2) * b2);
@@ -448,8 +462,8 @@ bool RtTryResolveHitSurface(
             float3 worldPosition1 = mul(float4(GetPackedVertexPosition(v1), 1.0f), instanceData.world).xyz;
             float3 worldPosition2 = mul(float4(GetPackedVertexPosition(v2), 1.0f), instanceData.world).xyz;
             surface.worldPosition = mul(float4(localPosition, 1.0f), instanceData.world).xyz;
-            surface.worldNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
-            surface.worldGeometricNormal = normalize(cross(
+            surface.worldNormal = RtSafeNormalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
+            surface.worldGeometricNormal = RtSafeNormalize(cross(
                 worldPosition1 - worldPosition0,
                 worldPosition2 - worldPosition0));
         }

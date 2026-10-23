@@ -140,6 +140,34 @@ float3 ReconstructCameraRelativePosition(float2 uv, float depth)
     return positionH.xyz / positionH.w;
 }
 
+/// The full-resolution pixel a trace pixel samples: the one under its centre.
+uint2 FinalGatherRepresentativePixel(uint2 tracePixel, uint2 traceSize, uint2 fullSize)
+{
+    float2 fullPixelPosition = (float2(tracePixel) + 0.5f) * float2(fullSize) / float2(traceSize);
+    return min(uint2(fullPixelPosition), fullSize - 1u);
+}
+
+/// Decodes a g-buffer normal. A pixel whose normal was never written decodes to a zero vector, which
+/// plain normalize would turn into NaN; those get an arbitrary but valid up vector instead.
+float3 FinalGatherDecodeNormal(float3 encoded)
+{
+    float3 normal = encoded * 2.0f - 1.0f;
+    float lengthSquared = dot(normal, normal);
+    return lengthSquared > 1e-8f ? normal * rsqrt(lengthSquared) : float3(0.0f, 1.0f, 0.0f);
+}
+
+/// False for NaN or infinity in any channel. Tests the exponent bits rather than calling isfinite,
+/// which fast-math shader compilation is free to fold to true.
+bool FinalGatherIsFinite(float4 value)
+{
+    uint4 exponent = asuint(value) & 0x7F800000u;
+    return all(exponent != 0x7F800000u.xxxx);
+}
+
+/// Device-depth increment used to measure how far one step of depth precision moves a reconstructed
+/// position at a given depth: a few ulps of 32-bit float just below 1.
+static const float DEPTH_PRECISION_STEP = 4.0e-7f;
+
 uint FinalGatherHash(uint value)
 {
     value ^= value >> 16u;
@@ -261,9 +289,7 @@ void DdgiFinalGatherCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint2 size = uint2(framebufferSizeX, framebufferSizeY);
-    float2 fullPixelPosition =
-        (float2(outputPixel) + 0.5f) * float2(size) / float2(outputSize);
-    uint2 pixel = min(uint2(fullPixelPosition), size - 1u);
+    uint2 pixel = FinalGatherRepresentativePixel(outputPixel, outputSize, size);
 
     RWTexture2D<float4> outputTexture = GetRWTexture(outputHandle);
     float depth = GetTexture(depthHandle).Load(int3(pixel, 0)).r;
@@ -274,16 +300,28 @@ void DdgiFinalGatherCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     float2 screenUv = (float2(pixel) + 0.5f) / float2(size);
-    float3 worldPosition = ReconstructCameraRelativePosition(screenUv, depth) + camera.cameraOrigin;
-    float3 normal = DecodeNormal(GetTexture(normalHandle).Load(int3(pixel, 0)).xyz);
+    float3 cameraRelativePosition = ReconstructCameraRelativePosition(screenUv, depth);
+    float3 worldPosition = cameraRelativePosition + camera.cameraOrigin;
+    float3 normal = FinalGatherDecodeNormal(GetTexture(normalHandle).Load(int3(pixel, 0)).xyz);
     float3 direction = CosineHemisphereDirection(normal, FinalGatherSample(outputPixel, frameIndex));
 
-    float launchBias = max(bias, 0.001f);
+    // A fixed bias only holds up close to the camera. Far away, the position rebuilt from the depth buffer
+    // is only as exact as the depth format at that range, and can land behind the surface it came from;
+    // a ray launched from there starts inside the geometry and reads as black. Push the origin off the
+    // surface by at least a pixel's width, and back toward the camera, along which the depth error lies,
+    // by a few depth steps.
+    float2 pixelStepUv = float2(1.0f / float(size.x), 0.0f);
+    float pixelFootprint = length(ReconstructCameraRelativePosition(screenUv + pixelStepUv, depth) - cameraRelativePosition);
+    float depthStep = length(ReconstructCameraRelativePosition(screenUv, min(depth + DEPTH_PRECISION_STEP, 1.0f)) - cameraRelativePosition);
+    float surfaceOffset = max(bias, max(pixelFootprint * 1.5f, 0.001f));
+    float viewOffset = depthStep * 2.0f;
+    float3 toCamera = normalize(-cameraRelativePosition);
     RayDesc ray;
-    ray.Origin = worldPosition + normal * launchBias;
+    ray.Origin = worldPosition + normal * surfaceOffset + toCamera * viewOffset;
     ray.Direction = direction;
     ray.TMin = 0.0f;
     ray.TMax = maxRayDistance;
+    float selfHitDistance = (surfaceOffset + viewOffset) * 4.0f;
     WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
 
     DdgiSampleParams params = MakeDdgiSampleParams();
@@ -311,9 +349,13 @@ void DdgiFinalGatherCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
         else if (dot(surface.worldGeometricNormal, direction) > 0.0f)
         {
-            // The ray started inside geometry or reached the back of a closed mesh; nothing lit
-            // can be seen from there. The probe trace makes the same call.
-            radiance = 0.0f.xxx;
+            // A back face right at the origin means the launch point is still inside the surface it
+            // left, which says nothing about the light there; take the probes' estimate for this point
+            // instead. Further away, the ray reached the back of a closed mesh and nothing lit can be
+            // seen from there. The probe trace makes the same call.
+            radiance = hit.distance < selfHitDistance
+                ? SampleIndirectIrradiance(params, worldPosition, normal)
+                : 0.0f.xxx;
         }
         else
         {
@@ -325,7 +367,7 @@ void DdgiFinalGatherCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         radiance = SampleUnoccludedRadiance(params, ray.Origin + direction * maxRayDistance, direction);
     }
 
-    radiance = max(radiance, 0.0f.xxx);
+    radiance = FinalGatherIsFinite(float4(radiance, 0.0f)) ? max(radiance, 0.0f.xxx) : 0.0f.xxx;
     if (fireflyClamp > 0.0f)
     {
         float luminance = dot(radiance, float3(0.2126f, 0.7152f, 0.0722f));
