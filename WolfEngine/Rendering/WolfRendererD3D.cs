@@ -489,11 +489,6 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		{
 			_imguiInputSink.SetKey(imguiKey, true);
 		}
-
-		if (key == Key.Escape)
-		{
-			_window?.Close();
-		}
 	}
 
 	private void HandleKeyUp(IKeyboard keyboard, Key key, int keycode)
