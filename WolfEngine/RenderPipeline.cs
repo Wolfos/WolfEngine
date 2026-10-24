@@ -154,9 +154,13 @@ public class RenderPipeline : IRenderPipeline
 
 		using (FrameProfiler.Instance.Measure("Build Snapshot"))
 		{
-			if (_renderGraph.TryBeginSnapshotWrite(out var frameSnapshot) == false)
+			FrameSnapshot frameSnapshot;
+			using (FrameProfiler.Instance.Measure("Wait for snapshot"))
 			{
-				return;
+				if (_renderGraph.TryBeginSnapshotWrite(out frameSnapshot) == false)
+				{
+					return;
+				}
 			}
 
 			for (var i = 0; i < views.Count; i++)
@@ -178,9 +182,12 @@ public class RenderPipeline : IRenderPipeline
 
 			// Every database copies the process-wide generation tables after all gathers. A later view can
 			// allocate a shared draw, mesh or material slot that an earlier view must see this same frame.
-			for (var i = 0; i < frameSnapshot.Views.Count; i++)
+			using (FrameProfiler.Instance.Measure("Refresh shared handles"))
 			{
-				frameSnapshot.Views[i].GpuDrawDatabase.RefreshSharedHandleState();
+				for (var i = 0; i < frameSnapshot.Views.Count; i++)
+				{
+					frameSnapshot.Views[i].GpuDrawDatabase.RefreshSharedHandleState();
+				}
 			}
 
 			if (_renderGraph.TryPublishSnapshot() == false)
