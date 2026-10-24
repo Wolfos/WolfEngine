@@ -112,6 +112,7 @@ public class RenderPipeline : IRenderPipeline
 			}
 
 			PopulateSnapshot(snapshot, cameraWorldTransform, config, worlds);
+			ExtractRenderFeatures(snapshot, worlds);
 			if (_renderGraph.TryPublishSnapshot() == false)
 			{
 				return;
@@ -172,6 +173,7 @@ public class RenderPipeline : IRenderPipeline
 					submission.CameraWorldTransform,
 					submission.Config,
 					[worlds[i]]);
+				ExtractRenderFeatures(snapshot, [worlds[i]]);
 			}
 
 			// Every database copies the process-wide generation tables after all gathers. A later view can
@@ -187,6 +189,17 @@ public class RenderPipeline : IRenderPipeline
 			}
 
 			_stressFrame++;
+		}
+	}
+
+	private void ExtractRenderFeatures(RenderViewSnapshot snapshot, IReadOnlyList<World> worlds)
+	{
+		using (FrameProfiler.Instance.Measure("Extract Render Features"))
+		{
+			for (var i = 0; i < worlds.Count; i++)
+			{
+				snapshot.ExtractRenderFeatures(worlds[i], _renderGraph.RenderFeatures);
+			}
 		}
 	}
 

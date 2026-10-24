@@ -65,6 +65,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IThreeDFileImporter _threeDFileImporter;
 	private readonly IFontCompiler? _fontCompiler;
+	private readonly IComputeShaderCompiler? _computeShaderCompiler;
 	private readonly ITextureGpuCompressionService _textureGpuCompressionService;
 	private readonly IProjectTypeResolver? _typeResolver;
 	private readonly IEditorNotificationService? _notificationService;
@@ -81,7 +82,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		ITextureGpuCompressionService textureGpuCompressionService,
 		IProjectTypeResolver? typeResolver = null,
 		IEditorNotificationService? notificationService = null,
-		IFontCompiler? fontCompiler = null)
+		IFontCompiler? fontCompiler = null,
+		IComputeShaderCompiler? computeShaderCompiler = null)
 	{
 		_index = index ?? throw new ArgumentNullException(nameof(index));
 		_metadataStore = metadataStore ?? throw new ArgumentNullException(nameof(metadataStore));
@@ -93,6 +95,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		_typeResolver = typeResolver;
 		_notificationService = notificationService;
 		_fontCompiler = fontCompiler;
+		_computeShaderCompiler = computeShaderCompiler;
 		_importers = CreateImporters();
 	}
 
@@ -919,6 +922,72 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					RelativePath = relativeArtifactPath,
 					ContentHash = AssetHashing.ComputeFileHash(absoluteArtifactPath),
 					ByteSize = info.Length,
+					ChunkIndex = 0,
+					ChunkCount = 1
+				}
+			],
+			Dependencies = []
+		};
+	}
+
+	private ImportGraph ImportComputeShaderSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var compiler = _computeShaderCompiler
+		               ?? throw new InvalidOperationException("Compute shader import requires editor tooling registration.");
+		var name = ComputeShaderImport.GetAssetName(relativeSourcePath);
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.ComputeShader, name);
+		// Kernels are compiled for the host's backend only, like textures: Metal libraries need macOS to build.
+		var target = new RuntimeArtifactTargetProvider().CurrentTarget;
+		LogLibraryBuildStage($"Compiling compute shader '{relativeSourcePath}' for {target}.");
+		var kernels = compiler.Compile(absoluteSourcePath, Rendering.Shaders.ShaderProgramId.ForAsset(nodeId),
+			ComputeShaderImport.GetBackendKind(target));
+		var relativeArtifactPath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ArtifactsFolderName,
+			nodeId.ToString("D"),
+			target,
+			Rendering.Shaders.ComputeShaderArtifactSerializer.FileName));
+		var absoluteArtifactPath = GetAbsolutePath(projectRootPath, relativeArtifactPath);
+		Rendering.Shaders.ComputeShaderArtifactSerializer.Write(absoluteArtifactPath, kernels);
+		var summary = new ComputeShaderAssetSummary
+		{
+			EntryPoints = kernels.Select(kernel => kernel.Request.ComputeEntryPoint!).ToArray()
+		};
+
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.ComputeShader,
+					NodeKey = "main",
+					Name = name,
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(summary)
+				}
+			],
+			Artifacts =
+			[
+				new AssetArtifactRecord
+				{
+					NodeId = nodeId,
+					ArtifactKey = "runtime-compute-shader",
+					Kind = Rendering.Shaders.ComputeShaderArtifactSerializer.ArtifactKind,
+					Target = target,
+					RelativePath = relativeArtifactPath,
+					ContentHash = AssetHashing.ComputeFileHash(absoluteArtifactPath),
+					ByteSize = new FileInfo(absoluteArtifactPath).Length,
 					ChunkIndex = 0,
 					ChunkCount = 1
 				}
@@ -2230,6 +2299,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				path => string.Equals(Path.GetExtension(path), ".cube", StringComparison.OrdinalIgnoreCase),
 				() => "{}",
 				ImportColorLookupTableSource),
+			new AssetImporterDescriptor(
+				AssetImporterIds.ComputeShader,
+				1,
+				path => path.EndsWith(ComputeShaderImport.SourceExtension, StringComparison.OrdinalIgnoreCase),
+				() => "{}",
+				ImportComputeShaderSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
 				13,

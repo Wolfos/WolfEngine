@@ -62,7 +62,10 @@ internal sealed class RenderGraphPassSet
 			renderer,
 			gpuDrawBackendBridge);
 		SkyboxPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
+		BindlessResourceRegistry = bindlessResourceRegistry;
 	}
+
+	public BindlessResourceRegistry BindlessResourceRegistry { get; }
 
 	public AmbientOcclusionPass AmbientOcclusionPass { get; }
 	public AmbientOcclusionBlurPass AmbientOcclusionBlurPass { get; }

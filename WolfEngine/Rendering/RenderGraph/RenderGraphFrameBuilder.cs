@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Features;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Rendering.Shaders;
@@ -297,8 +298,9 @@ internal sealed class RenderGraphFrameBuilder
 	private bool _recordProceduralSkyLighting;
 	private bool _recordProceduralSkyBrdf;
 	private ResourceState _proceduralSkyboxInitialState = ResourceState.ShaderResource;
+	private readonly RenderFeatureHost _renderFeatureHost;
 
-	
+
 	public RenderGraphFrameBuilder(
 		RenderGraphResourceRegistry resources,
 		IRenderer renderer,
@@ -316,6 +318,7 @@ internal sealed class RenderGraphFrameBuilder
 		_skinningPass = new SkinningPass(shaderProvider);
 		_resources = resources;
 		_renderer = renderer;
+		_renderFeatureHost = new RenderFeatureHost(resources, renderer, passSet.BindlessResourceRegistry);
 		_ambientOcclusionPass = passSet.AmbientOcclusionPass;
 		_ambientOcclusionBlurPass = passSet.AmbientOcclusionBlurPass;
 		_ambientOcclusionUpsamplePass = passSet.AmbientOcclusionUpsamplePass;
@@ -1410,6 +1413,15 @@ internal sealed class RenderGraphFrameBuilder
 		_uiFrame = uiFrame;
 	}
 
+	/// <summary>Once per frame, before views are set up: releases what unregistered render features owned.</summary>
+	internal void BeginRenderFeatures(RenderFeatureRegistry registry) => _renderFeatureHost.BeginFrame(registry);
+
+	/// <summary>Hands the bound view its snapshot's render features; call after <see cref="BeginViewFrame"/>.</summary>
+	internal void SetViewRenderFeatures(IReadOnlyList<RenderFeatureFrame> frames) => _view.RenderFeatureFrames = frames;
+
+	/// <summary>Once per frame, after execution and before the resource registry ends the frame.</summary>
+	internal void CompleteRenderFeatures() => _renderFeatureHost.CompleteFrame();
+
 	public void SetGameplayUiFrame(GameplayUiRenderFrame frame)
 	{
 		_gameplayUiFrame = frame ?? GameplayUiRenderFrame.Empty;
@@ -1883,6 +1895,14 @@ internal sealed class RenderGraphFrameBuilder
 			
 			ReadSkyboxTextures(transparentForwardBuilder);
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
+
+			_renderFeatureHost.Record(
+				graph,
+				RenderInjectionPoint.BeforeTemporalResolve,
+				_view.RenderFeatureFrames,
+				_view.View,
+				_view.FrameResources.LightingBuffer,
+				_view.FrameResources.GBufferDepth);
 
 			if (_view.FrameResources.Config.AntiAliasing.UsesFsr3 && _view.FrameResources.Fsr3.InternalHistoryWrite.IsValid)
 			{

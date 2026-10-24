@@ -51,6 +51,9 @@ public sealed class RenderViewSnapshot
 	/// <summary>Skinned instances the render thread must deform this frame.</summary>
 	public List<SkinningPacket> SkinningPackets { get; }
 
+	/// <summary>The render features of this view's world and what their <c>Extract</c> captured.</summary>
+	internal IReadOnlyList<Features.RenderFeatureFrame> RenderFeatureFrames => _renderFeatureFrames;
+
 	/// <summary>Packed current and previous bone matrices for this frame.</summary>
 	public ReadOnlySpan<Matrix4x4> BoneMatrices => _boneMatrixArena.AsSpan(0, _boneMatrixArenaUsed);
 	public Vector3 SunDirection { get; private set; }
@@ -66,6 +69,9 @@ public sealed class RenderViewSnapshot
 	private bool _hasCameraState;
 	private Matrix4x4[] _boneMatrixArena = new Matrix4x4[512];
 	private int _boneMatrixArenaUsed;
+	private readonly List<Features.RenderFeatureFrame> _renderFeatureFrames = new(4);
+	private readonly Dictionary<Features.RenderFeature, object> _renderFeatureFramePool = new(ReferenceEqualityComparer.Instance);
+	private readonly List<Features.RenderFeature> _renderFeaturePoolScratch = new();
 
 	/// <summary>
 	/// A view id is a reusable slot. Retire records and camera history when that slot is rebound, even if
@@ -133,11 +139,73 @@ public sealed class RenderViewSnapshot
 		FogVolumePackets.Clear();
 		SkinningPackets.Clear();
 		OutlinePackets.Clear();
+		ClearRenderFeatureFrames();
 		_boneMatrixArenaUsed = 0;
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		HasPreviousCameraState = false;
 		GpuDrawDatabase.ResetForSnapshotWrite();
+	}
+
+	/// <summary>
+	/// Game thread: runs each feature's <c>Extract</c> into this snapshot's frame object for it, reusing the object
+	/// from the last time this snapshot was written. A feature that throws is disabled and reported.
+	/// </summary>
+	internal void ExtractRenderFeatures(World world, Features.RenderFeatureRegistry registry)
+	{
+		var features = registry.GetFeatures(world);
+		for (var i = 0; i < features.Count; i++)
+		{
+			var feature = features[i];
+			if (feature.IsRetired || feature.IsFaulted)
+			{
+				continue;
+			}
+
+			try
+			{
+				if (_renderFeatureFramePool.TryGetValue(feature, out var frame) == false)
+				{
+					frame = feature.CreateFrame();
+					_renderFeatureFramePool[feature] = frame;
+				}
+
+				feature.ExtractFrame(world, frame);
+				_renderFeatureFrames.Add(new Features.RenderFeatureFrame(feature, frame));
+			}
+			catch (Exception exception)
+			{
+				registry.Fault(feature, exception);
+			}
+		}
+	}
+
+	/// <summary>
+	/// Drops this snapshot's frames, and the pooled frame objects of features that are gone, so an unloaded
+	/// gameplay assembly is not kept alive by a snapshot.
+	/// </summary>
+	private void ClearRenderFeatureFrames()
+	{
+		_renderFeatureFrames.Clear();
+		if (_renderFeatureFramePool.Count == 0)
+		{
+			return;
+		}
+
+		foreach (var feature in _renderFeatureFramePool.Keys)
+		{
+			if (feature.IsRetired || feature.IsFaulted)
+			{
+				_renderFeaturePoolScratch.Add(feature);
+			}
+		}
+
+		foreach (var feature in _renderFeaturePoolScratch)
+		{
+			_renderFeatureFramePool.Remove(feature);
+		}
+
+		_renderFeaturePoolScratch.Clear();
 	}
 
 	/// <summary>Records current and previous poses for render-thread skinning.</summary>

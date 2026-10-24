@@ -52,6 +52,9 @@ public static class WolfEngine
 		services.AddSingleton<GpuProfiler>();
 		services.AddSingleton<BindlessResourceRegistry>();
 		services.AddSingleton<RenderGraphResourceRegistry>();
+		services.AddSingleton<Rendering.Features.RenderFeatureRegistry>();
+		services.AddSingleton<Rendering.Features.IRenderFeatureRegistry>(sp =>
+			sp.GetRequiredService<Rendering.Features.RenderFeatureRegistry>());
 		services.AddSingleton<RenderGraph>();
 		
 #pragma warning disable CA1416

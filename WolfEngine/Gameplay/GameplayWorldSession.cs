@@ -1,4 +1,5 @@
 using WolfEngine.ECS;
+using WolfEngine.Rendering.Features;
 
 namespace WolfEngine.Gameplay;
 
@@ -42,6 +43,8 @@ public sealed class GameplayWorldSession(
 			catch (Exception exception) { failures.Add(exception); }
 		}
 		Clean(() => gameplay.OnUnloading(old));
+		// Features the module forgot to unregister must not keep running against a world that is gone.
+		Clean(() => (services.GetService(typeof(IRenderFeatureRegistry)) as IRenderFeatureRegistry)?.UnregisterWorld(old));
 		Clean(stopAudio);
 		// Removal listeners must run before gameplay systems are detached.
 		Clean(() => manager.RemoveWorld(old));

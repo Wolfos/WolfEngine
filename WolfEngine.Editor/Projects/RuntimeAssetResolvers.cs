@@ -174,6 +174,28 @@ public sealed class ColorLookupTableRuntimeAssetResolver : IColorLookupTableRunt
 	internal static string GetRuntimeName(Guid assetId) => $"lut:{assetId:D}";
 }
 
+public sealed class ComputeShaderRuntimeAssetResolver : IComputeShaderRuntimeResolver
+{
+	private readonly IRuntimeArtifactTargetProvider _targetProvider;
+
+	public ComputeShaderRuntimeAssetResolver(IRuntimeArtifactTargetProvider targetProvider)
+	{
+		_targetProvider = targetProvider ?? throw new ArgumentNullException(nameof(targetProvider));
+	}
+
+	public object Resolve(RuntimeAssetResolveContext context)
+	{
+		var target = _targetProvider.CurrentTarget;
+		var artifact = context.Asset.Artifacts.FirstOrDefault(artifact =>
+			               string.Equals(artifact.Kind, Rendering.Shaders.ComputeShaderArtifactSerializer.ArtifactKind, StringComparison.Ordinal) &&
+			               string.Equals(artifact.Target, target, StringComparison.Ordinal))
+		               ?? throw new InvalidOperationException(
+			               $"Compute shader '{context.Asset.Name}' has no {target} kernels. Reimport it on this platform.");
+		var kernels = Rendering.Shaders.ComputeShaderArtifactSerializer.Read(context.GetAbsolutePath(artifact.RelativePath));
+		return new Rendering.ComputeShader(context.Asset.Name, kernels);
+	}
+}
+
 public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
 {
 	public object Resolve(RuntimeAssetResolveContext context)

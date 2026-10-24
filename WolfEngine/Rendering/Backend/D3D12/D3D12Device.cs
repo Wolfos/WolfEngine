@@ -2227,7 +2227,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	}
 	
 
-	private static Format ToDxgiFormat(TextureFormat format, bool isSrgb = false) => format switch
+	internal static Format ToDxgiFormat(TextureFormat format, bool isSrgb = false) => format switch
 	{
 		TextureFormat.Bgra8Unorm => isSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
 		TextureFormat.Rgba8Unorm => isSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
