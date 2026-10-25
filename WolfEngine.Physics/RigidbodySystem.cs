@@ -248,11 +248,16 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 				using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
 				using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
 				var hits = new List<ShapeCastResult>(capacity: 8);
+				// JoltPhysicsSharp reads query transforms in Jolt's column-vector layout, so the System.Numerics
+				// transform is transposed; passed as-is, its translation is lost and the query runs at the origin.
+				// CastShape takes no scale (the shape is built at scale 1), and a zero base offset keeps results in
+				// world space. The hit fraction is already relative to the cast direction.
+				var baseOffset = Vector3.Zero;
 				if (state.PhysicsSystem.NarrowPhaseQuery.CastShape(
 					    shapeHandle.Shape,
-					    shapeTransform,
-					    QueryShapeScale,
+					    Matrix4x4.Transpose(shapeTransform),
 					    direction,
+					    baseOffset,
 					    CollisionCollectorType.ClosestHit,
 					    hits,
 					    _broadPhaseLayerFilter,
@@ -274,7 +279,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 					entity,
 					shapeHit.ContactPointOn2,
 					-NormalizeDirection(shapeHit.PenetrationAxis),
-					Math.Clamp(shapeHit.Fraction / direction.Length(), 0.0f, 1.0f),
+					Math.Clamp(shapeHit.Fraction, 0.0f, 1.0f),
 					shapeHit.PenetrationDepth,
 					isSensor,
 					layer);
@@ -315,10 +320,11 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 				using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
 				using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
 				var overlapHits = new List<CollideShapeResult>(capacity: 8);
+				// Transposed into Jolt's layout, like the cast above. The scale argument comes before the transform.
 				if (state.PhysicsSystem.NarrowPhaseQuery.CollideShape(
 					    shapeHandle.Shape,
-					    baseOffset,
-					    shapeTransform,
+					    QueryShapeScale,
+					    Matrix4x4.Transpose(shapeTransform),
 					    baseOffset,
 					    CollisionCollectorType.AllHit,
 					    overlapHits,
