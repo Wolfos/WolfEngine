@@ -5,15 +5,24 @@ namespace WolfEngine.Rendering.Shaders;
 
 public readonly record struct ShaderProgramId
 {
+	private const string EngineNamespace = "engine://shaders/";
+	private const string AssetNamespace = "asset://shaders/";
+
 	public ShaderProgramId(string value)
 	{
-		if (string.IsNullOrWhiteSpace(value) || value.StartsWith("engine://shaders/", StringComparison.Ordinal) == false)
+		if (string.IsNullOrWhiteSpace(value) ||
+		    (value.StartsWith(EngineNamespace, StringComparison.Ordinal) == false &&
+		     value.StartsWith(AssetNamespace, StringComparison.Ordinal) == false))
 		{
-			throw new ArgumentException("Engine shader IDs must use the 'engine://shaders/' namespace.", nameof(value));
+			throw new ArgumentException(
+				$"Shader IDs must use the '{EngineNamespace}' or '{AssetNamespace}' namespace.", nameof(value));
 		}
 
 		Value = value;
 	}
+
+	/// <summary>Identifies a compute shader asset. Its kernels are compiled at import, never through the catalog.</summary>
+	public static ShaderProgramId ForAsset(Guid assetId) => new($"{AssetNamespace}{assetId:D}");
 
 	public string Value { get; }
 

@@ -103,6 +103,9 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 			nameof(AssetType.Texture2D) when expectedType == typeof(Texture) => CreateTexture(id, stream),
 			nameof(AssetType.ColorLookupTable) when expectedType == typeof(ColorLookupTable) =>
 				ColorLookupTable.Create($"lut:{id:D}", ColorLookupTableArtifactSerializer.Read(stream), _textures),
+			nameof(AssetType.ComputeShader) when expectedType == typeof(global::WolfEngine.Rendering.ComputeShader) =>
+				new global::WolfEngine.Rendering.ComputeShader(id.ToString("D"),
+					global::WolfEngine.Rendering.Shaders.ComputeShaderArtifactSerializer.Read(stream)),
 			nameof(AssetType.Mesh) when expectedType == typeof(Mesh) => CreateMesh(id, stream),
 			nameof(AssetType.Terrain) when expectedType == typeof(TerrainAsset) =>
 				TerrainAssetSerializer.Read(stream, id.ToString("D")),

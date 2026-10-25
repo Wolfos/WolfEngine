@@ -83,6 +83,10 @@ public interface IColorLookupTableRuntimeResolver : IRuntimeAssetResolver
 {
 }
 
+public interface IComputeShaderRuntimeResolver : IRuntimeAssetResolver
+{
+}
+
 public interface IPrefabRuntimeAssetResolver : IRuntimeAssetResolver
 {
 }

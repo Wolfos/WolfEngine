@@ -154,6 +154,14 @@ public interface IGfxCommandList
 
 	void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes);
 
+	/// <summary>
+	/// Copies tightly packed rows of texels into mip 0 of an uncompressed 2D texture, ordered with the rest of
+	/// this command list, so a frame still on the GPU keeps reading the texels it was recorded with. The texture
+	/// must already be in <see cref="ResourceState.CopyDestination"/>.
+	/// </summary>
+	void UploadTexture(IGfxTexture texture, ReadOnlySpan<byte> texels) =>
+		throw new NotSupportedException($"{GetType().Name} does not upload texture data.");
+
 	void Barrier(in ResourceBarrierDescription barrier);
 
 	/// <summary>Orders UAV writes before a later dispatch reads or writes the same resource.</summary>

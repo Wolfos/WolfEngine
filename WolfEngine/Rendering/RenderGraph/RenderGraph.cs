@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using WolfEngine.ECS;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Features;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
@@ -18,6 +19,9 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 {
+	/// <summary>The game thread's render features; the snapshot carries them to this graph.</summary>
+	internal RenderFeatureRegistry RenderFeatures { get; }
+
 	private readonly RenderGraphResourceRegistry _resourceRegistry;
 	private readonly RenderGraphFrameBuilder _frameBuilder;
 	private readonly IRenderer _renderer;
@@ -90,8 +94,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		IShaderProvider shaderProvider,
 		BindlessResourceRegistry bindlessResourceRegistry,
 		IGpuDrawBackendBridge gpuDrawBackendBridge,
-		RenderPresentationOptions? presentationOptions = null)
+		RenderPresentationOptions? presentationOptions = null,
+		RenderFeatureRegistry? renderFeatures = null)
 	{
+		RenderFeatures = renderFeatures ?? new RenderFeatureRegistry();
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
@@ -791,6 +797,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 				// Shared setup takes its sun and sky from the primary view; see BeginSharedFrame.
 				_frameBuilder.SetGameplayUiFrame(_gameplayUiFrame);
+				_frameBuilder.BeginRenderFeatures(RenderFeatures);
 				_frameBuilder.BeginSharedFrame(
 					frameBufferSize,
 					primarySnapshot.SunDirection,
@@ -875,6 +882,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 						viewSnapshot.DecalPackets.Count > 0,
 						viewSnapshot.Config,
 						viewCameraPosition);
+					_frameBuilder.SetViewRenderFeatures(viewSnapshot.RenderFeatureFrames);
 				}
 
 				// Every view is set up before anything is recorded: the shared draw update records first and
@@ -908,6 +916,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 						_view.SceneRenderTarget.SetCurrentState(_resourceRegistry.GetResourceState(viewSceneColor));
 					}
 				}
+
+				_frameBuilder.CompleteRenderFeatures();
 
 				SelectView(RenderViewId.Primary);
 				_renderer.Render(_resourceRegistry, _frameBuilder.GetFinalColorHandle());

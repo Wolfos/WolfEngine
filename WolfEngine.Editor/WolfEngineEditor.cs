@@ -8,6 +8,7 @@ using WolfEngine.Input;
 using WolfEngine.Logging;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Features;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Animation;
@@ -56,6 +57,7 @@ public class WolfEngineEditor
 	private readonly List<ISystem> _registeredGameplaySystems = new();
 	private readonly FixedStepAccumulator _physicsAccumulator = new(PhysicsFixedDeltaTime, PhysicsMaxStepsPerFrame);
 	private readonly IServiceProvider _serviceProvider;
+	private readonly IRenderFeatureRegistry? _renderFeatures;
 	private readonly RigidbodySystem _rigidbodySystem;
 	private readonly IAudioRuntime _audioRuntime;
 	private readonly GameplayExceptionReporter _gameplayExceptionReporter;
@@ -133,6 +135,7 @@ public class WolfEngineEditor
 		_gameplayExceptionReporter = new GameplayExceptionReporter(logService);
 		_worldManager.SetExceptionHandler(SystemExecutionGroup.Gameplay, _gameplayExceptionReporter.ReportSystem);
 		_editorRenderViews = serviceProvider?.GetService(typeof(EditorRenderViews)) as EditorRenderViews;
+		_renderFeatures = serviceProvider?.GetService(typeof(IRenderFeatureRegistry)) as IRenderFeatureRegistry;
 		_serviceProvider = serviceProvider;
 		_rigidbodySystem = serviceProvider.GetRequiredService<RigidbodySystem>();
 	}
@@ -703,6 +706,8 @@ public class WolfEngineEditor
 		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.OnUnloading),
 			() => _boundGameplayModule?.OnUnloading(_boundGameplayWorld));
+		// Features the module forgot to unregister must not outlive it: they hold its types.
+		_renderFeatures?.UnregisterWorld(_boundGameplayWorld);
 		_audioRuntime.StopAll();
 		for (var index = _registeredGameplaySystems.Count - 1; index >= 0; index--)
 		{

@@ -125,6 +125,9 @@ public static class GameBuilder
 			.ToDictionary(group => group.Key, group => group.ToList());
 
 		var shaderSources = CookShaders(provider, target.Backend);
+		// Compute shader assets the game references share the pack with the engine's shaders.
+		if (groups.TryGetValue("shaders", out var computeShaderSources))
+			shaderSources.AddRange(computeShaderSources);
 		groups["shaders"] = shaderSources;
 		groups["bootstrap"] =
 		[
@@ -224,6 +227,12 @@ public static class GameBuilder
 		{
 			path = asset.Artifacts.FirstOrDefault(item => item.Kind == ColorLookupTableArtifactSerializer.ArtifactKind)?.RelativePath
 			       ?? throw new InvalidOperationException($"Colour lookup table '{asset.Id}' has no runtime artifact.");
+		}
+		else if (asset.Type == AssetType.ComputeShader)
+		{
+			// Shader targets are named like texture targets, one per backend.
+			path = asset.Artifacts.FirstOrDefault(item => item.Kind == ComputeShaderArtifactSerializer.ArtifactKind && item.Target == textureTarget)?.RelativePath
+			       ?? throw new InvalidOperationException($"Compute shader '{asset.Name}' has no {textureTarget} kernels. Reimport it on this platform.");
 		}
 		else
 		{
@@ -329,6 +338,7 @@ public static class GameBuilder
 		AssetType.Material or AssetType.DataAsset or AssetType.Terrain => "materials-data-terrain",
 		AssetType.AudioClip => "audio",
 		AssetType.Font => "fonts",
+		AssetType.ComputeShader => "shaders",
 		_ => throw new InvalidOperationException($"Asset type '{type}' has no cooked pack class.")
 	};
 

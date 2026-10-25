@@ -244,6 +244,12 @@ public sealed class RenderGraphResourceRegistry
 		DisposeAvailableTransientTextures();
 	}
 
+	/// <summary>The descriptor a texture handle was created or imported with; available before allocation.</summary>
+	internal TextureDescriptor GetTextureDescriptor(RenderGraphResourceHandle handle) =>
+		_textures.TryGetValue(handle.Id, out var record)
+			? record.Descriptor
+			: throw new KeyNotFoundException($"Texture handle {handle.Id} is not registered this frame.");
+
 	public RenderGraphResourceHandle CreateTransientTexture(in TextureDescriptor descriptor)
 	{
 		var handle = new RenderGraphResourceHandle(_nextHandleId++);

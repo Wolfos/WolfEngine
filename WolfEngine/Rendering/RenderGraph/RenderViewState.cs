@@ -35,6 +35,9 @@ internal sealed class RenderViewState
 
 	public RenderViewId View { get; }
 
+	/// <summary>This frame's render features, from the view's snapshot. Valid from BeginViewFrame until recording ends.</summary>
+	public IReadOnlyList<Features.RenderFeatureFrame> RenderFeatureFrames { get; set; } = [];
+
 	/// <summary>Changes whenever this slot is bound to a new view, even if the same world is rebound.</summary>
 	public long BindingGeneration;
 

@@ -26,7 +26,8 @@ public enum AssetType
 	AnimationSet,
 	AnimationSequence,
 	BoneMask,
-	Font
+	Font,
+	ComputeShader
 }
 
 public enum MaterialAssetType
@@ -145,6 +146,12 @@ public sealed class TextureAssetSummary
 	public int Channels { get; set; }
 	public TextureSemantic Semantic { get; set; }
 	public string SourceExtension { get; set; } = string.Empty;
+}
+
+public sealed class ComputeShaderAssetSummary
+{
+	/// <summary>The functions marked <c>[shader("compute")]</c>, in source order.</summary>
+	public string[] EntryPoints { get; set; } = [];
 }
 
 public sealed class ColorLookupTableAssetSummary

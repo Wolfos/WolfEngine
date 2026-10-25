@@ -1029,6 +1029,60 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		}
 	}
 
+	public void UploadTexture(IGfxTexture texture, ReadOnlySpan<byte> texels)
+	{
+		ThrowIfDisposed();
+		if (texture is not MetalTexture metalTexture || metalTexture.Texture.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Texture was not created by the Metal backend.");
+		}
+
+		var descriptor = texture.Descriptor;
+		if (descriptor.Dimension != TextureDimension.Texture2D || TextureFormatUtilities.IsCompressed(descriptor.Format))
+		{
+			throw new NotSupportedException("Only uncompressed 2D textures can be uploaded.");
+		}
+
+		var rowBytes = TextureFormatUtilities.GetBytesPerRow(descriptor.Format, descriptor.Width);
+		if (texels.Length != rowBytes * descriptor.Height)
+		{
+			throw new ArgumentException(
+				$"Expected {rowBytes * descriptor.Height} bytes of tightly packed texels, got {texels.Length}.",
+				nameof(texels));
+		}
+
+		EndActiveEncoders();
+
+		// A blit from a staging buffer is ordered with this command buffer, where ReplaceRegion would write the
+		// texture immediately under a frame still reading it. The command buffer retains the staging buffer
+		// until it completes, so this method can release its own reference straight away.
+		MTLBuffer staging;
+		fixed (byte* source = texels)
+		{
+			staging = _queue.Device.NewBuffer((IntPtr)source, (ulong)texels.Length, MTLResourceOptions.ResourceStorageModeShared);
+		}
+
+		var blit = _commandBuffer.BlitCommandEncoder();
+		TakeOwnership(blit.NativePtr);
+		blit.CopyFromBuffer(
+			staging,
+			0,
+			(ulong)rowBytes,
+			(ulong)texels.Length,
+			new MTLSize { width = (ulong)descriptor.Width, height = (ulong)descriptor.Height, depth = 1 },
+			metalTexture.Texture,
+			0,
+			0,
+			new MTLOrigin { x = 0, y = 0, z = 0 });
+		blit.EndEncoding();
+		if (blit.NativePtr != IntPtr.Zero)
+		{
+			blit.Dispose();
+		}
+
+		staging.Dispose();
+	}
+
 	public void Barrier(in ResourceBarrierDescription barrier)
 	{
 		ThrowIfDisposed();
