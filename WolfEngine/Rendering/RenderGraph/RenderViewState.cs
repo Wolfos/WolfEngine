@@ -19,14 +19,13 @@ namespace WolfEngine.Rendering;
 /// each view owns its own, and so a closed view can retire its GPU resources on its own schedule through
 /// <see cref="ReleaseAll"/> rather than living until the renderer shuts down.
 ///
-/// The fields are public because this is a state bag for one collaborator, not an abstraction. Allocation
-/// still belongs to the frame builder, which knows the frame's config and sizes; teardown belongs here,
-/// because knowing which resources exist and what state they were left in is exactly what this type holds.
+/// The fields are public because this is a state bag for one collaborator, not an abstraction. Each ping-pong
+/// history is a <see cref="ViewHistory{TShape}"/>, which owns its own allocation, swap, invalidation and release;
+/// the frame builder only decides each frame which shape an effect needs and whether it runs. The colour pyramid
+/// and the companion resources beside some histories are still allocated by the frame builder.
 /// </remarks>
 internal sealed class RenderViewState
 {
-	private const int DdgiShCoefficientCount = DdgiUtilities.ShCoefficientCount;
-
 	public RenderViewState(RenderViewId view)
 	{
 		View = view;
@@ -167,35 +166,17 @@ internal sealed class RenderViewState
 	public bool PreviousTaaEnabled;
 	public AntiAliasingMode PreviousAntiAliasingMode;
 
-	// Temporal anti-aliasing and FSR3 history.
-	public AntiAliasingMode HistoryMode;
-	public bool HistoryValid;
+	// Temporal anti-aliasing and FSR3 history. FSR3 keeps two more ping-pong textures alongside TAA's colour and
+	// depth; both histories are allocated, swapped and released together.
 	public bool ResetTaaHistoryThisFrame;
-	public IGfxDevice? HistoryDevice;
-	public GraphicsBackendKind? HistoryBackendKind;
-	public Int2 HistorySize;
-	public int HistoryReadIndex;
-	public readonly IGfxTexture?[] HistoryColorTextures = new IGfxTexture?[2];
-	public readonly IGfxTexture?[] HistoryDepthTextures = new IGfxTexture?[2];
-	public readonly ResourceState[] HistoryColorStates = new ResourceState[2];
-	public readonly ResourceState[] HistoryDepthStates = new ResourceState[2];
-	public readonly IGfxTexture?[] Fsr3CurrentLumaTextures = new IGfxTexture?[2];
-	public readonly IGfxTexture?[] Fsr3AccumulationTextures = new IGfxTexture?[2];
-	public readonly ResourceState[] Fsr3CurrentLumaStates = new ResourceState[2];
-	public readonly ResourceState[] Fsr3AccumulationStates = new ResourceState[2];
+	public readonly ViewHistory<TemporalHistoryShape> TemporalHistory = new("Temporal AA", TemporalHistorySlot.Count, DescribeTemporalHistory);
+	public readonly ViewHistory<Int2> Fsr3History = new("FSR3", Fsr3HistorySlot.Count, DescribeFsr3History);
 	public IGfxTexture? Fsr3FrameInfoTexture;
 	public ResourceState Fsr3FrameInfoState = ResourceState.UnorderedAccess;
 	public uint Fsr3FrameIndex;
 
 	// Volumetric fog froxel history. The grid is camera-frustum aligned, so it is per view by construction.
-	public bool FogHistoryValid;
-	public readonly IGfxTexture?[] FogHistoryTextures = new IGfxTexture?[2];
-	public readonly ResourceState[] FogHistoryStates = new ResourceState[2];
-	public IGfxDevice? FogHistoryDevice;
-	public GraphicsBackendKind? FogHistoryBackendKind;
-	public Int3 FogHistoryGrid;
-	public float FogHistoryMaxDistance;
-	public int FogHistoryReadIndex;
+	public readonly ViewHistory<FogHistoryShape> FogHistory = new("Volumetric fog", 1, DescribeFogHistory);
 
 	// Colour pyramid.
 	public IGfxDevice? ColorPyramidDevice;
@@ -205,25 +186,13 @@ internal sealed class RenderViewState
 	public IGfxTexture[] ColorPyramidTextures = Array.Empty<IGfxTexture>();
 	public ResourceState[] ColorPyramidStates = Array.Empty<ResourceState>();
 
-	// DDGI probe volume. One world backs one view, so the volume belongs to the view that renders it.
-	public bool DdgiHistoryValid;
-	public IGfxDevice? DdgiHistoryDevice;
-	public GraphicsBackendKind? DdgiHistoryBackendKind;
-	public DdgiGridShape DdgiHistoryGridShape;
-	public int DdgiHistoryReadIndex;
-	public readonly IGfxTexture?[,] DdgiIrradianceTextures = new IGfxTexture?[DdgiShCoefficientCount, 2];
-	public readonly IGfxTexture?[] DdgiVisibilityTextures = new IGfxTexture?[2];
-	public readonly IGfxTexture?[] DdgiProbeStateTextures = new IGfxTexture?[2];
+	// DDGI probe volume. One world backs one view, so the volume belongs to the view that renders it. The probe
+	// activity texture and irradiance estimator are not ping-ponged, but share the history's lifetime.
+	public readonly ViewHistory<DdgiHistoryShape> DdgiHistory = new("DDGI", DdgiHistorySlot.Count, DescribeDdgiHistory);
 	public IGfxTexture? DdgiProbeActivityTexture;
 	public IGfxBuffer? DdgiIrradianceEstimatorBuffer;
-	public readonly ResourceState[,] DdgiIrradianceStates = new ResourceState[DdgiShCoefficientCount, 2];
-	public readonly ResourceState[] DdgiVisibilityStates = new ResourceState[2];
-	public readonly ResourceState[] DdgiProbeStateStates = new ResourceState[2];
 	public ResourceState DdgiProbeActivityState = ResourceState.Common;
 	public ResourceState DdgiIrradianceEstimatorState = ResourceState.Common;
-	public Vector3 DdgiHistoryLatticeAnchor;
-	public float DdgiHistoryProbeSpacing;
-	public int DdgiHistoryVisibilityTileInteriorSize;
 	public Vector3 DdgiCommittedRuntimeOrigin;
 	public Int3 DdgiCommittedStorageOffset;
 	public bool DdgiCommittedPlacementValid;
@@ -231,16 +200,39 @@ internal sealed class RenderViewState
 	public bool CurrentDdgiConfigValid;
 
 	/// <summary>
-	/// Ping-pong history of the DDGI final gather's SVGF denoiser, at its trace resolution. Indexed
-	/// [slot, ping-pong index] with <see cref="DdgiFinalGatherHistorySlot"/>.
+	/// Ping-pong history of the DDGI final gather's SVGF denoiser at its trace resolution, one slot per
+	/// <see cref="DdgiFinalGatherHistorySlot"/>.
 	/// </summary>
-	public readonly IGfxTexture?[,] FinalGatherHistoryTextures = new IGfxTexture?[DdgiFinalGatherHistorySlot.Count, 2];
-	public readonly ResourceState[,] FinalGatherHistoryStates = new ResourceState[DdgiFinalGatherHistorySlot.Count, 2];
-	public IGfxDevice? FinalGatherHistoryDevice;
-	public GraphicsBackendKind? FinalGatherHistoryBackendKind;
-	public Int2 FinalGatherHistorySize;
-	public int FinalGatherHistoryReadIndex;
-	public bool FinalGatherHistoryValid;
+	public readonly ViewHistory<Int2> FinalGatherHistory = new(
+		"DDGI final gather",
+		DdgiFinalGatherHistorySlot.Count,
+		DescribeFinalGatherHistory);
+
+	/// <summary>
+	/// Ends the frame for every history: those this frame imported swap, the rest become invalid. Companion state a
+	/// family keeps beside its history is committed by the caller first, while <see cref="ViewHistory.IsImported"/>
+	/// still says whether this frame ran the effect.
+	/// </summary>
+	public void CompleteHistories(RenderGraphResourceRegistry resources)
+	{
+		TemporalHistory.Complete(resources);
+		Fsr3History.Complete(resources);
+		FogHistory.Complete(resources);
+		DdgiHistory.Complete(resources);
+		FinalGatherHistory.Complete(resources);
+	}
+
+	/// <summary>
+	/// Marks screen-space history unusable because the frame's shape changed. DDGI is world-space and keeps its
+	/// history across a resize.
+	/// </summary>
+	public void InvalidateScreenSpaceHistories()
+	{
+		TemporalHistory.Invalidate();
+		Fsr3History.Invalidate();
+		FogHistory.Invalidate();
+		FinalGatherHistory.Invalidate();
+	}
 
 	/// <summary>
 	/// Retires every GPU resource this view holds. Called when the view closes; each release goes through the
@@ -269,28 +261,14 @@ internal sealed class RenderViewState
 
 	public void ReleaseFogHistoryResources()
 	{
-		for (var i = 0; i < 2; i++)
-		{
-			if (FogHistoryTextures[i] is IGfxTexture texture)
-			{
-				EnqueueTemporalRelease(FogHistoryDevice, texture, FogHistoryStates[i]);
-			}
-			FogHistoryTextures[i] = null;
-			FogHistoryStates[i] = ResourceState.Common;
-		}
-		FogHistoryDevice = null;
-		FogHistoryBackendKind = null;
-		FogHistoryGrid = default;
-		FogHistoryMaxDistance = 0.0f;
-		FogHistoryReadIndex = 0;
-		FogHistoryValid = false;
+		FogHistory.Release();
 	}
 
 	public void ReleaseColorPyramidResources()
 	{
 		for (var level = 0; level < ColorPyramidTextures.Length; level++)
 		{
-			EnqueueTemporalRelease(ColorPyramidDevice, ColorPyramidTextures[level], ColorPyramidStates[level]);
+			TemporalResourceRetirement.RetireTexture(ColorPyramidDevice, ColorPyramidTextures[level], ColorPyramidStates[level]);
 		}
 
 		ColorPyramidTextures = Array.Empty<IGfxTexture>();
@@ -303,165 +281,177 @@ internal sealed class RenderViewState
 
 	public void ReleaseTemporalHistoryResources()
 	{
-		for (var i = 0; i < 2; i++)
-		{
-			if (HistoryColorTextures[i] is IGfxTexture colorTexture)
-			{
-				EnqueueTemporalRelease(HistoryDevice, colorTexture, HistoryColorStates[i]);
-			}
+		TemporalHistory.Release();
+		ReleaseFsr3HistoryResources();
+	}
 
-			if (HistoryDepthTextures[i] is IGfxTexture depthTexture)
-			{
-				EnqueueTemporalRelease(HistoryDevice, depthTexture, HistoryDepthStates[i]);
-			}
-			if (Fsr3CurrentLumaTextures[i] is IGfxTexture currentLumaTexture)
-			{
-				EnqueueTemporalRelease(HistoryDevice, currentLumaTexture, Fsr3CurrentLumaStates[i]);
-			}
-			if (Fsr3AccumulationTextures[i] is IGfxTexture accumulationTexture)
-			{
-				EnqueueTemporalRelease(HistoryDevice, accumulationTexture, Fsr3AccumulationStates[i]);
-			}
+	/// <summary>Releases FSR3's own history, for when temporal AA stays on but switches to another method.</summary>
+	public void ReleaseFsr3HistoryResources()
+	{
+		var frameInfoDevice = Fsr3History.Device;
+		Fsr3History.Release();
 
-			HistoryColorTextures[i] = null;
-			HistoryDepthTextures[i] = null;
-			Fsr3CurrentLumaTextures[i] = null;
-			Fsr3AccumulationTextures[i] = null;
-			HistoryColorStates[i] = ResourceState.Common;
-			HistoryDepthStates[i] = ResourceState.Common;
-			Fsr3CurrentLumaStates[i] = ResourceState.Common;
-			Fsr3AccumulationStates[i] = ResourceState.Common;
-		}
 		if (Fsr3FrameInfoTexture is not null)
 		{
-			EnqueueTemporalRelease(HistoryDevice, Fsr3FrameInfoTexture, Fsr3FrameInfoState);
+			TemporalResourceRetirement.RetireTexture(frameInfoDevice, Fsr3FrameInfoTexture, Fsr3FrameInfoState);
 			Fsr3FrameInfoTexture = null;
 			Fsr3FrameInfoState = ResourceState.Common;
 		}
 
-		HistoryBackendKind = null;
-		HistoryDevice = null;
-		HistorySize = Int2.Zero;
-		HistoryReadIndex = 0;
-		HistoryValid = false;
 		Fsr3FrameIndex = 0;
 	}
 
 	public void ReleaseFinalGatherHistoryResources()
 	{
-		for (var i = 0; i < 2; i++)
-		{
-			for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
-			{
-				if (FinalGatherHistoryTextures[slot, i] is IGfxTexture texture)
-				{
-					EnqueueTemporalRelease(FinalGatherHistoryDevice, texture, FinalGatherHistoryStates[slot, i]);
-				}
-				FinalGatherHistoryTextures[slot, i] = null;
-				FinalGatherHistoryStates[slot, i] = ResourceState.Common;
-			}
-		}
-		FinalGatherHistoryDevice = null;
-		FinalGatherHistoryBackendKind = null;
-		FinalGatherHistorySize = Int2.Zero;
-		FinalGatherHistoryReadIndex = 0;
-		FinalGatherHistoryValid = false;
+		FinalGatherHistory.Release();
 	}
 
 	public void ReleaseDdgiHistoryResources()
 	{
-		for (var i = 0; i < 2; i++)
-		{
-			for (var coefficientIndex = 0; coefficientIndex < DdgiShCoefficientCount; coefficientIndex++)
-			{
-				if (DdgiIrradianceTextures[coefficientIndex, i] is IGfxTexture irradianceTexture)
-				{
-					EnqueueTemporalRelease(
-						DdgiHistoryDevice,
-						irradianceTexture,
-						DdgiIrradianceStates[coefficientIndex, i]);
-				}
-				DdgiIrradianceTextures[coefficientIndex, i] = null;
-				DdgiIrradianceStates[coefficientIndex, i] = ResourceState.Common;
-			}
+		var device = DdgiHistory.Device;
+		DdgiHistory.Release();
+		ReleaseDdgiCompanionResources(device);
+	}
 
-			if (DdgiVisibilityTextures[i] is IGfxTexture visibilityTexture)
-			{
-				EnqueueTemporalRelease(DdgiHistoryDevice, visibilityTexture, DdgiVisibilityStates[i]);
-			}
-
-			if (DdgiProbeStateTextures[i] is IGfxTexture probeStateTexture)
-			{
-				EnqueueTemporalRelease(DdgiHistoryDevice, probeStateTexture, DdgiProbeStateStates[i]);
-			}
-
-			DdgiVisibilityTextures[i] = null;
-			DdgiProbeStateTextures[i] = null;
-			DdgiVisibilityStates[i] = ResourceState.Common;
-			DdgiProbeStateStates[i] = ResourceState.Common;
-		}
-
+	/// <summary>Releases the DDGI resources that share the history's lifetime but are not ping-ponged.</summary>
+	public void ReleaseDdgiCompanionResources(IGfxDevice? device)
+	{
 		if (DdgiProbeActivityTexture is IGfxTexture activityTexture)
 		{
-			EnqueueTemporalRelease(DdgiHistoryDevice, activityTexture, DdgiProbeActivityState);
+			TemporalResourceRetirement.RetireTexture(device, activityTexture, DdgiProbeActivityState);
 		}
 		DdgiProbeActivityTexture = null;
 		DdgiProbeActivityState = ResourceState.Common;
 
 		if (DdgiIrradianceEstimatorBuffer is IGfxBuffer estimatorBuffer)
 		{
-			EnqueueTemporalBufferRelease(DdgiHistoryDevice, estimatorBuffer);
+			TemporalResourceRetirement.RetireBuffer(device, estimatorBuffer);
 		}
 		DdgiIrradianceEstimatorBuffer = null;
 		DdgiIrradianceEstimatorState = ResourceState.Common;
 
-		DdgiHistoryBackendKind = null;
-		DdgiHistoryDevice = null;
-		DdgiHistoryGridShape = default;
-		DdgiHistoryLatticeAnchor = Vector3.Zero;
-		DdgiHistoryProbeSpacing = 0.0f;
-		DdgiHistoryVisibilityTileInteriorSize = 0;
-		DdgiHistoryReadIndex = 0;
-		DdgiHistoryValid = false;
 		DdgiCommittedRuntimeOrigin = Vector3.Zero;
 		DdgiCommittedStorageOffset = default;
 		DdgiCommittedPlacementValid = false;
 	}
 
-	private static void EnqueueTemporalRelease(IGfxDevice? device, IGfxTexture texture, ResourceState lastKnownState)
+	private static TextureDescriptor DescribeTemporalHistory(TemporalHistoryShape shape, int slot)
 	{
-		if (device is null)
-		{
-			(texture as IDisposable)?.Dispose();
-			return;
-		}
+		// Colour is cleared to opaque black. TAA stores view depth in the depth slot, zero for sky; FSR3 reuses it
+		// as its luma history.
+		var clearAlpha = slot == TemporalHistorySlot.Color ? 1.0f : 0.0f;
 
-		var texturePoolDevice = device as ITexturePoolDevice;
-		device.Retire(
-			() =>
-			{
-				var pooled = texturePoolDevice?.ReturnTexture(texture, lastKnownState) ?? false;
-				if (pooled == false)
-				{
-					(texture as IDisposable)?.Dispose();
-				}
-			},
-			texture.Name ?? "Temporal render-graph texture");
+		return new TextureDescriptor(
+			shape.Size.X,
+			shape.Size.Y,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.0f, 0.0f, 0.0f, clearAlpha));
 	}
 
-	private static void EnqueueTemporalBufferRelease(IGfxDevice? device, IGfxBuffer buffer)
+	private static TextureDescriptor DescribeFsr3History(Int2 size, int slot)
 	{
-		if (buffer is not IDisposable disposableBuffer)
-		{
-			return;
-		}
-
-		if (device is null)
-		{
-			disposableBuffer.Dispose();
-			return;
-		}
-
-		device.Retire(disposableBuffer, buffer.Name ?? "Temporal render-graph buffer");
+		return new TextureDescriptor(
+			size.X,
+			size.Y,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f));
 	}
+
+	private static TextureDescriptor DescribeFogHistory(FogHistoryShape shape, int slot)
+	{
+		return RenderGraphFrameBuilder.CreateFogTextureDescriptor(shape.Grid);
+	}
+
+	private static TextureDescriptor DescribeFinalGatherHistory(Int2 traceSize, int slot)
+	{
+		return new TextureDescriptor(
+			traceSize.X,
+			traceSize.Y,
+			DdgiFinalGatherHistorySlot.GetFormat(slot),
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f));
+	}
+
+	private static TextureDescriptor DescribeDdgiHistory(DdgiHistoryShape shape, int slot)
+	{
+		if (slot == DdgiHistorySlot.Visibility)
+		{
+			var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(shape.GridShape, shape.VisibilityTileInteriorSize);
+
+			return new TextureDescriptor(
+				visibilityAtlasSize.X,
+				visibilityAtlasSize.Y,
+				TextureFormat.Rgba16Float,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f));
+		}
+
+		if (slot == DdgiHistorySlot.ProbeState)
+		{
+			return new TextureDescriptor(
+				shape.GridShape.AtlasColumns,
+				shape.GridShape.AtlasRows,
+				TextureFormat.Rgba16Float,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f));
+		}
+
+		var shCoefficientTextureSize = DdgiUtilities.GetShCoefficientTextureSize(shape.GridShape);
+
+		return new TextureDescriptor(
+			shCoefficientTextureSize.X,
+			shCoefficientTextureSize.Y,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f));
+	}
+}
+
+/// <summary>What temporal AA and FSR3 history is only valid against.</summary>
+internal readonly record struct TemporalHistoryShape(Int2 Size, AntiAliasingMode Mode);
+
+/// <summary>
+/// What volumetric fog history is only valid against. The maximum distance does not change the grid, but it
+/// rescales the slices, so last frame's froxels no longer line up.
+/// </summary>
+internal readonly record struct FogHistoryShape(Int3 Grid, float MaxDistance);
+
+/// <summary>
+/// What the DDGI probe volume is only valid against. The anchor and spacing do not change the textures, but they
+/// move every probe, so last frame's irradiance belongs to other positions.
+/// </summary>
+internal readonly record struct DdgiHistoryShape(
+	DdgiGridShape GridShape,
+	Vector3 LatticeAnchor,
+	float ProbeSpacing,
+	int VisibilityTileInteriorSize);
+
+/// <summary>The slots of <see cref="RenderViewState.TemporalHistory"/>.</summary>
+internal static class TemporalHistorySlot
+{
+	public const int Color = 0;
+	public const int Depth = 1;
+	public const int Count = 2;
+}
+
+/// <summary>The slots of <see cref="RenderViewState.Fsr3History"/>.</summary>
+internal static class Fsr3HistorySlot
+{
+	public const int CurrentLuma = 0;
+	public const int Accumulation = 1;
+	public const int Count = 2;
+}
+
+/// <summary>
+/// The slots of <see cref="RenderViewState.DdgiHistory"/>: the spherical-harmonic irradiance coefficients in
+/// L0, Ly, Lz, Lx order, then visibility and probe state.
+/// </summary>
+internal static class DdgiHistorySlot
+{
+	public const int Irradiance = 0;
+	public const int Visibility = DdgiUtilities.ShCoefficientCount;
+	public const int ProbeState = Visibility + 1;
+	public const int Count = ProbeState + 1;
 }
