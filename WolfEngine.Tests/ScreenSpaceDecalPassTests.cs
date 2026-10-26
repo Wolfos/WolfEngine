@@ -188,7 +188,8 @@ public sealed class ScreenSpaceDecalPassTests
 		var renderer = new Mock<IRenderer>();
 		renderer.Setup(value => value.GetGfxDevice()).Returns(device.Object);
 		var shaderProvider = new Mock<IShaderProvider>();
-		var gpuDrawBackendBridge = new Mock<IGpuDrawBackendBridge>();
+		var drawRecordEncoder = new Mock<IDrawRecordEncoder>();
+		var gpuDrawDiagnosticsSampler = new Mock<IGpuDrawDiagnosticsSampler>();
 		var bindlessRegistry = new BindlessResourceRegistry();
 		var gpuDrawResources = new GpuDrawResources(shaderProvider.Object);
 		var hardeningStats = new GpuDrawHardeningStats();
@@ -211,14 +212,16 @@ public sealed class ScreenSpaceDecalPassTests
 			gameplayUiRenderer,
 			shaderProvider.Object,
 			bindlessRegistry,
-			gpuDrawBackendBridge.Object);
+			drawRecordEncoder.Object,
+			gpuDrawDiagnosticsSampler.Object);
 		var passSet = new RenderGraphPassSet(
 			renderer.Object,
 			shaderProvider.Object,
 			bindlessRegistry,
 			gpuDrawResources,
 			hardeningStats,
-			gpuDrawBackendBridge.Object);
+			drawRecordEncoder.Object,
+			gpuDrawDiagnosticsSampler.Object);
 		var frameBuilder = new RenderGraphFrameBuilder(
 			registry,
 			renderer.Object,

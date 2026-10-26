@@ -93,7 +93,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		GameplayUiGpuRenderer gameplayUiRenderer,
 		IShaderProvider shaderProvider,
 		BindlessResourceRegistry bindlessResourceRegistry,
-		IGpuDrawBackendBridge gpuDrawBackendBridge,
+		IDrawRecordEncoder drawRecordEncoder,
+		IGpuDrawDiagnosticsSampler gpuDrawDiagnosticsSampler,
 		RenderPresentationOptions? presentationOptions = null,
 		RenderFeatureRegistry? renderFeatures = null)
 	{
@@ -107,7 +108,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			bindlessResourceRegistry,
 			gpuDrawResources,
 			hardeningStats,
-			gpuDrawBackendBridge);
+			drawRecordEncoder,
+			gpuDrawDiagnosticsSampler);
 		_frameBuilder = new(
 			resourceRegistry,
 			renderer,

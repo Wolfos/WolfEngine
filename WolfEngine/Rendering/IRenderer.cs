@@ -47,6 +47,12 @@ public interface IRenderer : IFrameCaptureSource
 	IGfxBuffer GetPackedMeshIndexBuffer();
 
 	/// <summary>
+	/// Increases each time a packed geometry buffer is replaced. Anything that captured the identity of the
+	/// previous buffers, such as an encoded draw record or an uploaded bindless handle, is stale once it moves.
+	/// </summary>
+	ulong PackedGeometryGeneration { get; }
+
+	/// <summary>
 	/// Gives a skinned instance its own vertex range in the packed buffer, seeded with the source
 	/// mesh's bind pose, while sharing the source's index range. The skinning pass overwrites the
 	/// range each frame; sharing indices keeps a spawned character from duplicating index data it

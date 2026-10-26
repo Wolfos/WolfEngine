@@ -242,6 +242,9 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 		}
 	}
 
+	/// <summary>The descriptor heaps are created once and never replaced, so draw records never see them move.</summary>
+	public ulong Generation => 0;
+
 	public void Free(DescriptorHandle handle)
 	{
 		if (handle.IsValid == false)

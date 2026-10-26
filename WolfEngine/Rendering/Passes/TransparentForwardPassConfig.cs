@@ -13,7 +13,7 @@ public readonly struct TransparentExecutionBucket
 		SharedDrawGraphicsBufferBindings bufferBindings,
 		GraphicsPassBindingSet passBindings,
 		IGfxPipeline pipeline,
-		ReadOnlyMemory<SharedDrawIndirectCommandPage> indirectCommandPages)
+		ReadOnlyMemory<DrawRecordPage> indirectCommandPages)
 	{
 		DrawKind = drawKind;
 		BucketId = bucketId;
@@ -32,7 +32,7 @@ public readonly struct TransparentExecutionBucket
 	public SharedDrawGraphicsBufferBindings BufferBindings { get; }
 	public GraphicsPassBindingSet PassBindings { get; }
 	public IGfxPipeline Pipeline { get; }
-	public ReadOnlyMemory<SharedDrawIndirectCommandPage> IndirectCommandPages { get; }
+	public ReadOnlyMemory<DrawRecordPage> IndirectCommandPages { get; }
 }
 
 /// <summary>

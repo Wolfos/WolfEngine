@@ -12,7 +12,7 @@ public readonly struct ShadowMapExecutionBucket
 		string debugName,
 		SharedDrawGraphicsBufferBindings bufferBindings,
 		IGfxPipeline pipeline,
-		ReadOnlyMemory<SharedDrawIndirectCommandPage> indirectCommandPages)
+		ReadOnlyMemory<DrawRecordPage> indirectCommandPages)
 	{
 		DrawKind = drawKind;
 		BucketId = bucketId;
@@ -29,7 +29,7 @@ public readonly struct ShadowMapExecutionBucket
 	public string DebugName { get; }
 	public SharedDrawGraphicsBufferBindings BufferBindings { get; }
 	public IGfxPipeline Pipeline { get; }
-	public ReadOnlyMemory<SharedDrawIndirectCommandPage> IndirectCommandPages { get; }
+	public ReadOnlyMemory<DrawRecordPage> IndirectCommandPages { get; }
 }
 
 public readonly struct ShadowFrameData

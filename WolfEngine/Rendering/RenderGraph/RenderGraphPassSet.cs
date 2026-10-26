@@ -11,14 +11,20 @@ internal sealed class RenderGraphPassSet
 		BindlessResourceRegistry bindlessResourceRegistry,
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats gpuDrawHardeningStats,
-		IGpuDrawBackendBridge gpuDrawBackendBridge)
+		IDrawRecordEncoder drawRecordEncoder,
+		IGpuDrawDiagnosticsSampler gpuDrawDiagnosticsSampler)
 	{
 		ArgumentNullException.ThrowIfNull(renderer);
 		ArgumentNullException.ThrowIfNull(shaderCompiler);
 		ArgumentNullException.ThrowIfNull(bindlessResourceRegistry);
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 		ArgumentNullException.ThrowIfNull(gpuDrawHardeningStats);
-		ArgumentNullException.ThrowIfNull(gpuDrawBackendBridge);
+		ArgumentNullException.ThrowIfNull(drawRecordEncoder);
+		ArgumentNullException.ThrowIfNull(gpuDrawDiagnosticsSampler);
+
+		var liveDraws = new GpuDrawLiveDrawSource(renderer);
+		var stalenessInputs = new GpuDrawStalenessInputSource(gpuDrawResources, renderer);
+		var drawRecords = new IndirectDrawRecords(drawRecordEncoder, liveDraws, stalenessInputs);
 
 		AmbientOcclusionPass = new(shaderCompiler, bindlessResourceRegistry);
 		AmbientOcclusionBlurPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -46,21 +52,24 @@ internal sealed class RenderGraphPassSet
 		Fsr3AccumulatePass = new(shaderCompiler, bindlessResourceRegistry);
 		Fsr3RcasPass = new(shaderCompiler, bindlessResourceRegistry);
 		Fsr3DebugViewPass = new(shaderCompiler, bindlessResourceRegistry);
-		TransparentForwardPass = new(shaderCompiler, bindlessResourceRegistry);
+		TransparentForwardPass = new(shaderCompiler, bindlessResourceRegistry, drawRecords, gpuDrawResources);
 		BloomPass = new(shaderCompiler, bindlessResourceRegistry);
 		ColorPyramidPass = new(shaderCompiler, bindlessResourceRegistry);
 		TonemappingPass = new(shaderCompiler, bindlessResourceRegistry);
 		CasSharpenPass = new(shaderCompiler, bindlessResourceRegistry);
 		CopyToFinalPass = new(shaderCompiler, bindlessResourceRegistry);
 		MotionVectorDebugPass = new(shaderCompiler, bindlessResourceRegistry);
-		ShadowMapPass = new(shaderCompiler);
+		ShadowMapPass = new(shaderCompiler, drawRecords, gpuDrawResources);
 		GpuDrawPass = new(
 			shaderCompiler,
 			bindlessResourceRegistry,
 			gpuDrawResources,
 			gpuDrawHardeningStats,
 			renderer,
-			gpuDrawBackendBridge);
+			drawRecords,
+			liveDraws,
+			stalenessInputs,
+			gpuDrawDiagnosticsSampler);
 		SkyboxPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
 		BindlessResourceRegistry = bindlessResourceRegistry;
 	}

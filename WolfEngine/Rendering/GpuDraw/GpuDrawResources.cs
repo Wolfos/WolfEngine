@@ -202,7 +202,7 @@ public sealed class GpuDrawResources : IDisposable
 	/// passes in order.
 	/// </summary>
 	/// <remarks>
-	/// Indirect draw records bake these buffers' addresses, so a view's buffers go with that view's own indirect
+	/// Metal draw records bake these buffers' addresses, so a view's buffers go with that view's own indirect
 	/// command sets.
 	/// </remarks>
 	private sealed class ViewFrameBuffers
@@ -876,7 +876,7 @@ public sealed class GpuDrawResources : IDisposable
 		if (existingBuffer is not null)
 		{
 			// Frames still in flight, and the frame currently being recorded, hold this buffer's GPU
-			// virtual address - both bound directly and baked into indirect command records. Destroying
+			// virtual address - bound directly, and on Metal baked into draw records. Destroying
 			// it here is a use-after-free that surfaces as a device hang at ExecuteIndirect.
 			if (existingBuffer is IDisposable disposableBuffer)
 			{

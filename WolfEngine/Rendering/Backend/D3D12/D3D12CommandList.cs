@@ -888,8 +888,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
-		ValidateIndirectReferences(d3d12CommandBuffer, maxAvailable);
-		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 		CommandList.ExecuteIndirect(
 			d3d12CommandBuffer.CommandSignature,
 			maxAvailable,
@@ -897,19 +895,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			0,
 			(ID3D12Resource*)null,
 			0);
-	}
-
-	private static void ValidateIndirectReferences(D3D12IndirectCommandBuffer commandBuffer, uint commandCount)
-	{
-		if (GraphicsConfig.ValidateIndirectCommandBuffers == false)
-		{
-			return;
-		}
-
-		if (commandBuffer.TryDescribeStaleReferences(out var description))
-		{
-			Console.WriteLine($"[indirect validation] {description} (executing {commandCount} commands)");
-		}
 	}
 
 	public void ExecuteCompactedIndirectCommandBuffer(
@@ -941,8 +926,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
-		ValidateIndirectReferences(d3d12CommandBuffer, maxCommandCount);
-		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 
 		// Both transitions double as the barrier that orders the compaction dispatch's writes ahead of
 		// the command processor reading them.
@@ -980,8 +963,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
-		ValidateIndirectReferences(d3d12CommandBuffer, d3d12CommandBuffer.Descriptor.MaxCommandCount);
-		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 
 		// Range mode: consume {start,count} and execute from command 0 using the count value only.
 		var countOffset = commandRangeOffsetBytes + sizeof(uint);
@@ -1452,17 +1433,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		native.Anonymous.Transition = transition;
 		CommandList.ResourceBarrier(1, &native);
 		buffer.CurrentState = targetState;
-	}
-
-	private void TransitionIndirectReferencedBuffers(D3D12IndirectCommandBuffer commandBuffer)
-	{
-		foreach (var (buffer, requiredState) in commandBuffer.ReferencedBufferStates)
-		{
-			if (buffer.IsCpuWritableDirect == false)
-			{
-				TransitionBufferIfNeeded(buffer, requiredState);
-			}
-		}
 	}
 
 	private static ResourceStates ConvertResourceState(ResourceState state)

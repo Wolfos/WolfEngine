@@ -13,7 +13,10 @@ public sealed class GpuDrawPass
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly IRenderer _renderer;
-	private readonly IGpuDrawBackendBridge _backendBridge;
+	private readonly IndirectDrawRecords _records;
+	private readonly GpuDrawLiveDrawSource _liveDraws;
+	private readonly IDrawRecordStalenessInputSource _stalenessInputs;
+	private readonly IGpuDrawDiagnosticsSampler _diagnosticsSampler;
 	private DescriptorHandle _terrainLayerSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _terrainControlSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _terrainHeightSampler = DescriptorHandle.Invalid;
@@ -54,9 +57,6 @@ public sealed class GpuDrawPass
 	private readonly List<RenderViewId> _updateOwners = new();
 	private readonly List<GpuDrawDatabase> _updateSources = new();
 	private readonly List<GpuDrawUpdate> _sourceUpdateScratch = new();
-	// Every database whose draws live in the shared tables this frame. Indirect-command maintenance that
-	// rebuilds from draw entries has to see all of them, or rebuilding for one view wipes the others.
-	private readonly List<GpuDrawSource> _liveSources = new();
 	private readonly List<GpuDrawInstanceUpdateData> _instanceUpdateData = new();
 	private readonly List<GpuDrawMeshUpdateData> _meshUpdateData = new();
 	private readonly List<GpuDrawMaterialUpdateData> _materialUpdateData = new();
@@ -70,22 +70,17 @@ public sealed class GpuDrawPass
 	private readonly Dictionary<uint, int> _terrainMaterialUpdateIndices = new();
 	private readonly List<GpuTerrainLayerUpdateData> _terrainLayerUpdateData = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
-	private readonly List<GpuDrawEntry> _liveEntryScratch = new();
 	private readonly List<uint> _drawGenerations = new();
 	private readonly List<uint> _instanceGenerations = new();
 	private readonly List<uint> _meshGenerations = new();
 	private readonly List<uint> _materialGenerations = new();
-	private readonly List<SharedDrawIndirectCommandSet> _knownIndirectCommandSets = new();
 	private readonly uint[] _lastGpuDiagnosticCounters = new uint[GpuDrawResources.HardeningCounterCount];
-	private readonly List<StructuralCommandRecord> _structuralReplayRecords = new();
 	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly SharedDrawGraphicsBufferBindings?[] _gbufferBufferBindings = new SharedDrawGraphicsBufferBindings?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly ShaderReflectionLayout?[] _gbufferReflections = new ShaderReflectionLayout?[GpuDrawExecutionLanes.ExecutionLaneCount];
-	private readonly PerViewIndirectCommandSets _gbufferIndirectCommandSets = new();
-	// Frames counted by the shared draw update, and when each registered command set was last used. A set idle
-	// for a full turn of the slot ring stops holding back replay-log compaction and re-encodes on its next use.
-	private long _updateFrame;
-	private readonly Dictionary<SharedDrawIndirectCommandSet, long> _commandSetLastUse = new();
+	private readonly PerViewIndirectCommandSets _gbufferIndirectCommandSets;
+	// Raised whenever a GBuffer lane pipeline is created, so records encoded against the previous pipelines re-encode.
+	private ulong _gbufferLaneBindingGeneration;
 	private bool _gbufferCompactionActive;
 	private readonly Dictionary<uint, MaterialDrawState> _materialDrawStates = new();
 	private readonly Dictionary<uint, TerrainDrawSurface> _terrainMaterialStates = new();
@@ -93,10 +88,7 @@ public sealed class GpuDrawPass
 	private int _nextTerrainLayerSlot = 1;
 	private int _terrainLogHealthyBudget;
 	private int _activeIndirectSlot = -1;
-	private ulong _latestStructuralVersion;
-	private ulong _nextStructuralVersion = 1;
-	private uint _bindlessEpoch = 1;
-	private bool _supportsIndirectStructuralUpdates;
+	private DrawRecordStalenessInputs _frameStartStalenessInputs;
 	private bool _loggedCapacityExceeded;
 	private bool _loggedUpdateOverflowRecovery;
 	private bool _loggedUnsupportedDrawKind;
@@ -108,29 +100,6 @@ public sealed class GpuDrawPass
 	private const int DrawFlagBucketShift = GpuDrawFlags.BucketShift;
 	private const uint DrawFlagBucketMask = GpuDrawFlags.BucketMask;
 
-	private readonly struct StructuralCommandRecord
-	{
-		public StructuralCommandRecord(
-			ulong version,
-			GpuDrawUpdateType type,
-			GpuDrawHandle drawHandle,
-			GpuDrawExecutionKey executionKey,
-			Mesh? mesh)
-		{
-			Version = version;
-			Type = type;
-			DrawHandle = drawHandle;
-			ExecutionKey = executionKey;
-			Mesh = mesh;
-		}
-
-		public ulong Version { get; }
-		public GpuDrawUpdateType Type { get; }
-		public GpuDrawHandle DrawHandle { get; }
-		public GpuDrawExecutionKey ExecutionKey { get; }
-		public Mesh? Mesh { get; }
-	}
-
 	private readonly record struct MaterialDrawState(
 		GpuDrawExecutionKey ExecutionKey,
 		int ExecutionIndex,
@@ -140,17 +109,27 @@ public sealed class GpuDrawPass
 
 	private readonly record struct ComputeResourceBindings(params uint[] Slots);
 
-	public GpuDrawPass(IShaderProvider shaderCompiler,
+	internal GpuDrawPass(IShaderProvider shaderCompiler,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats, IRenderer renderer,
-		IGpuDrawBackendBridge backendBridge)
+		IndirectDrawRecords records,
+		GpuDrawLiveDrawSource liveDraws,
+		IDrawRecordStalenessInputSource stalenessInputs,
+		IGpuDrawDiagnosticsSampler diagnosticsSampler)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-		_backendBridge = backendBridge ?? throw new ArgumentNullException(nameof(backendBridge));
+		_records = records ?? throw new ArgumentNullException(nameof(records));
+		_liveDraws = liveDraws ?? throw new ArgumentNullException(nameof(liveDraws));
+		_stalenessInputs = stalenessInputs ?? throw new ArgumentNullException(nameof(stalenessInputs));
+		_gbufferIndirectCommandSets = new PerViewIndirectCommandSets(
+			records,
+			DrawPassParticipation.GBuffer,
+			new GBufferLaneBindings(this));
+		_diagnosticsSampler = diagnosticsSampler ?? throw new ArgumentNullException(nameof(diagnosticsSampler));
 	}
 
 	/// <summary>Single-view update: the context's database, owned by the primary view.</summary>
@@ -172,12 +151,8 @@ public sealed class GpuDrawPass
 			throw new ArgumentException("A draw update needs at least one source database.", nameof(sources));
 		}
 
-		_updateFrame++;
-		_liveSources.Clear();
-		for (var i = 0; i < sources.Length; i++)
-		{
-			_liveSources.Add(sources[i]);
-		}
+		_records.BeginFrame();
+		_liveDraws.SetSources(sources);
 
 		// Generation tables come from the shared handle registry and are identical in every source after the
 		// all-views refresh, so any source serves for the per-frame upload and the fallback handles.
@@ -188,22 +163,21 @@ public sealed class GpuDrawPass
 		_gpuDrawResources.EnsureCreated(device);
 		if (GpuDrawDiagnosticsEnabled)
 		{
-			SampleVisibilityDiagnostics();
+			SampleDiagnostics();
 			_hardeningStats.ResetSubmissionDiagnostics();
 		}
 		EnsureGBufferPipelines(device);
-		var primaryGBufferPipeline = GetPrimaryGBufferPipeline();
-		var backendSignals = _backendBridge.PrepareFrame(device, _renderer, _gpuDrawResources, primaryGBufferPipeline);
-		_supportsIndirectStructuralUpdates = backendSignals.SupportsIndirectStructuralUpdates;
-		if (backendSignals.RequiresFullSlotReencode)
-		{
-			_bindlessEpoch++;
-		}
+
+		// Draw records check these again whenever they are encoded, because a buffer can be replaced while passes
+		// are still recording. GPU draw state is only re-uploaded here, so a replacement during recording is cured
+		// on the next frame.
+		var stalenessInputs = _stalenessInputs.Read();
+		var requireFullGpuStateRefresh = stalenessInputs != _frameStartStalenessInputs;
+		_frameStartStalenessInputs = stalenessInputs;
 
 		var activeSlot = AdvanceActiveIndirectSlot();
 		_gpuDrawResources.ActiveIndirectCommandSlot = activeSlot;
 		_gpuDrawResources.ActiveFrameSlot = activeSlot;
-		var requireFullGpuStateRefresh = backendSignals.RequiresFullSlotReencode;
 
 		_updates.Clear();
 		_updateOwners.Clear();
@@ -236,7 +210,7 @@ public sealed class GpuDrawPass
 			{
 				Console.WriteLine(
 					$"[gpu draw] full GPU state refresh on frame slot {activeSlot}: re-added {refreshed} draws, " +
-					$"bindless epoch {_bindlessEpoch}. Terrain layer allocations were reset.");
+					$"staleness inputs {stalenessInputs}. Terrain layer allocations were reset.");
 			}
 		}
 
@@ -473,23 +447,27 @@ public sealed class GpuDrawPass
 				executionLaneIndex = cachedState.ExecutionIndex;
 			}
 
-            // Material state is shared by rigid and skinned meshes; specialize only after resolving it.
-            var executionKey = new GpuDrawExecutionKey(drawKind, bucketId, sidedness,
-                drawKind == GpuDrawKind.Mesh && bucketId != GpuDrawBucketId.AlphaBlend && mesh?.IsSkinned == true,
-                GpuDrawClassification.ReversesWinding(update.World));
-            if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var specializedLane))
-            {
-                executionLaneIndex = specializedLane.ExecutionIndex;
-                if (drawFlags != 0u) drawFlags = CreateDrawFlags(executionLaneIndex);
-            }
+			var executionKey = GpuDrawClassification.ResolveExecutionKey(
+				drawKind,
+				bucketId,
+				sidedness,
+				mesh,
+				update.World);
+			if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var specializedLane))
+			{
+				executionLaneIndex = specializedLane.ExecutionIndex;
+				if (drawFlags != 0u)
+				{
+					drawFlags = CreateDrawFlags(executionLaneIndex);
+				}
+			}
 
-			if (backendSignals.SupportsIndirectStructuralUpdates &&
-			    IsStructuralUpdateType(update.Type) &&
+			if (IsStructuralUpdateType(update.Type) &&
 			    updateDatabase.IsCurrentDrawHandle(update.DrawHandle) &&
 			    update.DrawIndex > 0 &&
 			    update.DrawIndex < GpuDrawResources.MaxDrawCount)
 			{
-				AppendStructuralRecord(update, mesh, executionKey);
+				_records.RecordStructuralChange(update.Type, update.DrawHandle, executionKey, mesh);
 			}
 
 			if (materialResources is not null && GpuDrawClassification.SupportsTexturedPbrMaterialInterpretation(drawKind))
@@ -1283,7 +1261,7 @@ public sealed class GpuDrawPass
 	/// <returns>False when the backend cannot compact, meaning the caller must execute the full range.</returns>
 	public bool RecordIndirectCompaction(
 		RenderGraphContext context,
-		SharedDrawIndirectCommandSet commandSet,
+		DrawRecordSet commandSet,
 		DrawPassParticipation participation,
 		IGfxBuffer? drawArgsBuffer,
 		ulong drawArgsBaseOffsetBytes,
@@ -1294,8 +1272,7 @@ public sealed class GpuDrawPass
 		ArgumentNullException.ThrowIfNull(laneAvailable);
 
 		if (drawArgsBuffer is null ||
-		    _gpuDrawResources.DrawCommandBuffer is not { } drawCommandBuffer ||
-		    _supportsIndirectStructuralUpdates == false)
+		    _gpuDrawResources.DrawCommandBuffer is not { } drawCommandBuffer)
 		{
 			return false;
 		}
@@ -1360,7 +1337,7 @@ public sealed class GpuDrawPass
 						continue;
 					}
 
-					var rangeIndex = SharedDrawIndirectCommandSet.GetCompactedExecutionRangeIndex(
+					var rangeIndex = DrawRecordSet.GetCompactedExecutionRangeIndex(
 						activeSlot,
 						lane.ExecutionIndex,
 						page.PageIndex);
@@ -1438,7 +1415,7 @@ public sealed class GpuDrawPass
 	/// </summary>
 	private uint[] RentExecutionRangeReset()
 	{
-		var length = SharedDrawIndirectCommandSet.CompactedExecutionRangeEntryCount *
+		var length = DrawRecordSet.CompactedExecutionRangeEntryCount *
 		             (IndirectCompactionExecutionRange.StrideInBytes / sizeof(uint));
 		if (_executionRangeReset is null || _executionRangeReset.Length != length)
 		{
@@ -1460,7 +1437,7 @@ public sealed class GpuDrawPass
 	/// reported as one.
 	/// </returns>
 	private static IndirectCompactionKind? ResolveCompactionKind(
-		SharedDrawIndirectCommandSet commandSet,
+		DrawRecordSet commandSet,
 		int activeSlot,
 		ReadOnlySpan<GpuDrawExecutionLaneDefinition> laneDefinitions,
 		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable)
@@ -1673,6 +1650,7 @@ public sealed class GpuDrawPass
 			var bindings = SharedDrawGraphicsBufferBindings.FromGBufferReflection(compiled.ReflectionLayout);
 			_gbufferBufferBindings[lane.ExecutionIndex] = bindings;
 			_gbufferReflections[lane.ExecutionIndex] = compiled.ReflectionLayout;
+			_gbufferLaneBindingGeneration++;
 		}
 	}
 
@@ -1695,21 +1673,6 @@ public sealed class GpuDrawPass
 				["g_SkinnedInstances"] = _gpuDrawResources.SkinnedInstanceBuffer
 			},
 			SharedDrawPerDrawBindings.ResourceNames);
-	}
-
-	private IGfxPipeline? GetPrimaryGBufferPipeline()
-	{
-		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.GBuffer);
-		for (var i = 0; i < laneDefinitions.Length; i++)
-		{
-			var pipeline = GetGBufferPipeline(laneDefinitions[i]);
-			if (pipeline is not null)
-			{
-				return pipeline;
-			}
-		}
-
-		return null;
 	}
 
 	private IGfxPipeline? GetGBufferPipeline(GpuDrawExecutionLaneDefinition lane) => _gbufferPipelines[lane.ExecutionIndex];
@@ -1848,22 +1811,12 @@ public sealed class GpuDrawPass
 		_gbufferCompactionActive ? GBufferCommandSet.CompactedExecutionRangeBuffer : null;
 
 	/// <summary>The active view's G-buffer command set; see <see cref="PerViewIndirectCommandSets"/>.</summary>
-	private SharedDrawIndirectCommandSet GBufferCommandSet =>
+	private DrawRecordSet GBufferCommandSet =>
 		_gbufferIndirectCommandSets.Get(_gpuDrawResources.ActiveViewIndex);
 
-	/// <summary>Removes a destroyed view's G-buffer command sets, for the caller to retire.</summary>
-	internal IReadOnlyList<SharedDrawIndirectCommandSet> TakeViewCommandSets(int viewIndex) =>
-		_gbufferIndirectCommandSets.Take(viewIndex);
-
-	/// <summary>Stops tracking command sets that are about to be retired.</summary>
-	internal void ForgetIndirectCommandSets(IEnumerable<SharedDrawIndirectCommandSet> commandSets)
-	{
-		foreach (var commandSet in commandSets)
-		{
-			_knownIndirectCommandSets.Remove(commandSet);
-			_commandSetLastUse.Remove(commandSet);
-		}
-	}
+	/// <summary>Releases and retires a destroyed view's G-buffer command sets.</summary>
+	internal void ReleaseViewCommandSets(int viewIndex, IGfxDevice device) =>
+		_gbufferIndirectCommandSets.ReleaseView(viewIndex, device);
 
 	/// <summary>
 	/// Encodes the GBuffer commands and compacts them against the camera cull results. Runs in the cull
@@ -1873,7 +1826,7 @@ public sealed class GpuDrawPass
 	public void RecordGBufferIndirectCompaction(RenderGraphContext context)
 	{
 		ArgumentNullException.ThrowIfNull(context);
-		EnsureGBufferIndirectCommands(context);
+		EnsureGBufferIndirectCommands();
 		_gbufferCompactionActive = RecordIndirectCompaction(
 			context,
 			GBufferCommandSet,
@@ -1883,86 +1836,51 @@ public sealed class GpuDrawPass
 			static _ => true);
 	}
 
-	public void EnsureGBufferIndirectCommands(RenderGraphContext context)
+	public void EnsureGBufferIndirectCommands()
 	{
-		ArgumentNullException.ThrowIfNull(context);
 		var device = _renderer.GetGfxDevice();
 		EnsureGBufferPipelines(device);
-		EnsureIndirectCommandsForPass(
-			context.GpuDrawDatabase,
+		EnsureIndirectCommands(
 			GBufferCommandSet,
-			DrawPassParticipation.GBuffer,
-			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources),
-			static _ => true,
-			lane => _gbufferBufferBindings[lane.ExecutionIndex],
-			CreateGBufferPassBindingSet);
+			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources));
 	}
 
-	public void EnsureIndirectCommandsForPass(
-		GpuDrawDatabase drawDatabase,
-		SharedDrawIndirectCommandSet commandSet,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
-		Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> bindingResolver,
-		Func<GpuDrawExecutionLaneDefinition, GraphicsPassBindingSet?> passBindingResolver)
+	/// <summary>Brings the active slot of a pass's draw record set up to date before the pass executes it.</summary>
+	public void EnsureIndirectCommands(DrawRecordSet commandSet, in SharedDrawIndirectEncodeResources resources)
 	{
-		ArgumentNullException.ThrowIfNull(drawDatabase);
 		ArgumentNullException.ThrowIfNull(commandSet);
-		ArgumentNullException.ThrowIfNull(laneAvailable);
-		ArgumentNullException.ThrowIfNull(bindingResolver);
-		ArgumentNullException.ThrowIfNull(passBindingResolver);
-
-		if (_supportsIndirectStructuralUpdates == false)
-		{
-			return;
-		}
 
 		var device = _renderer.GetGfxDevice();
-		RegisterIndirectCommandSet(commandSet);
 		commandSet.EnsureCreated(device);
-		commandSet.SetIndexStream(resources.IndexStream);
-		var activeSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
-		var frameSlot = _gpuDrawResources.ActiveFrameSlot;
-		// Read the binding version here rather than trusting the frame-start backend signal: capacity
-		// growth happens while passes are recording, so a pass that encodes after it would otherwise
-		// execute records still holding the replaced buffers' addresses.
-		var bindingVersion = _gpuDrawResources.IndirectBindingVersion;
-		if (commandSet.RequiresFullReencode(activeSlot, frameSlot, _bindlessEpoch, bindingVersion))
-		{
-			using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
-			{
-				ReencodeAllIndirectCommands(
-					drawDatabase,
-					commandSet,
-					activeSlot,
-					device,
-					participation,
-					resources,
-					laneAvailable,
-					bindingResolver,
-					passBindingResolver);
-			}
+		_records.Prepare(
+			commandSet,
+			device,
+			_gpuDrawResources.ActiveIndirectCommandSlot,
+			_gpuDrawResources.ActiveFrameSlot,
+			resources);
+	}
 
-			commandSet.MarkSlotEncoded(activeSlot, frameSlot, _bindlessEpoch, bindingVersion, _latestStructuralVersion);
-			CompactStructuralReplayRecords();
-			return;
+	/// <summary>The lanes of the G-buffer draw record sets. Every G-buffer lane is drawn.</summary>
+	private sealed class GBufferLaneBindings : ILaneBindingProvider
+	{
+		private readonly GpuDrawPass _pass;
+
+		public GBufferLaneBindings(GpuDrawPass pass)
+		{
+			_pass = pass;
 		}
 
-		using (FrameProfiler.Instance.Measure("GpuDraw.StructuralReplay"))
-		{
-			ReplayPendingStructuralRecords(
-				drawDatabase,
-				commandSet,
-				activeSlot,
-				device,
-				participation,
-				resources,
-				laneAvailable,
-				bindingResolver,
-				passBindingResolver);
-		}
-		CompactStructuralReplayRecords();
+		public ulong Generation => _pass._gbufferLaneBindingGeneration;
+
+		public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => true;
+
+		public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass._gbufferBufferBindings[lane.ExecutionIndex];
+
+		public GraphicsPassBindingSet? GetPassBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass.CreateGBufferPassBindingSet(lane);
+
+		public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) => _pass.GetGBufferPipeline(lane);
 	}
 
 	public List<GBufferExecutionBucket> BuildGBufferBuckets()
@@ -1993,326 +1911,6 @@ public sealed class GpuDrawPass
 		}
 
 		return buckets;
-	}
-
-	private void ReplayPendingStructuralRecords(
-		GpuDrawDatabase drawDatabase,
-		SharedDrawIndirectCommandSet commandSet,
-		int slotIndex,
-		IGfxDevice device,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
-		Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> bindingResolver,
-		Func<GpuDrawExecutionLaneDefinition, GraphicsPassBindingSet?> passBindingResolver)
-	{
-		var appliedVersion = commandSet.GetAppliedStructuralVersion(slotIndex);
-		if (_latestStructuralVersion <= appliedVersion)
-		{
-			return;
-		}
-
-		for (var i = 0; i < _structuralReplayRecords.Count; i++)
-		{
-			var record = _structuralReplayRecords[i];
-			if (record.Version <= appliedVersion)
-			{
-				continue;
-			}
-
-			ApplyStructuralRecord(
-				drawDatabase,
-				record,
-				commandSet,
-				slotIndex,
-				device,
-				participation,
-				resources,
-				laneAvailable,
-				bindingResolver,
-				passBindingResolver);
-		}
-
-		commandSet.SetAppliedStructuralVersion(slotIndex, _latestStructuralVersion);
-	}
-
-	private void ApplyStructuralRecord(
-		GpuDrawDatabase drawDatabase,
-		in StructuralCommandRecord record,
-		SharedDrawIndirectCommandSet commandSet,
-		int slotIndex,
-		IGfxDevice device,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
-		Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> bindingResolver,
-		Func<GpuDrawExecutionLaneDefinition, GraphicsPassBindingSet?> passBindingResolver)
-	{
-		if (drawDatabase.IsCurrentDrawHandle(record.DrawHandle) == false)
-		{
-			return;
-		}
-
-		if (record.DrawHandle.Index == 0 || record.DrawHandle.Index >= GpuDrawResources.MaxDrawCount)
-		{
-			return;
-		}
-
-		var commandIndex = (uint)record.DrawHandle.Index;
-		if (record.Type == GpuDrawUpdateType.Remove ||
-		    GpuDrawClassification.SupportsMeshBackedGeometry(record.ExecutionKey.DrawKind) == false ||
-		    record.Mesh is null)
-		{
-			ResetCommandAcrossBuckets(commandSet, slotIndex, commandIndex);
-			return;
-		}
-
-		_renderer.EnsureMeshResources(record.Mesh);
-		EncodeCommandForPassLane(
-			commandIndex,
-			record.ExecutionKey,
-			record.Mesh,
-			commandSet,
-			slotIndex,
-			device,
-			participation,
-			resources,
-			laneAvailable,
-			bindingResolver,
-			passBindingResolver);
-	}
-
-	private void AppendStructuralRecord(in GpuDrawUpdate update, Mesh? mesh, GpuDrawExecutionKey executionKey)
-	{
-		var version = _nextStructuralVersion++;
-		var type = update.Type == GpuDrawUpdateType.Remove ? GpuDrawUpdateType.Remove : update.Type;
-		_structuralReplayRecords.Add(
-			new StructuralCommandRecord(version, type, update.DrawHandle, executionKey, mesh));
-		_latestStructuralVersion = version;
-	}
-
-	private void ReencodeAllIndirectCommands(GpuDrawDatabase drawDatabase,
-		SharedDrawIndirectCommandSet commandSet,
-		int slotIndex,
-		IGfxDevice device,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
-		Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> bindingResolver,
-		Func<GpuDrawExecutionLaneDefinition, GraphicsPassBindingSet?> passBindingResolver)
-	{
-		for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
-		{
-			var pages = commandSet.GetAllocatedPages(slotIndex, executionIndex);
-			for (var pageIndex = 0; pageIndex < pages.Length; pageIndex++)
-			{
-				var page = pages[pageIndex];
-				for (var commandIndex = 0u; commandIndex < page.PageCommandCapacity; commandIndex++)
-				{
-					_backendBridge.ResetCommand(page.CommandBuffer, commandIndex);
-				}
-			}
-		}
-
-		// Every command was just reset, so every live source's draws have to be re-encoded, not only the database
-		// of the pass that noticed the slot needed it.
-		CollectLiveDrawEntries(drawDatabase);
-		for (var i = 0; i < _drawEntries.Count; i++)
-		{
-			var entry = _drawEntries[i];
-			if (entry.DrawIndex <= 0 || entry.DrawIndex >= GpuDrawResources.MaxDrawCount)
-			{
-				continue;
-			}
-
-			if (GpuDrawClassification.SupportsMeshBackedGeometry(entry.DrawKind) == false)
-			{
-				LogUnsupportedDrawKindOnce(entry.DrawKind);
-				continue;
-			}
-
-			_renderer.EnsureMeshResources(entry.Mesh);
-			var executionKey = new GpuDrawExecutionKey(
-				entry.DrawKind,
-				GpuDrawClassification.ResolveBucketId(entry.DrawKind, entry.Material),
-				GpuDrawClassification.ResolveSidedness(entry.DrawKind, entry.Material),
-                entry.DrawKind == GpuDrawKind.Mesh && entry.Material.AlphaMode != AlphaMode.AlphaBlend && entry.Mesh.IsSkinned,
-                GpuDrawClassification.ReversesWinding(entry.World));
-			EncodeCommandForPassLane(
-				(uint)entry.DrawIndex,
-				executionKey,
-				entry.Mesh,
-				commandSet,
-				slotIndex,
-				device,
-				participation,
-				resources,
-				laneAvailable,
-				bindingResolver,
-				passBindingResolver);
-		}
-	}
-
-	/// <summary>
-	/// Draw entries of every database whose draws are in the shared tables this frame, or of
-	/// <paramref name="fallback"/> before the first update has named any.
-	/// </summary>
-	private void CollectLiveDrawEntries(GpuDrawDatabase fallback)
-	{
-		if (_liveSources.Count == 0)
-		{
-			fallback.CollectDrawEntries(_drawEntries);
-			return;
-		}
-
-		_liveEntryScratch.Clear();
-		for (var i = 0; i < _liveSources.Count; i++)
-		{
-			_liveSources[i].Database.CollectDrawEntries(_drawEntries);
-			_liveEntryScratch.AddRange(_drawEntries);
-		}
-
-		_drawEntries.Clear();
-		_drawEntries.AddRange(_liveEntryScratch);
-	}
-
-	private void RegisterIndirectCommandSet(SharedDrawIndirectCommandSet commandSet)
-	{
-		_commandSetLastUse[commandSet] = _updateFrame;
-		for (var i = 0; i < _knownIndirectCommandSets.Count; i++)
-		{
-			if (ReferenceEquals(_knownIndirectCommandSets[i], commandSet))
-			{
-				return;
-			}
-		}
-
-		_knownIndirectCommandSets.Add(commandSet);
-	}
-
-	private void CompactStructuralReplayRecords()
-	{
-		if (_structuralReplayRecords.Count == 0 || _knownIndirectCommandSets.Count == 0)
-		{
-			return;
-		}
-
-		var minAppliedVersion = ulong.MaxValue;
-		for (var commandSetIndex = 0; commandSetIndex < _knownIndirectCommandSets.Count; commandSetIndex++)
-		{
-			var commandSet = _knownIndirectCommandSets[commandSetIndex];
-			// A set unused for a full turn of the slot ring — a hidden view's, or a cascade no longer rendered —
-			// would otherwise pin the log forever. It re-encodes in full on its next use instead of replaying.
-			if (_commandSetLastUse.TryGetValue(commandSet, out var lastUse) &&
-			    _updateFrame - lastUse > GpuDrawResources.IndirectCommandBufferSlotCount)
-			{
-				commandSet.InvalidateEncoding();
-				continue;
-			}
-
-			for (var slotIndex = 0; slotIndex < GpuDrawResources.IndirectCommandBufferSlotCount; slotIndex++)
-			{
-				var appliedVersion = commandSet.GetAppliedStructuralVersion(slotIndex);
-				if (appliedVersion < minAppliedVersion)
-				{
-					minAppliedVersion = appliedVersion;
-				}
-			}
-		}
-
-		if (minAppliedVersion == 0)
-		{
-			return;
-		}
-
-		var removeCount = 0;
-		for (; removeCount < _structuralReplayRecords.Count; removeCount++)
-		{
-			if (_structuralReplayRecords[removeCount].Version > minAppliedVersion)
-			{
-				break;
-			}
-		}
-
-		if (removeCount > 0)
-		{
-			_structuralReplayRecords.RemoveRange(0, removeCount);
-		}
-	}
-
-	private void ResetCommandAcrossBuckets(
-		SharedDrawIndirectCommandSet commandSet,
-		int slotIndex,
-		uint commandIndex)
-	{
-		for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
-		{
-			if (commandSet.TryGetPageForCommand(
-				    slotIndex,
-				    executionIndex,
-				    commandIndex,
-				    out var commandBuffer,
-				    out var pageCommandIndex))
-			{
-				_backendBridge.ResetCommand(commandBuffer, pageCommandIndex);
-			}
-		}
-	}
-
-	private void EncodeCommandForPassLane(
-		uint commandIndex,
-		GpuDrawExecutionKey executionKey,
-		Mesh mesh,
-		SharedDrawIndirectCommandSet commandSet,
-		int slotIndex,
-		IGfxDevice device,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
-		Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> bindingResolver,
-		Func<GpuDrawExecutionLaneDefinition, GraphicsPassBindingSet?> passBindingResolver)
-	{
-		if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var targetLane) == false ||
-		    targetLane.SupportsPass(participation) == false ||
-		    laneAvailable(targetLane) == false)
-		{
-			ResetCommandAcrossBuckets(commandSet, slotIndex, commandIndex);
-			return;
-		}
-
-		for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
-		{
-			if (executionIndex == targetLane.ExecutionIndex)
-			{
-				var bindings = bindingResolver(targetLane)
-				               ?? throw new InvalidOperationException(
-					               $"Missing reflected shared-draw buffer bindings for execution lane '{targetLane.DebugName}'.");
-				var passBindings = passBindingResolver(targetLane)
-					?? throw new InvalidOperationException($"Missing reflected graphics pass bindings for execution lane '{targetLane.DebugName}'.");
-				var commandBuffer = commandSet.EnsurePageForCommand(
-					device,
-					slotIndex,
-					executionIndex,
-					commandIndex,
-					out var pageCommandIndex);
-				var laneResources = resources.ForLane(targetLane);
-				if (_backendBridge.TryEncodeIndexedDrawCommand(commandBuffer, pageCommandIndex, commandIndex, mesh, laneResources, passBindings, bindings.ToPerDrawBindings()) == false)
-				{
-					_backendBridge.ResetCommand(commandBuffer, pageCommandIndex);
-				}
-				continue;
-			}
-
-			if (commandSet.TryGetPageForCommand(
-				    slotIndex,
-				    executionIndex,
-				    commandIndex,
-				    out var staleCommandBuffer,
-				    out var stalePageCommandIndex))
-			{
-				_backendBridge.ResetCommand(staleCommandBuffer, stalePageCommandIndex);
-			}
-		}
 	}
 
 	private static uint CreateDrawFlags(int bucketIndex)
@@ -2398,21 +1996,13 @@ public sealed class GpuDrawPass
 		UploadFallbackTableEntries();
 	}
 
-	private void SampleGpuDiagnosticCounters()
+	private void SampleDiagnostics()
 	{
-		_backendBridge.SampleGpuDiagnosticCounters(
-			_gpuDrawResources.DiagnosticsCounterBuffer,
+		_diagnosticsSampler.Sample(
+			_renderer.GetGfxDevice(),
+			_gpuDrawResources,
 			_lastGpuDiagnosticCounters,
 			_hardeningStats);
-	}
-
-	private void SampleVisibilityDiagnostics()
-	{
-		_backendBridge.SampleVisibilityDiagnostics(
-			_gpuDrawResources.DrawCountPerBucketBuffer,
-			_gpuDrawResources.DrawExecutionRangePerBucketBuffer,
-			_hardeningStats);
-		SampleGpuDiagnosticCounters();
 	}
 
 	private void PublishSubmittedBucketDiagnostics(GpuDrawDatabase drawDatabase)

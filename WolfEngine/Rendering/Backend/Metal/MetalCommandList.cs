@@ -583,10 +583,10 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		}
 		if (metalCommandBuffer.UsesCurrentBindlessBuffers(_descriptorTable, maxAvailable) == false)
 		{
-			// An argument buffer grew after this ICB slot was encoded. The backend bridge
-			// observes the pointer change at the next frame boundary and re-encodes the
-			// active slot. Skipping one stale execution is preferable to submitting an ICB
-			// that contains a dangling Metal buffer binding.
+			// An argument buffer grew after this ICB slot was encoded. The growth raised the bindless
+			// table's generation, so IndirectDrawRecords re-encodes the slot the next time it is
+			// prepared. Skipping one stale execution is preferable to submitting an ICB that
+			// contains a dangling Metal buffer binding.
 			return;
 		}
 
