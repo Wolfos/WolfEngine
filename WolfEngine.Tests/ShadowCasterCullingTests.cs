@@ -85,7 +85,7 @@ public sealed class ShadowCasterCullingTests
 	public void DisabledOptimizationUsesOriginalPlanesAndDoesNotChangeProjection()
 	{
 		var scene = CreateScene();
-		var pass = new ShadowMapPass(new ShaderCompiler());
+		var pass = new ShadowMapPass(new ShaderCompiler(), DrawRecordFakes.CreateRecords());
 		pass.PrepareFrame(scene, new ShadowMapConfig());
 		var matrix = pass.GetCurrentFrameData().CascadeViewProjection0;
 		Span<Vector4> planes = stackalloc Vector4[FrustumCulling.MaxPlaneCount];

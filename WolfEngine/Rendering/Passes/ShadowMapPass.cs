@@ -31,7 +31,7 @@ public sealed class ShadowMapPass
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), SharedDrawGraphicsBufferBindings> _bufferBindingsByCascadeExecutionKey = new();
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), ShaderReflectionLayout> _reflectionByCascadeExecutionKey = new();
 	// One set per cascade, per view; see PerViewIndirectCommandSets.
-	private readonly PerViewIndirectCommandSets _indirectCommandSets = new(MaxCascadeCount);
+	private readonly PerViewIndirectCommandSets _indirectCommandSets;
 	private ShadowFrameData _currentFrameData = CreateDisabledFrameData();
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _cameraWriter;
@@ -40,9 +40,10 @@ public sealed class ShadowMapPass
 	// cascade's draw config is built.
 	private readonly bool[] _compactedExecutionByCascade = new bool[MaxCascadeCount];
 
-	public ShadowMapPass(IShaderProvider shaderCompiler)
+	public ShadowMapPass(IShaderProvider shaderCompiler, IndirectDrawRecords records)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_indirectCommandSets = new PerViewIndirectCommandSets(records, MaxCascadeCount);
 	}
 
 	public void PrepareFrame(SceneDrawData sceneData, in ShadowMapConfig config)
@@ -107,14 +108,14 @@ public sealed class ShadowMapPass
 		_compactedExecutionByCascade[cascadeIndex] = enabled;
 	}
 
-	public SharedDrawIndirectCommandSet GetIndirectCommandSet(int cascadeIndex, int viewIndex)
+	public DrawRecordSet GetIndirectCommandSet(int cascadeIndex, int viewIndex)
 	{
 		ValidateCascadeIndex(cascadeIndex);
 		return _indirectCommandSets.Get(viewIndex, cascadeIndex);
 	}
 
 	/// <summary>Removes a destroyed view's cascade command sets, for the caller to retire.</summary>
-	internal IReadOnlyList<SharedDrawIndirectCommandSet> TakeViewCommandSets(int viewIndex) =>
+	internal IReadOnlyList<DrawRecordSet> TakeViewCommandSets(int viewIndex) =>
 		_indirectCommandSets.Take(viewIndex);
 
 	public void EnsureIndirectResources(IGfxDevice device, int cascadeIndex, int viewIndex)

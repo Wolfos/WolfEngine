@@ -35,7 +35,7 @@ internal static class SharedDrawIndirectExecution
 	/// </summary>
 	public static void ExecutePages(
 		IGfxCommandList commandList,
-		ReadOnlySpan<SharedDrawIndirectCommandPage> pages,
+		ReadOnlySpan<DrawRecordPage> pages,
 		uint commandUpperBound)
 	{
 		for (var i = 0; i < pages.Length; i++)
@@ -63,7 +63,7 @@ internal static class SharedDrawIndirectExecution
 	/// </summary>
 	public static void ExecuteCompactedPages(
 		IGfxCommandList commandList,
-		ReadOnlySpan<SharedDrawIndirectCommandPage> pages,
+		ReadOnlySpan<DrawRecordPage> pages,
 		IGfxBuffer executionRangeBuffer,
 		int slotIndex,
 		int executionLaneIndex,
@@ -77,7 +77,7 @@ internal static class SharedDrawIndirectExecution
 				continue;
 			}
 
-			var rangeIndex = SharedDrawIndirectCommandSet.GetCompactedExecutionRangeIndex(
+			var rangeIndex = DrawRecordSet.GetCompactedExecutionRangeIndex(
 				slotIndex,
 				executionLaneIndex,
 				page.PageIndex);

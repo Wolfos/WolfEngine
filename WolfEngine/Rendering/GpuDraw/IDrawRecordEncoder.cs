@@ -9,6 +9,9 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public interface IDrawRecordEncoder
 {
+	/// <summary>Creates one page of draw records, which the caller owns and disposes.</summary>
+	IGfxIndirectCommandBuffer CreatePage(IGfxDevice device, uint commandCapacity, string name);
+
 	void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex);
 
 	/// <param name="pipeline">

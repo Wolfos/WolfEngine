@@ -1,10 +1,11 @@
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Passes;
 
-namespace WolfEngine.Rendering.Passes;
+namespace WolfEngine.Rendering;
 
-public readonly struct SharedDrawIndirectCommandPage
+public readonly struct DrawRecordPage
 {
-	public SharedDrawIndirectCommandPage(
+	public DrawRecordPage(
 		uint pageIndex,
 		uint pageStartCommandIndex,
 		uint pageCommandCapacity,
@@ -22,7 +23,11 @@ public readonly struct SharedDrawIndirectCommandPage
 	public IGfxIndirectCommandBuffer CommandBuffer { get; }
 }
 
-public sealed class SharedDrawIndirectCommandSet : IDisposable
+/// <summary>
+/// The draw records of one pass for one view, across every frame slot and execution lane. Sets are created and
+/// kept current by <see cref="IndirectDrawRecords"/>; passes only read their pages to execute them.
+/// </summary>
+public sealed class DrawRecordSet : IDisposable
 {
 	public const uint IndirectCommandPageCapacity = 2048;
 
@@ -35,17 +40,12 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 	private readonly ulong[] _appliedStructuralVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly DrawRecordStalenessInputs[] _encodedStalenessInputs = new DrawRecordStalenessInputs[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _frameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
+	private readonly IDrawRecordEncoder _encoder;
 	private MeshIndexStream _indexStream;
 
-	internal void SetIndexStream(MeshIndexStream stream)
+	internal DrawRecordSet(IDrawRecordEncoder encoder)
 	{
-		if (_indexStream == stream) return;
-		_indexStream = stream;
-		InvalidateEncoding();
-	}
-
-	public SharedDrawIndirectCommandSet()
-	{
+		_encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
 		Array.Fill(_frameBindings, -1);
 		for (var i = 0; i < _commandPages.Length; i++)
 		{
@@ -69,6 +69,13 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 			name: "SharedDrawCompactedExecutionRanges"));
 	}
 
+	internal void SetIndexStream(MeshIndexStream stream)
+	{
+		if (_indexStream == stream) return;
+		_indexStream = stream;
+		InvalidateEncoding();
+	}
+
 	public static int CompactedExecutionRangeEntryCount =>
 		GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount * (int)MaxPageCount;
 
@@ -80,7 +87,7 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		return (FlattenSlotLaneIndex(slotIndex, executionLaneIndex) * (int)MaxPageCount) + (int)pageIndex;
 	}
 
-	public IGfxIndirectCommandBuffer EnsurePage(
+	internal IGfxIndirectCommandBuffer EnsurePage(
 		IGfxDevice device,
 		int slotIndex,
 		int executionLaneIndex,
@@ -98,15 +105,15 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		}
 
 		var laneName = ResolveLaneDebugName(executionLaneIndex);
-		commandBuffer = device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
-			PassKind.Graphics,
+		commandBuffer = _encoder.CreatePage(
+			device,
 			IndirectCommandPageCapacity,
-			name: $"{laneName} slot{slotIndex} page{pageIndex}"));
+			$"{laneName} slot{slotIndex} page{pageIndex}");
 		pages.Add(pageIndex, commandBuffer);
 		return commandBuffer;
 	}
 
-	public IGfxIndirectCommandBuffer EnsurePageForCommand(
+	internal IGfxIndirectCommandBuffer EnsurePageForCommand(
 		IGfxDevice device,
 		int slotIndex,
 		int executionLaneIndex,
@@ -140,7 +147,7 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		return TryGetPage(slotIndex, executionLaneIndex, GetPageIndex(commandIndex), out commandBuffer);
 	}
 
-	public SharedDrawIndirectCommandPage[] GetAllocatedPages(int slotIndex, int executionLaneIndex)
+	public DrawRecordPage[] GetAllocatedPages(int slotIndex, int executionLaneIndex)
 	{
 		ValidateSlot(slotIndex);
 		ValidateLane(executionLaneIndex);
@@ -148,14 +155,14 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		var pages = _commandPages[FlattenSlotLaneIndex(slotIndex, executionLaneIndex)];
 		if (pages.Count == 0)
 		{
-			return Array.Empty<SharedDrawIndirectCommandPage>();
+			return Array.Empty<DrawRecordPage>();
 		}
 
-		var result = new SharedDrawIndirectCommandPage[pages.Count];
+		var result = new DrawRecordPage[pages.Count];
 		var i = 0;
 		foreach (var page in pages)
 		{
-			result[i++] = new SharedDrawIndirectCommandPage(
+			result[i++] = new DrawRecordPage(
 				page.Key,
 				page.Key * IndirectCommandPageCapacity,
 				IndirectCommandPageCapacity,
@@ -165,13 +172,13 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		return result;
 	}
 
-	public ulong GetAppliedStructuralVersion(int slotIndex)
+	internal ulong GetAppliedStructuralVersion(int slotIndex)
 	{
 		ValidateSlot(slotIndex);
 		return _appliedStructuralVersions[slotIndex];
 	}
 
-	public void SetAppliedStructuralVersion(int slotIndex, ulong version)
+	internal void SetAppliedStructuralVersion(int slotIndex, ulong version)
 	{
 		ValidateSlot(slotIndex);
 		_appliedStructuralVersions[slotIndex] = version;
@@ -181,7 +188,7 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 	/// The staleness inputs as they stand right now. A slot encoded against older inputs may hold the identity of
 	/// buffers that have since been replaced, and must be re-encoded before it is executed.
 	/// </param>
-	public bool RequiresFullReencode(int slotIndex, int frameSlot, in DrawRecordStalenessInputs stalenessInputs)
+	internal bool RequiresFullReencode(int slotIndex, int frameSlot, in DrawRecordStalenessInputs stalenessInputs)
 	{
 		ValidateSlot(slotIndex);
 		return _frameBindings[slotIndex] != frameSlot ||
@@ -193,13 +200,13 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 	/// replaying structural records. For a set that stopped being used: the replay log is compacted without
 	/// waiting for it, so by the time it is used again the records it would need may be gone.
 	/// </summary>
-	public void InvalidateEncoding()
+	internal void InvalidateEncoding()
 	{
 		Array.Fill(_frameBindings, -1);
 		Array.Clear(_appliedStructuralVersions);
 	}
 
-	public void MarkSlotEncoded(int slotIndex, int frameSlot, in DrawRecordStalenessInputs stalenessInputs, ulong structuralVersion)
+	internal void MarkSlotEncoded(int slotIndex, int frameSlot, in DrawRecordStalenessInputs stalenessInputs, ulong structuralVersion)
 	{
 		ValidateSlot(slotIndex);
 		_frameBindings[slotIndex] = frameSlot;

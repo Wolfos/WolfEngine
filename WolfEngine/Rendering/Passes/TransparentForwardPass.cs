@@ -15,7 +15,7 @@ public sealed class TransparentForwardPass
 	private readonly Dictionary<GpuDrawExecutionKey, IGfxPipeline> _pipelinesByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, SharedDrawGraphicsBufferBindings> _bufferBindingsByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, ShaderReflectionLayout> _reflectionByExecutionKey = new();
-	private readonly PerViewIndirectCommandSets _indirectCommandSets = new();
+	private readonly PerViewIndirectCommandSets _indirectCommandSets;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private GraphicsBackendKind? _reflectionBackendKind;
@@ -24,17 +24,21 @@ public sealed class TransparentForwardPass
 	private ShaderPropertyWriter? _ddgiDebugWriter;
 	private uint _cameraRegisterIndex = 2;
 
-	public TransparentForwardPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public TransparentForwardPass(
+		IShaderProvider shaderCompiler,
+		BindlessResourceRegistry bindlessRegistry,
+		IndirectDrawRecords records)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_indirectCommandSets = new PerViewIndirectCommandSets(records);
 	}
 
 	/// <summary>The given view's command set; see <see cref="PerViewIndirectCommandSets"/>.</summary>
-	public SharedDrawIndirectCommandSet GetIndirectCommandSet(int viewIndex) => _indirectCommandSets.Get(viewIndex);
+	public DrawRecordSet GetIndirectCommandSet(int viewIndex) => _indirectCommandSets.Get(viewIndex);
 
 	/// <summary>Removes a destroyed view's command set, for the caller to retire.</summary>
-	internal IReadOnlyList<SharedDrawIndirectCommandSet> TakeViewCommandSets(int viewIndex) =>
+	internal IReadOnlyList<DrawRecordSet> TakeViewCommandSets(int viewIndex) =>
 		_indirectCommandSets.Take(viewIndex);
 
 	public void EnsureIndirectResources(IGfxDevice device, int viewIndex)

@@ -37,7 +37,8 @@ public static class GraphicsConfig
 
 	/// <summary>
 	/// Validate, before every ExecuteIndirect, that the buffers whose GPU virtual addresses were baked into the
-	/// indirect command records are still alive at those same addresses.
+	/// indirect command records are still alive at those same addresses. Direct3D12 only, and Direct3D12 draw records
+	/// now hold no addresses, so there is nothing for it to find.
 	/// </summary>
 	public static bool ValidateIndirectCommandBuffers { get; } =
 		string.Equals(Environment.GetEnvironmentVariable("WOLF_VALIDATE_INDIRECT"), "1", StringComparison.Ordinal);

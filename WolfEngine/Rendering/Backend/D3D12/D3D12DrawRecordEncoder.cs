@@ -5,6 +5,15 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 
 public sealed class D3D12DrawRecordEncoder : IDrawRecordEncoder
 {
+	public IGfxIndirectCommandBuffer CreatePage(IGfxDevice device, uint commandCapacity, string name)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+		return device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
+			PassKind.Graphics,
+			commandCapacity,
+			name: name));
+	}
+
 	public void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex)
 	{
 		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer)

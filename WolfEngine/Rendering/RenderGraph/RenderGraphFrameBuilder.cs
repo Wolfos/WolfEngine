@@ -2156,7 +2156,7 @@ internal sealed class RenderGraphFrameBuilder
 		}
 
 		var device = _renderer.GetGfxDevice();
-		var commandSets = new List<SharedDrawIndirectCommandSet>();
+		var commandSets = new List<DrawRecordSet>();
 		commandSets.AddRange(_gpuDrawPass.TakeViewCommandSets(view.Index));
 		commandSets.AddRange(_transparentForwardPass.TakeViewCommandSets(view.Index));
 		commandSets.AddRange(_shadowMapPass.TakeViewCommandSets(view.Index));
@@ -2555,7 +2555,6 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		_shadowMapPass.EnsureIndirectResources(device, cascadeIndex, _gpuDrawResources.ActiveViewIndex);
 		_gpuDrawPass.EnsureIndirectCommandsForPass(
-			context.GpuDrawDatabase,
 			_shadowMapPass.GetIndirectCommandSet(cascadeIndex, _gpuDrawResources.ActiveViewIndex),
 			DrawPassParticipation.ShadowCaster,
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(
@@ -3329,7 +3328,6 @@ internal sealed class RenderGraphFrameBuilder
 		var device = _renderer.GetGfxDevice();
 		_transparentForwardPass.EnsureIndirectResources(device, _gpuDrawResources.ActiveViewIndex);
 		_gpuDrawPass.EnsureIndirectCommandsForPass(
-			context.GpuDrawDatabase,
 			_transparentForwardPass.GetIndirectCommandSet(_gpuDrawResources.ActiveViewIndex),
 			DrawPassParticipation.ForwardTransparent,
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources),

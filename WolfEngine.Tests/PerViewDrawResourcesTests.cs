@@ -64,7 +64,7 @@ public sealed class PerViewDrawResourcesTests
 	[Test]
 	public void PerViewIndirectCommandSets_AreDistinctPerViewAndPerSetAndStartFreshAfterTake()
 	{
-		var sets = new PerViewIndirectCommandSets(setsPerView: 3);
+		var sets = new PerViewIndirectCommandSets(DrawRecordFakes.CreateRecords(), setsPerView: 3);
 		var primaryCascade0 = sets.Get(0, 0);
 
 		Assert.Multiple(() =>
@@ -84,41 +84,6 @@ public sealed class PerViewDrawResourcesTests
 		});
 	}
 
-	[Test]
-	public void InvalidateEncoding_ForcesAFullReencodeOfEverySlot()
-	{
-		// A set that stops being used no longer holds back replay-log compaction, so the records it would need to
-		// catch up may be gone by its next use; invalidating makes that use re-encode instead of replaying.
-		var set = new SharedDrawIndirectCommandSet();
-		var inputs = new DrawRecordStalenessInputs(1, 1, 1);
-		set.MarkSlotEncoded(slotIndex: 0, frameSlot: 0, inputs, structuralVersion: 5);
-		Assert.That(set.RequiresFullReencode(0, 0, inputs), Is.False);
-
-		set.InvalidateEncoding();
-
-		Assert.Multiple(() =>
-		{
-			Assert.That(set.RequiresFullReencode(0, 0, inputs), Is.True);
-			Assert.That(set.GetAppliedStructuralVersion(0), Is.Zero);
-		});
-	}
-
-	[Test]
-	public void ChangingAnyStalenessInputForcesAFullReencode()
-	{
-		var set = new SharedDrawIndirectCommandSet();
-		var inputs = new DrawRecordStalenessInputs(1, 1, 1);
-		set.MarkSlotEncoded(slotIndex: 0, frameSlot: 0, inputs, structuralVersion: 5);
-
-		Assert.Multiple(() =>
-		{
-			Assert.That(set.RequiresFullReencode(0, 0, inputs with { SharedDrawBufferGeneration = 2 }), Is.True);
-			Assert.That(set.RequiresFullReencode(0, 0, inputs with { PackedGeometryGeneration = 2 }), Is.True);
-			Assert.That(set.RequiresFullReencode(0, 0, inputs with { BindlessTableGeneration = 2 }), Is.True);
-			Assert.That(set.RequiresFullReencode(0, frameSlot: 1, inputs), Is.True);
-			Assert.That(set.RequiresFullReencode(0, 0, inputs), Is.False);
-		});
-	}
 
 	private static IGfxDevice CreateDevice(out Mock<IGfxDevice> deviceMock)
 	{

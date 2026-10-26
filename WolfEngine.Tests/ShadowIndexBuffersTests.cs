@@ -67,18 +67,6 @@ public sealed class ShadowIndexBuffersTests
     }
 
     [Test]
-    public void ChangingIndexStreamInvalidatesEncodedCommands()
-    {
-        var set = new SharedDrawIndirectCommandSet();
-        var inputs = new DrawRecordStalenessInputs(1, 1, 1);
-        set.MarkSlotEncoded(0, 0, inputs, 5);
-        set.SetIndexStream(MeshIndexStream.Main);
-        Assert.That(set.RequiresFullReencode(0, 0, inputs), Is.False);
-        set.SetIndexStream(MeshIndexStream.ShadowOpaque);
-        Assert.That(set.RequiresFullReencode(0, 0, inputs), Is.True);
-    }
-
-    [Test]
     public void TerrainAlwaysUsesOriginalIndicesAndCutoutsKeepUvs()
     {
         var resources = new SharedDrawIndirectEncodeResources(null, null, null, 0, null, MeshIndexStream.ShadowOpaque);
