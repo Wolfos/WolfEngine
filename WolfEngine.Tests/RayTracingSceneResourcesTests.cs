@@ -2037,6 +2037,7 @@ public sealed class RayTracingSceneResourcesTests
 		public void ReleaseMeshResources(Mesh mesh) { }
 		public IGfxBuffer GetPackedMeshVertexBuffer() => _vertexBuffer;
 		public IGfxBuffer GetPackedMeshIndexBuffer() => _indexBuffer;
+		public ulong PackedGeometryGeneration => 0;
 		public uint GetPackedMeshVertexStride() => throw new NotSupportedException();
 		public bool SupportsGpuCapture => false;
 		public bool IsGpuCaptureActive => false;
@@ -2223,5 +2224,6 @@ public sealed class RayTracingSceneResourcesTests
 		public DescriptorHandle AllocateSampler(in SamplerDescriptor sampler) => throw new NotSupportedException();
 		public BindlessFallbackHandles GetOrCreateFallbackHandles() => throw new NotSupportedException();
 		public void Free(DescriptorHandle handle) => throw new NotSupportedException();
+		public ulong Generation => 0;
 	}
 }

@@ -136,6 +136,14 @@ public sealed class ShadowMapPass
 		return _pipelinesByCascadeExecutionKey.ContainsKey((cascadeIndex, lane.Key));
 	}
 
+	public IGfxPipeline? GetPipeline(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
+	{
+		ValidateCascadeIndex(cascadeIndex);
+		return _pipelinesByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var pipeline)
+			? pipeline
+			: null;
+	}
+
 	public SharedDrawGraphicsBufferBindings? GetBufferBindings(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
 	{
 		ValidateCascadeIndex(cascadeIndex);

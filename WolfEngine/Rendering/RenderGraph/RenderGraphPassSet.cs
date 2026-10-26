@@ -11,14 +11,16 @@ internal sealed class RenderGraphPassSet
 		BindlessResourceRegistry bindlessResourceRegistry,
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats gpuDrawHardeningStats,
-		IGpuDrawBackendBridge gpuDrawBackendBridge)
+		IDrawRecordEncoder drawRecordEncoder,
+		IGpuDrawDiagnosticsSampler gpuDrawDiagnosticsSampler)
 	{
 		ArgumentNullException.ThrowIfNull(renderer);
 		ArgumentNullException.ThrowIfNull(shaderCompiler);
 		ArgumentNullException.ThrowIfNull(bindlessResourceRegistry);
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 		ArgumentNullException.ThrowIfNull(gpuDrawHardeningStats);
-		ArgumentNullException.ThrowIfNull(gpuDrawBackendBridge);
+		ArgumentNullException.ThrowIfNull(drawRecordEncoder);
+		ArgumentNullException.ThrowIfNull(gpuDrawDiagnosticsSampler);
 
 		AmbientOcclusionPass = new(shaderCompiler, bindlessResourceRegistry);
 		AmbientOcclusionBlurPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -60,7 +62,8 @@ internal sealed class RenderGraphPassSet
 			gpuDrawResources,
 			gpuDrawHardeningStats,
 			renderer,
-			gpuDrawBackendBridge);
+			drawRecordEncoder,
+			gpuDrawDiagnosticsSampler);
 		SkyboxPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
 		BindlessResourceRegistry = bindlessResourceRegistry;
 	}

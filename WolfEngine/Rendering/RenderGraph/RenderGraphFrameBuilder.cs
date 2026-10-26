@@ -2565,7 +2565,8 @@ internal sealed class RenderGraphFrameBuilder
 				_view.FrameResources.Config.ShadowMaps.WeldShadowVertices ? MeshIndexStream.ShadowOpaque : MeshIndexStream.Main),
 			lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane),
 			lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane),
-			lane => _shadowMapPass.GetPassBindingSet(cascadeIndex, lane, _gpuDrawResources));
+			lane => _shadowMapPass.GetPassBindingSet(cascadeIndex, lane, _gpuDrawResources),
+			lane => _shadowMapPass.GetPipeline(cascadeIndex, lane));
 	}
 
 	private void ExecuteShadowMap(RenderGraphContext context)
@@ -3334,7 +3335,8 @@ internal sealed class RenderGraphFrameBuilder
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources),
 			lane => _transparentForwardPass.HasIndirectLane(lane),
 			lane => _transparentForwardPass.GetBufferBindings(lane),
-			lane => _transparentForwardPass.GetPassBindingSet(lane, _gpuDrawResources));
+			lane => _transparentForwardPass.GetPassBindingSet(lane, _gpuDrawResources),
+			lane => _transparentForwardPass.GetPipeline(lane));
 		var config = _transparentForwardPass.BuildConfig(
 			context,
 			_view.FrameResources,

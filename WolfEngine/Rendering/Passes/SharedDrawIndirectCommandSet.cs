@@ -33,8 +33,7 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		new SortedDictionary<uint, IGfxIndirectCommandBuffer>[GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
 	private IGfxBuffer? _compactedExecutionRanges;
 	private readonly ulong[] _appliedStructuralVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
-	private readonly uint[] _bindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
-	private readonly ulong[] _bindingVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
+	private readonly DrawRecordStalenessInputs[] _encodedStalenessInputs = new DrawRecordStalenessInputs[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _frameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private MeshIndexStream _indexStream;
 
@@ -178,17 +177,15 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		_appliedStructuralVersions[slotIndex] = version;
 	}
 
-	/// <param name="bindingVersion">
-	/// <see cref="GpuDrawResources.IndirectBindingVersion"/> as it stands right now. Records bake the GPU
-	/// virtual addresses of the shared buffers, so a slot encoded against an older version points at
-	/// buffers that capacity growth has since replaced, and must be re-encoded before it is executed.
+	/// <param name="stalenessInputs">
+	/// The staleness inputs as they stand right now. A slot encoded against older inputs may hold the identity of
+	/// buffers that have since been replaced, and must be re-encoded before it is executed.
 	/// </param>
-	public bool RequiresFullReencode(int slotIndex, int frameSlot, uint bindlessEpoch, ulong bindingVersion)
+	public bool RequiresFullReencode(int slotIndex, int frameSlot, in DrawRecordStalenessInputs stalenessInputs)
 	{
 		ValidateSlot(slotIndex);
 		return _frameBindings[slotIndex] != frameSlot ||
-		       _bindlessEpochs[slotIndex] != bindlessEpoch ||
-		       _bindingVersions[slotIndex] != bindingVersion;
+		       _encodedStalenessInputs[slotIndex] != stalenessInputs;
 	}
 
 	/// <summary>
@@ -202,12 +199,11 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		Array.Clear(_appliedStructuralVersions);
 	}
 
-	public void MarkSlotEncoded(int slotIndex, int frameSlot, uint bindlessEpoch, ulong bindingVersion, ulong structuralVersion)
+	public void MarkSlotEncoded(int slotIndex, int frameSlot, in DrawRecordStalenessInputs stalenessInputs, ulong structuralVersion)
 	{
 		ValidateSlot(slotIndex);
 		_frameBindings[slotIndex] = frameSlot;
-		_bindlessEpochs[slotIndex] = bindlessEpoch;
-		_bindingVersions[slotIndex] = bindingVersion;
+		_encodedStalenessInputs[slotIndex] = stalenessInputs;
 		_appliedStructuralVersions[slotIndex] = structuralVersion;
 	}
 

@@ -119,6 +119,12 @@ public interface IGfxDescriptorTable
 	DescriptorHandle AllocateSampler(in SamplerDescriptor sampler);
 	BindlessFallbackHandles GetOrCreateFallbackHandles();
 	void Free(DescriptorHandle handle);
+
+	/// <summary>
+	/// Increases each time the table replaces a GPU buffer that draw records may have captured, such as a
+	/// grown argument buffer. Freeing or allocating descriptors does not change it.
+	/// </summary>
+	ulong Generation { get; }
 }
 
 /// <summary>

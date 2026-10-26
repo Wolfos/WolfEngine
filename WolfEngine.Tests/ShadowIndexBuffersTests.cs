@@ -70,11 +70,12 @@ public sealed class ShadowIndexBuffersTests
     public void ChangingIndexStreamInvalidatesEncodedCommands()
     {
         var set = new SharedDrawIndirectCommandSet();
-        set.MarkSlotEncoded(0,0,1,1,5);
+        var inputs = new DrawRecordStalenessInputs(1, 1, 1);
+        set.MarkSlotEncoded(0, 0, inputs, 5);
         set.SetIndexStream(MeshIndexStream.Main);
-        Assert.That(set.RequiresFullReencode(0,0,1,1), Is.False);
+        Assert.That(set.RequiresFullReencode(0, 0, inputs), Is.False);
         set.SetIndexStream(MeshIndexStream.ShadowOpaque);
-        Assert.That(set.RequiresFullReencode(0,0,1,1), Is.True);
+        Assert.That(set.RequiresFullReencode(0, 0, inputs), Is.True);
     }
 
     [Test]

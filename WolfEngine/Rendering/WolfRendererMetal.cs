@@ -43,7 +43,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private ulong _packedVertexBufferUsedBytes;
     private ulong _packedIndexBufferUsedBytes;
     private readonly SkinnedInstanceVertexAllocator _skinnedInstanceVertexAllocator = new();
-    private bool _needsPackedGeometryReencode;
+    private ulong _packedGeometryGeneration;
     private MTLTexture _depthTexture;
     private MTLDepthStencilState _depthState;
 
@@ -337,16 +337,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         return true;
     }
 
-    internal bool ConsumePackedGeometryRefresh()
-    {
-        if (_needsPackedGeometryReencode == false)
-        {
-            return false;
-        }
-
-        _needsPackedGeometryReencode = false;
-        return true;
-    }
+    public ulong PackedGeometryGeneration => _packedGeometryGeneration;
 
     private void CreateDepthTexture(int width, int height)
     {
@@ -1005,7 +996,7 @@ internal unsafe class WolfRendererMetal : IRenderer
                 indexPublished = true;
             }
 
-            _needsPackedGeometryReencode = true;
+            _packedGeometryGeneration++;
             return true;
         }
         catch
@@ -1259,7 +1250,6 @@ internal unsafe class WolfRendererMetal : IRenderer
         mesh.PackedShadowOpaqueIndexOffsetBytes = 0;
         mesh.PackedShadowAlphaTestIndexOffsetBytes = 0;
         mesh.PackedBaseVertex = 0;
-        _needsPackedGeometryReencode = true;
     }
 
     public IGfxBuffer GetPackedMeshVertexBuffer() => _packedVertexBuffer!;

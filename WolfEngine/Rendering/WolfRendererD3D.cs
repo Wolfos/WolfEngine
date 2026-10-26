@@ -132,6 +132,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	private IGfxBuffer? _packedVertexBuffer;
 	private IGfxBuffer? _packedIndexBuffer;
 	private ulong _packedVertexBufferUsedBytes;
+	private ulong _packedGeometryGeneration;
 	private ulong _packedIndexBufferUsedBytes;
 	private readonly SkinnedInstanceVertexAllocator _skinnedInstanceVertexAllocator = new();
 	private bool _loggedPackedCapacityLimit;
@@ -1651,6 +1652,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 				isVertexBuffer: false);
 		}
 
+		_packedGeometryGeneration++;
 		return true;
 	}
 
@@ -1887,6 +1889,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	public IGfxBuffer GetPackedMeshVertexBuffer() => _packedVertexBuffer!;
 
 	public IGfxBuffer GetPackedMeshIndexBuffer() => _packedIndexBuffer!;
+
+	public ulong PackedGeometryGeneration => _packedGeometryGeneration;
 
 	public uint GetPackedMeshVertexStride() => (uint)Unsafe.SizeOf<VertexData>();
 

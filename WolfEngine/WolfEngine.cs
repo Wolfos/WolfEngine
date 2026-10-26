@@ -69,7 +69,8 @@ public static class WolfEngine
 		{
 			services.AddSingleton<IMacOSInputHandler, MacOsInputHandler>();
 			services.AddSingleton<IMetalSurface, SdlMetalSurface>();
-			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
+			services.AddSingleton<IDrawRecordEncoder, MetalDrawRecordEncoder>();
+			services.AddSingleton<IGpuDrawDiagnosticsSampler, MetalGpuDrawDiagnosticsSampler>();
 			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
@@ -78,14 +79,16 @@ public static class WolfEngine
 		{
 			// The app owns the view and the main loop, so it registers its layer with AddHostMetalSurface and drives
 			// frames through IRenderPipeline.Start and RenderFrame.
-			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
+			services.AddSingleton<IDrawRecordEncoder, MetalDrawRecordEncoder>();
+			services.AddSingleton<IGpuDrawDiagnosticsSampler, MetalGpuDrawDiagnosticsSampler>();
 			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
 		}
 		else if (OperatingSystem.IsWindows())
 		{
-			services.AddSingleton<IGpuDrawBackendBridge, D3D12GpuDrawBackendBridge>();
+			services.AddSingleton<IDrawRecordEncoder, D3D12DrawRecordEncoder>();
+			services.AddSingleton<IGpuDrawDiagnosticsSampler, D3D12GpuDrawDiagnosticsSampler>();
 			services.AddSingleton<IImGuiRenderer, D3D12UiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererD3D>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();

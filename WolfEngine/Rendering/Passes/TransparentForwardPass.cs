@@ -51,6 +51,9 @@ public sealed class TransparentForwardPass
 
 	public bool HasIndirectLane(GpuDrawExecutionLaneDefinition lane) => _pipelinesByExecutionKey.ContainsKey(lane.Key);
 
+	public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) =>
+		_pipelinesByExecutionKey.TryGetValue(lane.Key, out var pipeline) ? pipeline : null;
+
 	public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
 		_bufferBindingsByExecutionKey.TryGetValue(lane.Key, out var bindings) ? bindings : null;
 
