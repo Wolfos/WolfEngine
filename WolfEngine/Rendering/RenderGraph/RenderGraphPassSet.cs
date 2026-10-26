@@ -52,14 +52,14 @@ internal sealed class RenderGraphPassSet
 		Fsr3AccumulatePass = new(shaderCompiler, bindlessResourceRegistry);
 		Fsr3RcasPass = new(shaderCompiler, bindlessResourceRegistry);
 		Fsr3DebugViewPass = new(shaderCompiler, bindlessResourceRegistry);
-		TransparentForwardPass = new(shaderCompiler, bindlessResourceRegistry, drawRecords);
+		TransparentForwardPass = new(shaderCompiler, bindlessResourceRegistry, drawRecords, gpuDrawResources);
 		BloomPass = new(shaderCompiler, bindlessResourceRegistry);
 		ColorPyramidPass = new(shaderCompiler, bindlessResourceRegistry);
 		TonemappingPass = new(shaderCompiler, bindlessResourceRegistry);
 		CasSharpenPass = new(shaderCompiler, bindlessResourceRegistry);
 		CopyToFinalPass = new(shaderCompiler, bindlessResourceRegistry);
 		MotionVectorDebugPass = new(shaderCompiler, bindlessResourceRegistry);
-		ShadowMapPass = new(shaderCompiler, drawRecords);
+		ShadowMapPass = new(shaderCompiler, drawRecords, gpuDrawResources);
 		GpuDrawPass = new(
 			shaderCompiler,
 			bindlessResourceRegistry,

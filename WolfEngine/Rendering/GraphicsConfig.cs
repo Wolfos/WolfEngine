@@ -36,14 +36,6 @@ public static class GraphicsConfig
 		string.Equals(Environment.GetEnvironmentVariable("WOLF_D3D_DEBUG_BREAK"), "1", StringComparison.Ordinal);
 
 	/// <summary>
-	/// Validate, before every ExecuteIndirect, that the buffers whose GPU virtual addresses were baked into the
-	/// indirect command records are still alive at those same addresses. Direct3D12 only, and Direct3D12 draw records
-	/// now hold no addresses, so there is nothing for it to find.
-	/// </summary>
-	public static bool ValidateIndirectCommandBuffers { get; } =
-		string.Equals(Environment.GetEnvironmentVariable("WOLF_VALIDATE_INDIRECT"), "1", StringComparison.Ordinal);
-
-	/// <summary>
 	/// Enable the hardening stress path that forces rapid draw churn.
 	/// </summary>
 	public static bool GpuHardeningStressEnabled { get; } =

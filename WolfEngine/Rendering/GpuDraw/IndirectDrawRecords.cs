@@ -48,7 +48,10 @@ public sealed class IndirectDrawRecords
 	/// <summary>Structural changes not yet replayed into every set that is still in use.</summary>
 	internal int PendingStructuralChangeCount => _replayLog.Count;
 
-	public DrawRecordSet CreateSet() => new(_encoder);
+	/// <param name="participation">The pass whose lanes the set's records draw.</param>
+	/// <param name="lanes">How that pass binds each lane, for as long as the set lives.</param>
+	public DrawRecordSet CreateSet(DrawPassParticipation participation, ILaneBindingProvider lanes) =>
+		new(_encoder, participation, lanes);
 
 	/// <summary>
 	/// Stops tracking a set that is about to be retired, so it no longer holds back replay-log compaction. The
@@ -88,25 +91,25 @@ public sealed class IndirectDrawRecords
 		IGfxDevice device,
 		int slotIndex,
 		int frameSlot,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		ILaneBindingProvider lanes)
+		in SharedDrawIndirectEncodeResources resources)
 	{
 		ArgumentNullException.ThrowIfNull(set);
 		ArgumentNullException.ThrowIfNull(device);
-		ArgumentNullException.ThrowIfNull(lanes);
 
+		var participation = set.Participation;
+		var lanes = set.Lanes;
 		Track(set);
 		set.SetIndexStream(resources.IndexStream);
 		var stalenessInputs = _stalenessInputs.Read();
-		if (set.RequiresFullReencode(slotIndex, frameSlot, stalenessInputs))
+		var laneGeneration = lanes.Generation;
+		if (set.RequiresFullReencode(slotIndex, frameSlot, stalenessInputs, laneGeneration))
 		{
 			using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
 			{
 				ReencodeSlot(set, slotIndex, device, participation, resources, lanes);
 			}
 
-			set.MarkSlotEncoded(slotIndex, frameSlot, stalenessInputs, _latestStructuralVersion);
+			set.MarkSlotEncoded(slotIndex, frameSlot, stalenessInputs, laneGeneration, _latestStructuralVersion);
 			CompactReplayLog();
 			return;
 		}

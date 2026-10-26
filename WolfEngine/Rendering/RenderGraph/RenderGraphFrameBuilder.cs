@@ -2156,15 +2156,9 @@ internal sealed class RenderGraphFrameBuilder
 		}
 
 		var device = _renderer.GetGfxDevice();
-		var commandSets = new List<DrawRecordSet>();
-		commandSets.AddRange(_gpuDrawPass.TakeViewCommandSets(view.Index));
-		commandSets.AddRange(_transparentForwardPass.TakeViewCommandSets(view.Index));
-		commandSets.AddRange(_shadowMapPass.TakeViewCommandSets(view.Index));
-		_gpuDrawPass.ForgetIndirectCommandSets(commandSets);
-		foreach (var commandSet in commandSets)
-		{
-			device.Retire(commandSet, $"Indirect command set for {view}");
-		}
+		_gpuDrawPass.ReleaseViewCommandSets(view.Index, device);
+		_transparentForwardPass.ReleaseViewCommandSets(view.Index, device);
+		_shadowMapPass.ReleaseViewCommandSets(view.Index, device);
 	}
 
 	/// <summary>Exposes a view's state so tests can assert that views do not share history.</summary>
@@ -2554,18 +2548,13 @@ internal sealed class RenderGraphFrameBuilder
 	private void EnsureShadowIndirectCommands(RenderGraphContext context, IGfxDevice device, int cascadeIndex)
 	{
 		_shadowMapPass.EnsureIndirectResources(device, cascadeIndex, _gpuDrawResources.ActiveViewIndex);
-		_gpuDrawPass.EnsureIndirectCommandsForPass(
+		_gpuDrawPass.EnsureIndirectCommands(
 			_shadowMapPass.GetIndirectCommandSet(cascadeIndex, _gpuDrawResources.ActiveViewIndex),
-			DrawPassParticipation.ShadowCaster,
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(
 				_gpuDrawResources,
 				_gpuDrawResources.ShadowDrawArgsBuffer,
 				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
-				_view.FrameResources.Config.ShadowMaps.WeldShadowVertices ? MeshIndexStream.ShadowOpaque : MeshIndexStream.Main),
-			lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane),
-			lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane),
-			lane => _shadowMapPass.GetPassBindingSet(cascadeIndex, lane, _gpuDrawResources),
-			lane => _shadowMapPass.GetPipeline(cascadeIndex, lane));
+				_view.FrameResources.Config.ShadowMaps.WeldShadowVertices ? MeshIndexStream.ShadowOpaque : MeshIndexStream.Main));
 	}
 
 	private void ExecuteShadowMap(RenderGraphContext context)
@@ -3327,14 +3316,9 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		var device = _renderer.GetGfxDevice();
 		_transparentForwardPass.EnsureIndirectResources(device, _gpuDrawResources.ActiveViewIndex);
-		_gpuDrawPass.EnsureIndirectCommandsForPass(
+		_gpuDrawPass.EnsureIndirectCommands(
 			_transparentForwardPass.GetIndirectCommandSet(_gpuDrawResources.ActiveViewIndex),
-			DrawPassParticipation.ForwardTransparent,
-			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources),
-			lane => _transparentForwardPass.HasIndirectLane(lane),
-			lane => _transparentForwardPass.GetBufferBindings(lane),
-			lane => _transparentForwardPass.GetPassBindingSet(lane, _gpuDrawResources),
-			lane => _transparentForwardPass.GetPipeline(lane));
+			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources));
 		var config = _transparentForwardPass.BuildConfig(
 			context,
 			_view.FrameResources,

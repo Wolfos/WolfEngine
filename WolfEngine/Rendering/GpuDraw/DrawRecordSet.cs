@@ -39,13 +39,16 @@ public sealed class DrawRecordSet : IDisposable
 	private IGfxBuffer? _compactedExecutionRanges;
 	private readonly ulong[] _appliedStructuralVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly DrawRecordStalenessInputs[] _encodedStalenessInputs = new DrawRecordStalenessInputs[GpuDrawResources.IndirectCommandBufferSlotCount];
+	private readonly ulong[] _encodedLaneGenerations = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _frameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly IDrawRecordEncoder _encoder;
 	private MeshIndexStream _indexStream;
 
-	internal DrawRecordSet(IDrawRecordEncoder encoder)
+	internal DrawRecordSet(IDrawRecordEncoder encoder, DrawPassParticipation participation, ILaneBindingProvider lanes)
 	{
 		_encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
+		Participation = participation;
+		Lanes = lanes ?? throw new ArgumentNullException(nameof(lanes));
 		Array.Fill(_frameBindings, -1);
 		for (var i = 0; i < _commandPages.Length; i++)
 		{
@@ -68,6 +71,11 @@ public sealed class DrawRecordSet : IDisposable
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
 			name: "SharedDrawCompactedExecutionRanges"));
 	}
+
+	/// <summary>The pass whose lanes this set's records draw.</summary>
+	public DrawPassParticipation Participation { get; }
+
+	internal ILaneBindingProvider Lanes { get; }
 
 	internal void SetIndexStream(MeshIndexStream stream)
 	{
@@ -188,11 +196,17 @@ public sealed class DrawRecordSet : IDisposable
 	/// The staleness inputs as they stand right now. A slot encoded against older inputs may hold the identity of
 	/// buffers that have since been replaced, and must be re-encoded before it is executed.
 	/// </param>
-	internal bool RequiresFullReencode(int slotIndex, int frameSlot, in DrawRecordStalenessInputs stalenessInputs)
+	/// <param name="laneGeneration">The <see cref="ILaneBindingProvider.Generation"/> of this set's lanes right now.</param>
+	internal bool RequiresFullReencode(
+		int slotIndex,
+		int frameSlot,
+		in DrawRecordStalenessInputs stalenessInputs,
+		ulong laneGeneration)
 	{
 		ValidateSlot(slotIndex);
 		return _frameBindings[slotIndex] != frameSlot ||
-		       _encodedStalenessInputs[slotIndex] != stalenessInputs;
+		       _encodedStalenessInputs[slotIndex] != stalenessInputs ||
+		       _encodedLaneGenerations[slotIndex] != laneGeneration;
 	}
 
 	/// <summary>
@@ -206,11 +220,17 @@ public sealed class DrawRecordSet : IDisposable
 		Array.Clear(_appliedStructuralVersions);
 	}
 
-	internal void MarkSlotEncoded(int slotIndex, int frameSlot, in DrawRecordStalenessInputs stalenessInputs, ulong structuralVersion)
+	internal void MarkSlotEncoded(
+		int slotIndex,
+		int frameSlot,
+		in DrawRecordStalenessInputs stalenessInputs,
+		ulong laneGeneration,
+		ulong structuralVersion)
 	{
 		ValidateSlot(slotIndex);
 		_frameBindings[slotIndex] = frameSlot;
 		_encodedStalenessInputs[slotIndex] = stalenessInputs;
+		_encodedLaneGenerations[slotIndex] = laneGeneration;
 		_appliedStructuralVersions[slotIndex] = structuralVersion;
 	}
 

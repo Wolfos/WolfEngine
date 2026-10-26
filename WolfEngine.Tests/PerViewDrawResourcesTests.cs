@@ -62,9 +62,15 @@ public sealed class PerViewDrawResourcesTests
 	}
 
 	[Test]
-	public void PerViewIndirectCommandSets_AreDistinctPerViewAndPerSetAndStartFreshAfterTake()
+	public void PerViewIndirectCommandSets_AreDistinctPerViewAndPerSet_AndStartFreshAfterTheViewIsReleased()
 	{
-		var sets = new PerViewIndirectCommandSets(DrawRecordFakes.CreateRecords(), setsPerView: 3);
+		var lanesPerSet = new ILaneBindingProvider[]
+		{
+			new FakeLaneBindingProvider(),
+			new FakeLaneBindingProvider(),
+			new FakeLaneBindingProvider()
+		};
+		var sets = new PerViewIndirectCommandSets(DrawRecordFakes.CreateRecords(), DrawPassParticipation.ShadowCaster, lanesPerSet);
 		var primaryCascade0 = sets.Get(0, 0);
 
 		Assert.Multiple(() =>
@@ -72,18 +78,21 @@ public sealed class PerViewDrawResourcesTests
 			Assert.That(sets.Get(0, 0), Is.SameAs(primaryCascade0));
 			Assert.That(sets.Get(0, 1), Is.Not.SameAs(primaryCascade0));
 			Assert.That(sets.Get(1, 0), Is.Not.SameAs(primaryCascade0));
+			Assert.That(sets.Get(0, 2).Participation, Is.EqualTo(DrawPassParticipation.ShadowCaster));
 			Assert.Throws<ArgumentOutOfRangeException>(() => sets.Get(0, 3));
 		});
 
-		var secondViewSets = sets.Take(1);
+		var secondViewCascade0 = sets.Get(1, 0);
+		var deviceMock = new Mock<IGfxDevice>();
+		var releasedCount = sets.ReleaseView(1, deviceMock.Object);
 		Assert.Multiple(() =>
 		{
-			Assert.That(secondViewSets, Has.Count.EqualTo(3));
-			Assert.That(sets.Get(1, 0), Is.Not.SameAs(secondViewSets[0]), "a reused slot must not inherit encoded records");
-			Assert.That(sets.Take(7), Is.Empty);
+			Assert.That(releasedCount, Is.EqualTo(3));
+			deviceMock.Verify(device => device.Retire(It.IsAny<Action>(), It.IsAny<string?>()), Times.Exactly(3));
+			Assert.That(sets.Get(1, 0), Is.Not.SameAs(secondViewCascade0), "a reused slot must not inherit encoded records");
+			Assert.That(sets.ReleaseView(7, deviceMock.Object), Is.Zero);
 		});
 	}
-
 
 	private static IGfxDevice CreateDevice(out Mock<IGfxDevice> deviceMock)
 	{

@@ -10,6 +10,12 @@ internal static class DrawRecordFakes
 {
 	public static IndirectDrawRecords CreateRecords() =>
 		new(new FakeDrawRecordEncoder(), new FakeLiveDrawSource(), new FakeStalenessInputSource());
+
+	public static ShadowMapPass CreateShadowMapPass()
+	{
+		var shaderCompiler = new ShaderCompiler();
+		return new ShadowMapPass(shaderCompiler, CreateRecords(), new GpuDrawResources(shaderCompiler));
+	}
 }
 
 /// <summary>A page that remembers which draw each of its records was last encoded for.</summary>
@@ -102,6 +108,8 @@ internal sealed class FakeStalenessInputSource : IDrawRecordStalenessInputSource
 internal sealed class FakeLaneBindingProvider : ILaneBindingProvider
 {
 	private readonly IGfxPipeline _pipeline = Mock.Of<IGfxPipeline>();
+
+	public ulong Generation { get; set; } = 1;
 
 	public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => true;
 

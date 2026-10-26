@@ -31,7 +31,10 @@ public sealed class ShadowMapPass
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), SharedDrawGraphicsBufferBindings> _bufferBindingsByCascadeExecutionKey = new();
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), ShaderReflectionLayout> _reflectionByCascadeExecutionKey = new();
 	// One set per cascade, per view; see PerViewIndirectCommandSets.
+	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly PerViewIndirectCommandSets _indirectCommandSets;
+	// Raised whenever a lane pipeline is created, so records encoded against the previous pipelines re-encode.
+	private ulong _laneBindingGeneration;
 	private ShadowFrameData _currentFrameData = CreateDisabledFrameData();
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _cameraWriter;
@@ -40,10 +43,17 @@ public sealed class ShadowMapPass
 	// cascade's draw config is built.
 	private readonly bool[] _compactedExecutionByCascade = new bool[MaxCascadeCount];
 
-	public ShadowMapPass(IShaderProvider shaderCompiler, IndirectDrawRecords records)
+	public ShadowMapPass(IShaderProvider shaderCompiler, IndirectDrawRecords records, GpuDrawResources gpuDrawResources)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
-		_indirectCommandSets = new PerViewIndirectCommandSets(records, MaxCascadeCount);
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		var cascadeLanes = new ILaneBindingProvider[MaxCascadeCount];
+		for (var cascadeIndex = 0; cascadeIndex < cascadeLanes.Length; cascadeIndex++)
+		{
+			cascadeLanes[cascadeIndex] = new CascadeLaneBindings(this, cascadeIndex);
+		}
+
+		_indirectCommandSets = new PerViewIndirectCommandSets(records, DrawPassParticipation.ShadowCaster, cascadeLanes);
 	}
 
 	public void PrepareFrame(SceneDrawData sceneData, in ShadowMapConfig config)
@@ -114,9 +124,9 @@ public sealed class ShadowMapPass
 		return _indirectCommandSets.Get(viewIndex, cascadeIndex);
 	}
 
-	/// <summary>Removes a destroyed view's cascade command sets, for the caller to retire.</summary>
-	internal IReadOnlyList<DrawRecordSet> TakeViewCommandSets(int viewIndex) =>
-		_indirectCommandSets.Take(viewIndex);
+	/// <summary>Releases and retires a destroyed view's cascade command sets.</summary>
+	internal void ReleaseViewCommandSets(int viewIndex, IGfxDevice device) =>
+		_indirectCommandSets.ReleaseView(viewIndex, device);
 
 	public void EnsureIndirectResources(IGfxDevice device, int cascadeIndex, int viewIndex)
 	{
@@ -137,7 +147,7 @@ public sealed class ShadowMapPass
 		return _pipelinesByCascadeExecutionKey.ContainsKey((cascadeIndex, lane.Key));
 	}
 
-	public IGfxPipeline? GetPipeline(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
+	private IGfxPipeline? GetPipeline(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
 	{
 		ValidateCascadeIndex(cascadeIndex);
 		return _pipelinesByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var pipeline)
@@ -145,7 +155,7 @@ public sealed class ShadowMapPass
 			: null;
 	}
 
-	public SharedDrawGraphicsBufferBindings? GetBufferBindings(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
+	private SharedDrawGraphicsBufferBindings? GetBufferBindings(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
 	{
 		ValidateCascadeIndex(cascadeIndex);
 		return _bufferBindingsByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var bindings)
@@ -153,13 +163,10 @@ public sealed class ShadowMapPass
 			: null;
 	}
 
-	public GraphicsPassBindingSet? GetPassBindingSet(
-		int cascadeIndex,
-		GpuDrawExecutionLaneDefinition lane,
-		GpuDrawResources resources)
+	private GraphicsPassBindingSet? GetPassBindingSet(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
 	{
 		ValidateCascadeIndex(cascadeIndex);
-		ArgumentNullException.ThrowIfNull(resources);
+		var resources = _gpuDrawResources;
 		if (_reflectionByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var reflection) == false)
 			return null;
 		return GraphicsPassBindingSet.FromReflection(reflection,
@@ -366,6 +373,7 @@ public sealed class ShadowMapPass
 			cascadeDefine);
 		pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
 		_pipelinesByCascadeExecutionKey[pipelineKeyByCascadeBucket] = pipeline;
+		_laneBindingGeneration++;
 		_bufferBindingsByCascadeExecutionKey[pipelineKeyByCascadeBucket] =
 			SharedDrawGraphicsBufferBindings.FromShadowReflection(compiled.ReflectionLayout);
 		_reflectionByCascadeExecutionKey[pipelineKeyByCascadeBucket] = compiled.ReflectionLayout;
@@ -661,5 +669,30 @@ public sealed class ShadowMapPass
 				maxDistance,
 				Math.Max(0.0f, config.DepthBias));
 		}
+	}
+
+	/// <summary>The lanes of one cascade's draw record sets.</summary>
+	private sealed class CascadeLaneBindings : ILaneBindingProvider
+	{
+		private readonly ShadowMapPass _pass;
+		private readonly int _cascadeIndex;
+
+		public CascadeLaneBindings(ShadowMapPass pass, int cascadeIndex)
+		{
+			_pass = pass;
+			_cascadeIndex = cascadeIndex;
+		}
+
+		public ulong Generation => _pass._laneBindingGeneration;
+
+		public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => _pass.HasIndirectLane(_cascadeIndex, lane);
+
+		public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass.GetBufferBindings(_cascadeIndex, lane);
+
+		public GraphicsPassBindingSet? GetPassBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass.GetPassBindingSet(_cascadeIndex, lane);
+
+		public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) => _pass.GetPipeline(_cascadeIndex, lane);
 	}
 }

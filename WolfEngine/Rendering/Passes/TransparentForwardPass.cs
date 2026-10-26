@@ -15,7 +15,10 @@ public sealed class TransparentForwardPass
 	private readonly Dictionary<GpuDrawExecutionKey, IGfxPipeline> _pipelinesByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, SharedDrawGraphicsBufferBindings> _bufferBindingsByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, ShaderReflectionLayout> _reflectionByExecutionKey = new();
+	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly PerViewIndirectCommandSets _indirectCommandSets;
+	// Raised whenever a lane pipeline is created, so records encoded against the previous pipelines re-encode.
+	private ulong _laneBindingGeneration;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private GraphicsBackendKind? _reflectionBackendKind;
@@ -27,19 +30,24 @@ public sealed class TransparentForwardPass
 	public TransparentForwardPass(
 		IShaderProvider shaderCompiler,
 		BindlessResourceRegistry bindlessRegistry,
-		IndirectDrawRecords records)
+		IndirectDrawRecords records,
+		GpuDrawResources gpuDrawResources)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
-		_indirectCommandSets = new PerViewIndirectCommandSets(records);
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_indirectCommandSets = new PerViewIndirectCommandSets(
+			records,
+			DrawPassParticipation.ForwardTransparent,
+			new LaneBindings(this));
 	}
 
 	/// <summary>The given view's command set; see <see cref="PerViewIndirectCommandSets"/>.</summary>
 	public DrawRecordSet GetIndirectCommandSet(int viewIndex) => _indirectCommandSets.Get(viewIndex);
 
-	/// <summary>Removes a destroyed view's command set, for the caller to retire.</summary>
-	internal IReadOnlyList<DrawRecordSet> TakeViewCommandSets(int viewIndex) =>
-		_indirectCommandSets.Take(viewIndex);
+	/// <summary>Releases and retires a destroyed view's command set.</summary>
+	internal void ReleaseViewCommandSets(int viewIndex, IGfxDevice device) =>
+		_indirectCommandSets.ReleaseView(viewIndex, device);
 
 	public void EnsureIndirectResources(IGfxDevice device, int viewIndex)
 	{
@@ -55,10 +63,10 @@ public sealed class TransparentForwardPass
 
 	public bool HasIndirectLane(GpuDrawExecutionLaneDefinition lane) => _pipelinesByExecutionKey.ContainsKey(lane.Key);
 
-	public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) =>
+	private IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) =>
 		_pipelinesByExecutionKey.TryGetValue(lane.Key, out var pipeline) ? pipeline : null;
 
-	public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+	private SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
 		_bufferBindingsByExecutionKey.TryGetValue(lane.Key, out var bindings) ? bindings : null;
 
 	public GraphicsPassBindingSet? GetPassBindingSet(GpuDrawExecutionLaneDefinition lane, GpuDrawResources resources)
@@ -443,6 +451,7 @@ public sealed class TransparentForwardPass
 			lane.PreprocessorDefine);
 		pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
 		_pipelinesByExecutionKey[lane.Key] = pipeline;
+		_laneBindingGeneration++;
 		_bufferBindingsByExecutionKey[lane.Key] = SharedDrawGraphicsBufferBindings.FromTransparentReflection(compiled.ReflectionLayout);
 		_reflectionByExecutionKey[lane.Key] = compiled.ReflectionLayout;
 		return pipeline;
@@ -499,4 +508,27 @@ public sealed class TransparentForwardPass
 		return _bindlessRegistry.GetTextureHandle(texture);
 	}
 
+
+	/// <summary>The lanes of this pass's draw record sets.</summary>
+	private sealed class LaneBindings : ILaneBindingProvider
+	{
+		private readonly TransparentForwardPass _pass;
+
+		public LaneBindings(TransparentForwardPass pass)
+		{
+			_pass = pass;
+		}
+
+		public ulong Generation => _pass._laneBindingGeneration;
+
+		public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => _pass.HasIndirectLane(lane);
+
+		public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass.GetBufferBindings(lane);
+
+		public GraphicsPassBindingSet? GetPassBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass.GetPassBindingSet(lane, _pass._gpuDrawResources);
+
+		public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) => _pass.GetPipeline(lane);
+	}
 }

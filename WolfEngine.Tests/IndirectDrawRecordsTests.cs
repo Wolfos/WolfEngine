@@ -48,7 +48,7 @@ public sealed class IndirectDrawRecordsTests
 	{
 		AddLiveDraw(3);
 		AddLiveDraw(5);
-		var set = _records.CreateSet();
+		var set = _records.CreateSet(Participation, _lanes);
 
 		Prepare(set);
 
@@ -63,8 +63,8 @@ public sealed class IndirectDrawRecordsTests
 	public void StructuralChange_EncodesOnlyThatDraw_InEverySetThatDrawsItsLane()
 	{
 		AddLiveDraw(3);
-		var first = _records.CreateSet();
-		var second = _records.CreateSet();
+		var first = _records.CreateSet(Participation, _lanes);
+		var second = _records.CreateSet(Participation, _lanes);
 		Prepare(first);
 		Prepare(second);
 		_encoder.ClearLog();
@@ -88,8 +88,8 @@ public sealed class IndirectDrawRecordsTests
 	{
 		AddLiveDraw(3);
 		AddLiveDraw(5);
-		var first = _records.CreateSet();
-		var second = _records.CreateSet();
+		var first = _records.CreateSet(Participation, _lanes);
+		var second = _records.CreateSet(Participation, _lanes);
 		Prepare(first);
 		Prepare(second);
 		_encoder.ClearLog();
@@ -110,7 +110,7 @@ public sealed class IndirectDrawRecordsTests
 	public void ChangeToADrawNoLongerCurrent_IsNotReplayed()
 	{
 		AddLiveDraw(3);
-		var set = _records.CreateSet();
+		var set = _records.CreateSet(Participation, _lanes);
 		Prepare(set);
 		_encoder.ClearLog();
 
@@ -127,7 +127,7 @@ public sealed class IndirectDrawRecordsTests
 	{
 		AddLiveDraw(3);
 		AddLiveDraw(5);
-		var set = _records.CreateSet();
+		var set = _records.CreateSet(Participation, _lanes);
 		Prepare(set, slotIndex: 0);
 		Prepare(set, slotIndex: 1);
 		_encoder.ClearLog();
@@ -151,8 +151,8 @@ public sealed class IndirectDrawRecordsTests
 	public void InputChangedBetweenTwoSetsInOneFrame_IsSeenByTheSecondSet()
 	{
 		AddLiveDraw(3);
-		var first = _records.CreateSet();
-		var second = _records.CreateSet();
+		var first = _records.CreateSet(Participation, _lanes);
+		var second = _records.CreateSet(Participation, _lanes);
 		Prepare(first);
 		Prepare(second);
 		_encoder.ClearLog();
@@ -170,10 +170,28 @@ public sealed class IndirectDrawRecordsTests
 	}
 
 	[Test]
+	public void LaneBindingGenerationChange_ReencodesOnlyTheSetsUsingThoseLanes()
+	{
+		AddLiveDraw(3);
+		var rebuiltLanes = new FakeLaneBindingProvider();
+		var rebuilt = _records.CreateSet(Participation, rebuiltLanes);
+		var untouched = _records.CreateSet(Participation, _lanes);
+		Prepare(rebuilt);
+		Prepare(untouched);
+		_encoder.ClearLog();
+
+		rebuiltLanes.Generation++;
+		Prepare(rebuilt);
+		Prepare(untouched);
+
+		Assert.That(_encoder.EncodedDraws, Is.EqualTo(new[] { 3u }), "only the set whose pass rebuilt its pipelines");
+	}
+
+	[Test]
 	public void FrameSlotChange_ReencodesTheSetInFull()
 	{
 		AddLiveDraw(3);
-		var set = _records.CreateSet();
+		var set = _records.CreateSet(Participation, _lanes);
 		Prepare(set, frameSlot: 0);
 		_encoder.ClearLog();
 
@@ -186,7 +204,7 @@ public sealed class IndirectDrawRecordsTests
 	public void IndexStreamChange_ReencodesTheSetInFull()
 	{
 		AddLiveDraw(3);
-		var set = _records.CreateSet();
+		var set = _records.CreateSet(Participation, _lanes);
 		Prepare(set);
 		_encoder.ClearLog();
 
@@ -199,8 +217,8 @@ public sealed class IndirectDrawRecordsTests
 	public void SetIdleForAFullTurnOfTheSlotRing_StopsHoldingBackTheLog_AndReencodesOnItsNextUse()
 	{
 		AddLiveDraw(3);
-		var busy = _records.CreateSet();
-		var idle = _records.CreateSet();
+		var busy = _records.CreateSet(Participation, _lanes);
+		var idle = _records.CreateSet(Participation, _lanes);
 		PrepareEverySlot(busy);
 		PrepareEverySlot(idle);
 
@@ -223,8 +241,8 @@ public sealed class IndirectDrawRecordsTests
 	public void ReleasedSet_NoLongerHoldsBackTheLog()
 	{
 		AddLiveDraw(3);
-		var kept = _records.CreateSet();
-		var released = _records.CreateSet();
+		var kept = _records.CreateSet(Participation, _lanes);
+		var released = _records.CreateSet(Participation, _lanes);
 		PrepareEverySlot(kept);
 		PrepareEverySlot(released);
 
@@ -249,9 +267,7 @@ public sealed class IndirectDrawRecordsTests
 			_device,
 			slotIndex,
 			frameSlot ?? slotIndex,
-			Participation,
-			new SharedDrawIndirectEncodeResources(null, null, null, 0, null, indexStream),
-			_lanes);
+			new SharedDrawIndirectEncodeResources(null, null, null, 0, null, indexStream));
 	}
 
 	private void PrepareEverySlot(DrawRecordSet set)

@@ -79,6 +79,8 @@ public sealed class GpuDrawPass
 	private readonly SharedDrawGraphicsBufferBindings?[] _gbufferBufferBindings = new SharedDrawGraphicsBufferBindings?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly ShaderReflectionLayout?[] _gbufferReflections = new ShaderReflectionLayout?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly PerViewIndirectCommandSets _gbufferIndirectCommandSets;
+	// Raised whenever a GBuffer lane pipeline is created, so records encoded against the previous pipelines re-encode.
+	private ulong _gbufferLaneBindingGeneration;
 	private bool _gbufferCompactionActive;
 	private readonly Dictionary<uint, MaterialDrawState> _materialDrawStates = new();
 	private readonly Dictionary<uint, TerrainDrawSurface> _terrainMaterialStates = new();
@@ -123,7 +125,10 @@ public sealed class GpuDrawPass
 		_records = records ?? throw new ArgumentNullException(nameof(records));
 		_liveDraws = liveDraws ?? throw new ArgumentNullException(nameof(liveDraws));
 		_stalenessInputs = stalenessInputs ?? throw new ArgumentNullException(nameof(stalenessInputs));
-		_gbufferIndirectCommandSets = new PerViewIndirectCommandSets(records);
+		_gbufferIndirectCommandSets = new PerViewIndirectCommandSets(
+			records,
+			DrawPassParticipation.GBuffer,
+			new GBufferLaneBindings(this));
 		_diagnosticsSampler = diagnosticsSampler ?? throw new ArgumentNullException(nameof(diagnosticsSampler));
 	}
 
@@ -1640,6 +1645,7 @@ public sealed class GpuDrawPass
 			var bindings = SharedDrawGraphicsBufferBindings.FromGBufferReflection(compiled.ReflectionLayout);
 			_gbufferBufferBindings[lane.ExecutionIndex] = bindings;
 			_gbufferReflections[lane.ExecutionIndex] = compiled.ReflectionLayout;
+			_gbufferLaneBindingGeneration++;
 		}
 	}
 
@@ -1803,18 +1809,9 @@ public sealed class GpuDrawPass
 	private DrawRecordSet GBufferCommandSet =>
 		_gbufferIndirectCommandSets.Get(_gpuDrawResources.ActiveViewIndex);
 
-	/// <summary>Removes a destroyed view's G-buffer command sets, for the caller to retire.</summary>
-	internal IReadOnlyList<DrawRecordSet> TakeViewCommandSets(int viewIndex) =>
-		_gbufferIndirectCommandSets.Take(viewIndex);
-
-	/// <summary>Stops tracking command sets that are about to be retired.</summary>
-	internal void ForgetIndirectCommandSets(IEnumerable<DrawRecordSet> commandSets)
-	{
-		foreach (var commandSet in commandSets)
-		{
-			_records.Release(commandSet);
-		}
-	}
+	/// <summary>Releases and retires a destroyed view's G-buffer command sets.</summary>
+	internal void ReleaseViewCommandSets(int viewIndex, IGfxDevice device) =>
+		_gbufferIndirectCommandSets.ReleaseView(viewIndex, device);
 
 	/// <summary>
 	/// Encodes the GBuffer commands and compacts them against the camera cull results. Runs in the cull
@@ -1839,25 +1836,13 @@ public sealed class GpuDrawPass
 		ArgumentNullException.ThrowIfNull(context);
 		var device = _renderer.GetGfxDevice();
 		EnsureGBufferPipelines(device);
-		EnsureIndirectCommandsForPass(
+		EnsureIndirectCommands(
 			GBufferCommandSet,
-			DrawPassParticipation.GBuffer,
-			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources),
-			static _ => true,
-			lane => _gbufferBufferBindings[lane.ExecutionIndex],
-			CreateGBufferPassBindingSet,
-			GetGBufferPipeline);
+			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources));
 	}
 
 	/// <summary>Brings the active slot of a pass's draw record set up to date before the pass executes it.</summary>
-	public void EnsureIndirectCommandsForPass(
-		DrawRecordSet commandSet,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
-		Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> bindingResolver,
-		Func<GpuDrawExecutionLaneDefinition, GraphicsPassBindingSet?> passBindingResolver,
-		Func<GpuDrawExecutionLaneDefinition, IGfxPipeline?> pipelineResolver)
+	public void EnsureIndirectCommands(DrawRecordSet commandSet, in SharedDrawIndirectEncodeResources resources)
 	{
 		ArgumentNullException.ThrowIfNull(commandSet);
 
@@ -1868,40 +1853,30 @@ public sealed class GpuDrawPass
 			device,
 			_gpuDrawResources.ActiveIndirectCommandSlot,
 			_gpuDrawResources.ActiveFrameSlot,
-			participation,
-			resources,
-			new DelegateLaneBindingProvider(laneAvailable, bindingResolver, passBindingResolver, pipelineResolver));
+			resources);
 	}
 
-	/// <summary>
-	/// Adapts the per-call lane delegates to <see cref="ILaneBindingProvider"/> until each pass provides its own.
-	/// </summary>
-	private sealed class DelegateLaneBindingProvider : ILaneBindingProvider
+	/// <summary>The lanes of the G-buffer draw record sets. Every G-buffer lane is drawn.</summary>
+	private sealed class GBufferLaneBindings : ILaneBindingProvider
 	{
-		private readonly Func<GpuDrawExecutionLaneDefinition, bool> _laneAvailable;
-		private readonly Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> _bindingResolver;
-		private readonly Func<GpuDrawExecutionLaneDefinition, GraphicsPassBindingSet?> _passBindingResolver;
-		private readonly Func<GpuDrawExecutionLaneDefinition, IGfxPipeline?> _pipelineResolver;
+		private readonly GpuDrawPass _pass;
 
-		public DelegateLaneBindingProvider(
-			Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
-			Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> bindingResolver,
-			Func<GpuDrawExecutionLaneDefinition, GraphicsPassBindingSet?> passBindingResolver,
-			Func<GpuDrawExecutionLaneDefinition, IGfxPipeline?> pipelineResolver)
+		public GBufferLaneBindings(GpuDrawPass pass)
 		{
-			_laneAvailable = laneAvailable ?? throw new ArgumentNullException(nameof(laneAvailable));
-			_bindingResolver = bindingResolver ?? throw new ArgumentNullException(nameof(bindingResolver));
-			_passBindingResolver = passBindingResolver ?? throw new ArgumentNullException(nameof(passBindingResolver));
-			_pipelineResolver = pipelineResolver ?? throw new ArgumentNullException(nameof(pipelineResolver));
+			_pass = pass;
 		}
 
-		public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => _laneAvailable(lane);
+		public ulong Generation => _pass._gbufferLaneBindingGeneration;
 
-		public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) => _bindingResolver(lane);
+		public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => true;
 
-		public GraphicsPassBindingSet? GetPassBindings(GpuDrawExecutionLaneDefinition lane) => _passBindingResolver(lane);
+		public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass._gbufferBufferBindings[lane.ExecutionIndex];
 
-		public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) => _pipelineResolver(lane);
+		public GraphicsPassBindingSet? GetPassBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass.CreateGBufferPassBindingSet(lane);
+
+		public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) => _pass.GetGBufferPipeline(lane);
 	}
 
 	public List<GBufferExecutionBucket> BuildGBufferBuckets()
