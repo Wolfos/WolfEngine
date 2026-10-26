@@ -10,18 +10,27 @@ namespace WolfEngine.Rendering;
 public interface IDrawRecordEncoder
 {
 	/// <summary>Creates one page of draw records, which the caller owns and disposes.</summary>
-	IGfxIndirectCommandBuffer CreatePage(IGfxDevice device, uint commandCapacity, string name);
+	IGfxIndirectCommandBuffer CreatePage(IGfxDevice device, uint commandCapacity, string name)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+		return device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
+			PassKind.Graphics,
+			commandCapacity,
+			name: name));
+	}
+
+	/// <summary>
+	/// Makes current whatever a record executed by <paramref name="pipeline"/> captures from outside the encoded
+	/// resources, such as bindless argument buffers. Called once per drawn lane before a set is checked for
+	/// staleness and encoded, so anything this replaces is seen by that check rather than after it.
+	/// </summary>
+	void PrepareForPipeline(IGfxDevice device, IGfxPipeline pipeline);
 
 	void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex);
 
-	/// <param name="pipeline">
-	/// The pipeline that will execute the record. A backend whose records capture its bindless tables uses it to
-	/// make those tables current before they are captured.
-	/// </param>
 	/// <returns>False when the resources cannot be encoded on this backend; the caller then resets the record.</returns>
 	bool TryEncodeIndexedDrawCommand(
 		IGfxDevice device,
-		IGfxPipeline pipeline,
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
 		uint drawArgsCommandIndex,

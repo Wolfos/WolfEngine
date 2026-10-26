@@ -9,13 +9,24 @@ namespace WolfEngine.Rendering.Backend.Metal;
 [SupportedOSPlatform("ios")]
 internal sealed class MetalDrawRecordEncoder : IDrawRecordEncoder
 {
-	public IGfxIndirectCommandBuffer CreatePage(IGfxDevice device, uint commandCapacity, string name)
+	/// <summary>
+	/// Records capture the argument buffers themselves, so they have to be sized and encoded for every pipeline that
+	/// executes a record before any address is taken. Growing one raises the bindless table's generation, which the
+	/// staleness check that follows then sees.
+	/// </summary>
+	public void PrepareForPipeline(IGfxDevice device, IGfxPipeline pipeline)
 	{
-		ArgumentNullException.ThrowIfNull(device);
-		return device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
-			PassKind.Graphics,
-			commandCapacity,
-			name: name));
+		if (device.GlobalTable is not MetalDescriptorTable descriptorTable)
+		{
+			throw new InvalidOperationException("Draw records can only be encoded against the Metal bindless table.");
+		}
+
+		if (pipeline is not MetalPipeline metalPipeline)
+		{
+			throw new InvalidOperationException("Pipeline was not created by the Metal backend.");
+		}
+
+		descriptorTable.PrepareArgumentBuffersFor(metalPipeline);
 	}
 
 	public void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex)
@@ -30,7 +41,6 @@ internal sealed class MetalDrawRecordEncoder : IDrawRecordEncoder
 
 	public bool TryEncodeIndexedDrawCommand(
 		IGfxDevice device,
-		IGfxPipeline pipeline,
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
 		uint drawArgsCommandIndex,
@@ -44,15 +54,6 @@ internal sealed class MetalDrawRecordEncoder : IDrawRecordEncoder
 			throw new InvalidOperationException("Draw records can only be encoded against the Metal device and its bindless table.");
 		}
 
-		if (pipeline is not MetalPipeline metalPipeline)
-		{
-			throw new InvalidOperationException("Pipeline was not created by the Metal backend.");
-		}
-
-		// The record captures the argument buffers themselves, so they have to be sized and encoded for the
-		// pipeline that executes it before their addresses are taken below.
-		descriptorTable.PrepareArgumentBuffersFor(metalPipeline);
-
 		if (commandBuffer is not MetalIndirectCommandBuffer indirectCommands ||
 		    mesh.VertexBuffer is not MetalBuffer metalVertexBuffer ||
 		    mesh.IndexBuffer is not MetalBuffer metalIndexBuffer ||
@@ -65,8 +66,7 @@ internal sealed class MetalDrawRecordEncoder : IDrawRecordEncoder
 		}
 		foreach (var binding in passBindings.Bindings)
 		{
-			if (binding.Resource is not MetalBuffer)
-				return false;
+			if (binding.Resource is not MetalBuffer) return false;
 		}
 
 		if (descriptorTable.CountBuffer.NativePtr == IntPtr.Zero ||

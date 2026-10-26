@@ -7,8 +7,18 @@ namespace WolfEngine.Rendering.Backend.Metal;
 [SupportedOSPlatform("ios")]
 internal sealed class MetalGpuDrawDiagnosticsSampler : IGpuDrawDiagnosticsSampler
 {
-	public unsafe void SampleVisibilityDiagnostics(
+	public void Sample(
 		IGfxDevice device,
+		GpuDrawResources resources,
+		uint[] lastCounters,
+		GpuDrawHardeningStats stats)
+	{
+		ArgumentNullException.ThrowIfNull(resources);
+		SampleVisibilityDiagnostics(resources.DrawCountPerBucketBuffer, resources.DrawExecutionRangePerBucketBuffer, stats);
+		SampleGpuDiagnosticCounters(resources.DiagnosticsCounterBuffer, lastCounters, stats);
+	}
+
+	private static unsafe void SampleVisibilityDiagnostics(
 		IGfxBuffer? drawCountPerBucketBuffer,
 		IGfxBuffer? drawExecutionRangePerBucketBuffer,
 		GpuDrawHardeningStats stats)
@@ -31,8 +41,7 @@ internal sealed class MetalGpuDrawDiagnosticsSampler : IGpuDrawDiagnosticsSample
 		GpuDrawDiagnosticsSampling.ApplyVisibilityDiagnostics(visibleCounts, executionRanges, stats);
 	}
 
-	public unsafe void SampleGpuDiagnosticCounters(
-		IGfxDevice device,
+	private static unsafe void SampleGpuDiagnosticCounters(
 		IGfxBuffer? diagnosticsCounterBuffer,
 		uint[] lastCounters,
 		GpuDrawHardeningStats stats)

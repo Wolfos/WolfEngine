@@ -49,6 +49,10 @@ internal sealed class FakeDrawRecordEncoder : IDrawRecordEncoder
 		return page;
 	}
 
+	public void PrepareForPipeline(IGfxDevice device, IGfxPipeline pipeline)
+	{
+	}
+
 	public void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex)
 	{
 		((FakeRecordPage)commandBuffer).Records.Remove(commandIndex);
@@ -56,7 +60,6 @@ internal sealed class FakeDrawRecordEncoder : IDrawRecordEncoder
 
 	public bool TryEncodeIndexedDrawCommand(
 		IGfxDevice device,
-		IGfxPipeline pipeline,
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
 		uint drawArgsCommandIndex,

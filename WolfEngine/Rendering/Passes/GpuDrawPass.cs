@@ -163,7 +163,7 @@ public sealed class GpuDrawPass
 		_gpuDrawResources.EnsureCreated(device);
 		if (GpuDrawDiagnosticsEnabled)
 		{
-			SampleVisibilityDiagnostics();
+			SampleDiagnostics();
 			_hardeningStats.ResetSubmissionDiagnostics();
 		}
 		EnsureGBufferPipelines(device);
@@ -447,15 +447,20 @@ public sealed class GpuDrawPass
 				executionLaneIndex = cachedState.ExecutionIndex;
 			}
 
-            // Material state is shared by rigid and skinned meshes; specialize only after resolving it.
-            var executionKey = new GpuDrawExecutionKey(drawKind, bucketId, sidedness,
-                drawKind == GpuDrawKind.Mesh && bucketId != GpuDrawBucketId.AlphaBlend && mesh?.IsSkinned == true,
-                GpuDrawClassification.ReversesWinding(update.World));
-            if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var specializedLane))
-            {
-                executionLaneIndex = specializedLane.ExecutionIndex;
-                if (drawFlags != 0u) drawFlags = CreateDrawFlags(executionLaneIndex);
-            }
+			var executionKey = GpuDrawClassification.ResolveExecutionKey(
+				drawKind,
+				bucketId,
+				sidedness,
+				mesh,
+				update.World);
+			if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var specializedLane))
+			{
+				executionLaneIndex = specializedLane.ExecutionIndex;
+				if (drawFlags != 0u)
+				{
+					drawFlags = CreateDrawFlags(executionLaneIndex);
+				}
+			}
 
 			if (IsStructuralUpdateType(update.Type) &&
 			    updateDatabase.IsCurrentDrawHandle(update.DrawHandle) &&
@@ -1821,7 +1826,7 @@ public sealed class GpuDrawPass
 	public void RecordGBufferIndirectCompaction(RenderGraphContext context)
 	{
 		ArgumentNullException.ThrowIfNull(context);
-		EnsureGBufferIndirectCommands(context);
+		EnsureGBufferIndirectCommands();
 		_gbufferCompactionActive = RecordIndirectCompaction(
 			context,
 			GBufferCommandSet,
@@ -1831,9 +1836,8 @@ public sealed class GpuDrawPass
 			static _ => true);
 	}
 
-	public void EnsureGBufferIndirectCommands(RenderGraphContext context)
+	public void EnsureGBufferIndirectCommands()
 	{
-		ArgumentNullException.ThrowIfNull(context);
 		var device = _renderer.GetGfxDevice();
 		EnsureGBufferPipelines(device);
 		EnsureIndirectCommands(
@@ -1992,23 +1996,13 @@ public sealed class GpuDrawPass
 		UploadFallbackTableEntries();
 	}
 
-	private void SampleGpuDiagnosticCounters()
+	private void SampleDiagnostics()
 	{
-		_diagnosticsSampler.SampleGpuDiagnosticCounters(
+		_diagnosticsSampler.Sample(
 			_renderer.GetGfxDevice(),
-			_gpuDrawResources.DiagnosticsCounterBuffer,
+			_gpuDrawResources,
 			_lastGpuDiagnosticCounters,
 			_hardeningStats);
-	}
-
-	private void SampleVisibilityDiagnostics()
-	{
-		_diagnosticsSampler.SampleVisibilityDiagnostics(
-			_renderer.GetGfxDevice(),
-			_gpuDrawResources.DrawCountPerBucketBuffer,
-			_gpuDrawResources.DrawExecutionRangePerBucketBuffer,
-			_hardeningStats);
-		SampleGpuDiagnosticCounters();
 	}
 
 	private void PublishSubmittedBucketDiagnostics(GpuDrawDatabase drawDatabase)

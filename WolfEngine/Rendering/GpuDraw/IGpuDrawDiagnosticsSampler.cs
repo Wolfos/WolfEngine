@@ -8,16 +8,14 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public interface IGpuDrawDiagnosticsSampler
 {
-	/// <summary>Called once per frame while diagnostics are enabled, before <see cref="SampleGpuDiagnosticCounters"/>.</summary>
-	void SampleVisibilityDiagnostics(
+	/// <summary>
+	/// Called once per frame while diagnostics are enabled. Reads the visibility diagnostics and the hardening
+	/// counters from <paramref name="resources"/> into <paramref name="stats"/>; a backend may skip frames whose
+	/// numbers are not reported.
+	/// </summary>
+	void Sample(
 		IGfxDevice device,
-		IGfxBuffer? drawCountPerBucketBuffer,
-		IGfxBuffer? drawExecutionRangePerBucketBuffer,
-		GpuDrawHardeningStats stats);
-
-	void SampleGpuDiagnosticCounters(
-		IGfxDevice device,
-		IGfxBuffer? diagnosticsCounterBuffer,
+		GpuDrawResources resources,
 		uint[] lastCounters,
 		GpuDrawHardeningStats stats);
 }

@@ -166,15 +166,14 @@ public sealed class ShadowMapPass
 	private GraphicsPassBindingSet? GetPassBindingSet(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
 	{
 		ValidateCascadeIndex(cascadeIndex);
-		var resources = _gpuDrawResources;
 		if (_reflectionByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var reflection) == false)
 			return null;
 		return GraphicsPassBindingSet.FromReflection(reflection,
 			new Dictionary<string, IGfxBuffer?>(StringComparer.Ordinal)
 			{
-				["CameraParams"] = resources.ShadowCameraBuffer,
-				["g_TerrainMaterialTable"] = resources.TerrainMaterialBuffer,
-				["g_TerrainLayerTable"] = resources.TerrainLayerBuffer
+				["CameraParams"] = _gpuDrawResources.ShadowCameraBuffer,
+				["g_TerrainMaterialTable"] = _gpuDrawResources.TerrainMaterialBuffer,
+				["g_TerrainLayerTable"] = _gpuDrawResources.TerrainLayerBuffer
 			},
 			SharedDrawPerDrawBindings.ResourceNames);
 	}

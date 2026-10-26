@@ -57,12 +57,12 @@ internal sealed class GpuDrawLiveDrawSource : ILiveDrawSource
 				}
 
 				_renderer.EnsureMeshResources(entry.Mesh);
-				var executionKey = new GpuDrawExecutionKey(
+				var executionKey = GpuDrawClassification.ResolveExecutionKey(
 					entry.DrawKind,
 					GpuDrawClassification.ResolveBucketId(entry.DrawKind, entry.Material),
 					GpuDrawClassification.ResolveSidedness(entry.DrawKind, entry.Material),
-					entry.DrawKind == GpuDrawKind.Mesh && entry.Material.AlphaMode != AlphaMode.AlphaBlend && entry.Mesh.IsSkinned,
-					GpuDrawClassification.ReversesWinding(entry.World));
+					entry.Mesh,
+					entry.World);
 				destination.Add(new LiveDraw((uint)entry.DrawIndex, executionKey, entry.Mesh));
 			}
 		}

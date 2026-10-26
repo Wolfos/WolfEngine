@@ -69,21 +69,20 @@ public sealed class TransparentForwardPass
 	private SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
 		_bufferBindingsByExecutionKey.TryGetValue(lane.Key, out var bindings) ? bindings : null;
 
-	public GraphicsPassBindingSet? GetPassBindingSet(GpuDrawExecutionLaneDefinition lane, GpuDrawResources resources)
+	private GraphicsPassBindingSet? GetPassBindingSet(GpuDrawExecutionLaneDefinition lane)
 	{
-		ArgumentNullException.ThrowIfNull(resources);
 		if (_reflectionByExecutionKey.TryGetValue(lane.Key, out var reflection) == false)
 			return null;
 		return GraphicsPassBindingSet.FromReflection(reflection,
 			new Dictionary<string, IGfxBuffer?>(StringComparer.Ordinal)
 			{
-				["CameraParams"] = resources.CameraBuffer,
-				["TransparentEnvironmentParams"] = resources.TransparentEnvironmentBuffer,
-				["LightingParams"] = resources.TransparentLightingBuffer,
-				["DdgiDebugParams"] = resources.DdgiDebugBuffer,
-				["g_PointLights"] = resources.ClusterPointLightBuffer,
-				["g_ClusterHeaders"] = resources.ClusterHeaderBuffer,
-				["g_ClusterLightIndices"] = resources.ClusterLightIndexBuffer
+				["CameraParams"] = _gpuDrawResources.CameraBuffer,
+				["TransparentEnvironmentParams"] = _gpuDrawResources.TransparentEnvironmentBuffer,
+				["LightingParams"] = _gpuDrawResources.TransparentLightingBuffer,
+				["DdgiDebugParams"] = _gpuDrawResources.DdgiDebugBuffer,
+				["g_PointLights"] = _gpuDrawResources.ClusterPointLightBuffer,
+				["g_ClusterHeaders"] = _gpuDrawResources.ClusterHeaderBuffer,
+				["g_ClusterLightIndices"] = _gpuDrawResources.ClusterLightIndexBuffer
 			},
 			SharedDrawPerDrawBindings.ResourceNames);
 	}
@@ -407,7 +406,7 @@ public sealed class TransparentForwardPass
 				laneDefinition.ExecutionIndex,
 				laneDefinition.DebugName,
 				_bufferBindingsByExecutionKey[laneDefinition.Key],
-				GetPassBindingSet(laneDefinition, gpuDrawResources)
+				GetPassBindingSet(laneDefinition)
 					?? throw new InvalidOperationException($"Missing pass bindings for transparent lane '{laneDefinition.DebugName}'."),
 				pipeline,
 				indirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
@@ -508,7 +507,6 @@ public sealed class TransparentForwardPass
 		return _bindlessRegistry.GetTextureHandle(texture);
 	}
 
-
 	/// <summary>The lanes of this pass's draw record sets.</summary>
 	private sealed class LaneBindings : ILaneBindingProvider
 	{
@@ -527,7 +525,7 @@ public sealed class TransparentForwardPass
 			_pass.GetBufferBindings(lane);
 
 		public GraphicsPassBindingSet? GetPassBindings(GpuDrawExecutionLaneDefinition lane) =>
-			_pass.GetPassBindingSet(lane, _pass._gpuDrawResources);
+			_pass.GetPassBindingSet(lane);
 
 		public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) => _pass.GetPipeline(lane);
 	}

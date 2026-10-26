@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
@@ -5,27 +6,40 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 public sealed class D3D12GpuDrawDiagnosticsSampler : IGpuDrawDiagnosticsSampler
 {
 	private int _frameIndex;
-	private bool _samplingThisFrame;
 	private IGfxBuffer? _counterReadback;
 	private IGfxBuffer? _visibleCountReadback;
 	private IGfxBuffer? _executionRangeReadback;
 	private bool _loggedReadbackFailure;
 
-	public void SampleVisibilityDiagnostics(
+	public void Sample(
+		IGfxDevice device,
+		GpuDrawResources resources,
+		uint[] lastCounters,
+		GpuDrawHardeningStats stats)
+	{
+		ArgumentNullException.ThrowIfNull(resources);
+
+		// Reading these buffers means copying out of the default heap and waiting for the copy, so only
+		// pay for it on the frames whose numbers actually get reported. Metal reads shared memory and can
+		// afford to sample every frame; this cannot.
+		_frameIndex++;
+		var interval = GraphicsConfig.GpuHardeningLogIntervalFrames;
+		if (interval <= 0 || _frameIndex % interval != 0)
+		{
+			return;
+		}
+
+		SampleVisibilityDiagnostics(device, resources.DrawCountPerBucketBuffer, resources.DrawExecutionRangePerBucketBuffer, stats);
+		SampleGpuDiagnosticCounters(device, resources.DiagnosticsCounterBuffer, lastCounters, stats);
+	}
+
+	private void SampleVisibilityDiagnostics(
 		IGfxDevice device,
 		IGfxBuffer? drawCountPerBucketBuffer,
 		IGfxBuffer? drawExecutionRangePerBucketBuffer,
 		GpuDrawHardeningStats stats)
 	{
-		// Reading these buffers means copying out of the default heap and waiting for the copy, so only
-		// pay for it on the frames whose numbers actually get reported. Metal reads shared memory and can
-		// afford to sample every frame; this cannot. This is the first sample of each frame, so it decides
-		// for the counters sampled after it as well.
-		_frameIndex++;
-		var interval = GraphicsConfig.GpuHardeningLogIntervalFrames;
-		_samplingThisFrame = interval > 0 && _frameIndex % interval == 0;
-
-		if (_samplingThisFrame == false || drawCountPerBucketBuffer is null || drawExecutionRangePerBucketBuffer is null)
+		if (drawCountPerBucketBuffer is null || drawExecutionRangePerBucketBuffer is null)
 		{
 			return;
 		}
@@ -41,13 +55,13 @@ public sealed class D3D12GpuDrawDiagnosticsSampler : IGpuDrawDiagnosticsSampler
 		GpuDrawDiagnosticsSampling.ApplyVisibilityDiagnostics(visibleCounts, executionRanges, stats);
 	}
 
-	public void SampleGpuDiagnosticCounters(
+	private void SampleGpuDiagnosticCounters(
 		IGfxDevice device,
 		IGfxBuffer? diagnosticsCounterBuffer,
 		uint[] lastCounters,
 		GpuDrawHardeningStats stats)
 	{
-		if (_samplingThisFrame == false || diagnosticsCounterBuffer is null)
+		if (diagnosticsCounterBuffer is null)
 		{
 			return;
 		}
@@ -102,13 +116,7 @@ public sealed class D3D12GpuDrawDiagnosticsSampler : IGpuDrawDiagnosticsSampler
 			device.WaitForIdle();
 		}
 
-		var raw = new byte[sizeInBytes];
-		readableBuffer.Read(raw);
-		for (var i = 0; i < destination.Length; i++)
-		{
-			destination[i] = BitConverter.ToUInt32(raw, i * sizeof(uint));
-		}
-
+		readableBuffer.Read(MemoryMarshal.AsBytes(destination));
 		return true;
 	}
 

@@ -5,13 +5,12 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 
 public sealed class D3D12DrawRecordEncoder : IDrawRecordEncoder
 {
-	public IGfxIndirectCommandBuffer CreatePage(IGfxDevice device, uint commandCapacity, string name)
+	/// <summary>
+	/// Records hold only a draw index and draw arguments, so neither the pipeline nor the descriptor heap is
+	/// captured, and there is nothing to make current before encoding.
+	/// </summary>
+	public void PrepareForPipeline(IGfxDevice device, IGfxPipeline pipeline)
 	{
-		ArgumentNullException.ThrowIfNull(device);
-		return device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
-			PassKind.Graphics,
-			commandCapacity,
-			name: name));
 	}
 
 	public void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex)
@@ -26,7 +25,6 @@ public sealed class D3D12DrawRecordEncoder : IDrawRecordEncoder
 
 	public bool TryEncodeIndexedDrawCommand(
 		IGfxDevice device,
-		IGfxPipeline pipeline,
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
 		uint drawArgsCommandIndex,
@@ -39,10 +37,6 @@ public sealed class D3D12DrawRecordEncoder : IDrawRecordEncoder
 		{
 			throw new InvalidOperationException("Draw records can only be encoded against the Direct3D12 device.");
 		}
-
-		// Records hold only a draw index and draw arguments, so neither the pipeline nor the descriptor heap is
-		// captured, and there is nothing to make current before encoding.
-		_ = pipeline;
 
 		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer ||
 		    resources.InstanceBuffer is not D3D12Buffer instanceBuffer ||

@@ -18,15 +18,17 @@ public sealed class IndirectDrawRecords
 	private readonly IDrawRecordEncoder _encoder;
 	private readonly ILiveDrawSource _liveDraws;
 	private readonly IDrawRecordStalenessInputSource _stalenessInputs;
-	private readonly List<DrawRecordSet> _sets = new();
-	// When each set was last prepared, in frames counted by BeginFrame. A set idle for a full turn of the slot ring
+	// Every tracked set, and when each was last prepared was last prepared, in frames counted by BeginFrame. A set idle for a full turn of the slot ring
 	// stops holding back replay-log compaction and re-encodes in full on its next use.
 	private readonly Dictionary<DrawRecordSet, long> _setLastUse = new();
 	private readonly List<StructuralChange> _replayLog = new();
 	private readonly List<LiveDraw> _liveDrawScratch = new();
+	// Each lane's bindings as resolved by the set being prepared, filled on first use and cleared by Prepare. Pass
+	// binding sets are rebuilt from reflection on every request, so resolving them per record would allocate per draw.
+	private readonly GraphicsPassBindingSet?[] _lanePassBindings = new GraphicsPassBindingSet?[GpuDrawExecutionLanes.ExecutionLaneCount];
+	private readonly SharedDrawPerDrawBindings[] _lanePerDrawBindings = new SharedDrawPerDrawBindings[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private long _frame;
 	private ulong _latestStructuralVersion;
-	private ulong _nextStructuralVersion = 1;
 
 	private readonly record struct StructuralChange(
 		ulong Version,
@@ -60,7 +62,6 @@ public sealed class IndirectDrawRecords
 	public void Release(DrawRecordSet set)
 	{
 		ArgumentNullException.ThrowIfNull(set);
-		_sets.Remove(set);
 		_setLastUse.Remove(set);
 	}
 
@@ -80,9 +81,8 @@ public sealed class IndirectDrawRecords
 		in GpuDrawExecutionKey executionKey,
 		Mesh? mesh)
 	{
-		var version = _nextStructuralVersion++;
-		_replayLog.Add(new StructuralChange(version, type, drawHandle, executionKey, mesh));
-		_latestStructuralVersion = version;
+		_latestStructuralVersion++;
+		_replayLog.Add(new StructuralChange(_latestStructuralVersion, type, drawHandle, executionKey, mesh));
 	}
 
 	/// <summary>Brings one slot of a set up to date before its pass executes it.</summary>
@@ -96,17 +96,18 @@ public sealed class IndirectDrawRecords
 		ArgumentNullException.ThrowIfNull(set);
 		ArgumentNullException.ThrowIfNull(device);
 
-		var participation = set.Participation;
-		var lanes = set.Lanes;
-		Track(set);
+		_setLastUse[set] = _frame;
 		set.SetIndexStream(resources.IndexStream);
+		Array.Clear(_lanePassBindings);
+		PrepareLanePipelines(set, device);
+
 		var stalenessInputs = _stalenessInputs.Read();
-		var laneGeneration = lanes.Generation;
+		var laneGeneration = set.Lanes.Generation;
 		if (set.RequiresFullReencode(slotIndex, frameSlot, stalenessInputs, laneGeneration))
 		{
 			using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
 			{
-				ReencodeSlot(set, slotIndex, device, participation, resources, lanes);
+				ReencodeSlot(set, slotIndex, device, resources);
 			}
 
 			set.MarkSlotEncoded(slotIndex, frameSlot, stalenessInputs, laneGeneration, _latestStructuralVersion);
@@ -116,33 +117,42 @@ public sealed class IndirectDrawRecords
 
 		using (FrameProfiler.Instance.Measure("GpuDraw.StructuralReplay"))
 		{
-			ReplayPendingChanges(set, slotIndex, device, participation, resources, lanes);
+			ReplayPendingChanges(set, slotIndex, device, resources);
 		}
 
 		CompactReplayLog();
 	}
 
-	private void Track(DrawRecordSet set)
+	/// <summary>
+	/// Lets the encoder make current what the set's records will capture, once per drawn lane, before the set is
+	/// checked for staleness. Anything this replaces then counts towards that check instead of going unnoticed until
+	/// the next prepare.
+	/// </summary>
+	private void PrepareLanePipelines(DrawRecordSet set, IGfxDevice device)
 	{
-		_setLastUse[set] = _frame;
-		for (var i = 0; i < _sets.Count; i++)
+		var definitions = GpuDrawExecutionLanes.Definitions;
+		for (var i = 0; i < definitions.Length; i++)
 		{
-			if (ReferenceEquals(_sets[i], set))
+			var lane = definitions[i];
+			if (lane.SupportsPass(set.Participation) == false ||
+			    set.Lanes.IsLaneDrawn(lane) == false)
 			{
-				return;
+				continue;
+			}
+
+			var pipeline = set.Lanes.GetPipeline(lane);
+			if (pipeline is not null)
+			{
+				_encoder.PrepareForPipeline(device, pipeline);
 			}
 		}
-
-		_sets.Add(set);
 	}
 
 	private void ReplayPendingChanges(
 		DrawRecordSet set,
 		int slotIndex,
 		IGfxDevice device,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		ILaneBindingProvider lanes)
+		in SharedDrawIndirectEncodeResources resources)
 	{
 		var appliedVersion = set.GetAppliedStructuralVersion(slotIndex);
 		if (_latestStructuralVersion <= appliedVersion)
@@ -158,7 +168,7 @@ public sealed class IndirectDrawRecords
 				continue;
 			}
 
-			ApplyStructuralChange(change, set, slotIndex, device, participation, resources, lanes);
+			ApplyStructuralChange(change, set, slotIndex, device, resources);
 		}
 
 		set.SetAppliedStructuralVersion(slotIndex, _latestStructuralVersion);
@@ -169,9 +179,7 @@ public sealed class IndirectDrawRecords
 		DrawRecordSet set,
 		int slotIndex,
 		IGfxDevice device,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		ILaneBindingProvider lanes)
+		in SharedDrawIndirectEncodeResources resources)
 	{
 		if (_liveDraws.IsCurrent(change.DrawHandle) == false)
 		{
@@ -200,18 +208,14 @@ public sealed class IndirectDrawRecords
 			set,
 			slotIndex,
 			device,
-			participation,
-			resources,
-			lanes);
+			resources);
 	}
 
 	private void ReencodeSlot(
 		DrawRecordSet set,
 		int slotIndex,
 		IGfxDevice device,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		ILaneBindingProvider lanes)
+		in SharedDrawIndirectEncodeResources resources)
 	{
 		for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
 		{
@@ -239,9 +243,7 @@ public sealed class IndirectDrawRecords
 				set,
 				slotIndex,
 				device,
-				participation,
-				resources,
-				lanes);
+				resources);
 		}
 	}
 
@@ -251,17 +253,15 @@ public sealed class IndirectDrawRecords
 	/// </summary>
 	private void CompactReplayLog()
 	{
-		if (_replayLog.Count == 0 || _sets.Count == 0)
+		if (_replayLog.Count == 0 || _setLastUse.Count == 0)
 		{
 			return;
 		}
 
 		var minAppliedVersion = ulong.MaxValue;
-		for (var setIndex = 0; setIndex < _sets.Count; setIndex++)
+		foreach (var (set, lastUse) in _setLastUse)
 		{
-			var set = _sets[setIndex];
-			if (_setLastUse.TryGetValue(set, out var lastUse) &&
-			    _frame - lastUse > GpuDrawResources.IndirectCommandBufferSlotCount)
+			if (_frame - lastUse > GpuDrawResources.IndirectCommandBufferSlotCount)
 			{
 				set.InvalidateEncoding();
 				continue;
@@ -324,62 +324,66 @@ public sealed class IndirectDrawRecords
 		DrawRecordSet set,
 		int slotIndex,
 		IGfxDevice device,
-		DrawPassParticipation participation,
-		in SharedDrawIndirectEncodeResources resources,
-		ILaneBindingProvider lanes)
+		in SharedDrawIndirectEncodeResources resources)
 	{
+		ResetCommandInEveryLane(set, slotIndex, commandIndex);
 		if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var targetLane) == false ||
-		    targetLane.SupportsPass(participation) == false ||
-		    lanes.IsLaneDrawn(targetLane) == false)
+		    targetLane.SupportsPass(set.Participation) == false ||
+		    set.Lanes.IsLaneDrawn(targetLane) == false)
 		{
-			ResetCommandInEveryLane(set, slotIndex, commandIndex);
 			return;
 		}
 
-		for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
+		var passBindings = ResolveLaneBindings(set.Lanes, targetLane, out var perDrawBindings);
+		var commandBuffer = set.EnsurePageForCommand(
+			device,
+			slotIndex,
+			targetLane.ExecutionIndex,
+			commandIndex,
+			out var pageCommandIndex);
+		var laneResources = resources.ForLane(targetLane);
+		if (_encoder.TryEncodeIndexedDrawCommand(
+			    device,
+			    commandBuffer,
+			    pageCommandIndex,
+			    commandIndex,
+			    mesh,
+			    laneResources,
+			    passBindings,
+			    perDrawBindings) == false)
 		{
-			if (executionIndex == targetLane.ExecutionIndex)
-			{
-				var bindings = lanes.GetBufferBindings(targetLane)
-				               ?? throw new InvalidOperationException(
-					               $"Missing reflected shared-draw buffer bindings for execution lane '{targetLane.DebugName}'.");
-				var passBindings = lanes.GetPassBindings(targetLane)
-					?? throw new InvalidOperationException($"Missing reflected graphics pass bindings for execution lane '{targetLane.DebugName}'.");
-				var pipeline = lanes.GetPipeline(targetLane)
-					?? throw new InvalidOperationException($"Missing pipeline for execution lane '{targetLane.DebugName}'.");
-				var commandBuffer = set.EnsurePageForCommand(
-					device,
-					slotIndex,
-					executionIndex,
-					commandIndex,
-					out var pageCommandIndex);
-				var laneResources = resources.ForLane(targetLane);
-				if (_encoder.TryEncodeIndexedDrawCommand(
-					    device,
-					    pipeline,
-					    commandBuffer,
-					    pageCommandIndex,
-					    commandIndex,
-					    mesh,
-					    laneResources,
-					    passBindings,
-					    bindings.ToPerDrawBindings()) == false)
-				{
-					_encoder.ResetCommand(commandBuffer, pageCommandIndex);
-				}
-
-				continue;
-			}
-
-			if (set.TryGetPageForCommand(
-				    slotIndex,
-				    executionIndex,
-				    commandIndex,
-				    out var staleCommandBuffer,
-				    out var stalePageCommandIndex))
-			{
-				_encoder.ResetCommand(staleCommandBuffer, stalePageCommandIndex);
-			}
+			_encoder.ResetCommand(commandBuffer, pageCommandIndex);
 		}
+	}
+
+	private GraphicsPassBindingSet ResolveLaneBindings(
+		ILaneBindingProvider lanes,
+		GpuDrawExecutionLaneDefinition lane,
+		out SharedDrawPerDrawBindings perDrawBindings)
+	{
+		var executionIndex = lane.ExecutionIndex;
+		var passBindings = _lanePassBindings[executionIndex];
+		if (passBindings is not null)
+		{
+			perDrawBindings = _lanePerDrawBindings[executionIndex];
+			return passBindings;
+		}
+
+		if (lanes.GetPipeline(lane) is null)
+		{
+			throw new InvalidOperationException($"Missing pipeline for execution lane '{lane.DebugName}'.");
+		}
+
+		var bufferBindings = lanes.GetBufferBindings(lane)
+			?? throw new InvalidOperationException(
+				$"Missing reflected shared-draw buffer bindings for execution lane '{lane.DebugName}'.");
+		passBindings = lanes.GetPassBindings(lane)
+			?? throw new InvalidOperationException(
+				$"Missing reflected graphics pass bindings for execution lane '{lane.DebugName}'.");
+
+		perDrawBindings = bufferBindings.ToPerDrawBindings();
+		_lanePassBindings[executionIndex] = passBindings;
+		_lanePerDrawBindings[executionIndex] = perDrawBindings;
+		return passBindings;
 	}
 }

@@ -2533,7 +2533,7 @@ internal sealed class RenderGraphFrameBuilder
 		var device = _renderer.GetGfxDevice();
 		for (var cascadeIndex = 0; cascadeIndex < shadowData.CascadeCount; cascadeIndex++)
 		{
-			EnsureShadowIndirectCommands(context, device, cascadeIndex);
+			EnsureShadowIndirectCommands(device, cascadeIndex);
 			var compacted = _gpuDrawPass.RecordIndirectCompaction(
 				context,
 				_shadowMapPass.GetIndirectCommandSet(cascadeIndex, _gpuDrawResources.ActiveViewIndex),
@@ -2545,7 +2545,7 @@ internal sealed class RenderGraphFrameBuilder
 		}
 	}
 
-	private void EnsureShadowIndirectCommands(RenderGraphContext context, IGfxDevice device, int cascadeIndex)
+	private void EnsureShadowIndirectCommands(IGfxDevice device, int cascadeIndex)
 	{
 		_shadowMapPass.EnsureIndirectResources(device, cascadeIndex, _gpuDrawResources.ActiveViewIndex);
 		_gpuDrawPass.EnsureIndirectCommands(
@@ -2621,7 +2621,7 @@ internal sealed class RenderGraphFrameBuilder
 		var materialTexture = context.GetTexture(materialHandle);
 		var emissiveTexture = context.GetTexture(emissiveHandle);
 		var depthTexture = context.GetTexture(_view.FrameResources.GBufferDepth);
-		_gpuDrawPass.EnsureGBufferIndirectCommands(context);
+		_gpuDrawPass.EnsureGBufferIndirectCommands();
 		var bucketList = _gpuDrawPass.BuildGBufferBuckets();
 
 		var gbufferConfig = new GBufferPassConfig
