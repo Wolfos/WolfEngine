@@ -567,6 +567,11 @@ internal sealed class RenderGraphFrameBuilder
 		_view.ResetTaaHistoryThisFrame = frameShapeChanged || (taaEnabled &&
 			(!_view.PreviousTaaEnabled || _view.PreviousAntiAliasingMode != config.AntiAliasing.Mode));
 		_view.PreviousAntiAliasingMode = config.AntiAliasing.Mode;
+		if (frameShapeChanged)
+		{
+			_view.InvalidateScreenSpaceHistories();
+		}
+
 		if (!taaEnabled || !sceneEnabled)
 		{
 			_view.ReleaseTemporalHistoryResources();
@@ -828,17 +833,13 @@ internal sealed class RenderGraphFrameBuilder
 			{
 				var fogGrid = VolumetricFogPass.ComputeGrid(sceneFramebufferSize, config.VolumetricFog);
 				var maxDistance = Math.Max(config.VolumetricFog.MaxDistance, 0.001f);
-				EnsureFogHistoryResources(device, fogGrid, maxDistance);
-				var fogWriteIndex = 1 - _view.FogHistoryReadIndex;
+				_view.FogHistory.Ensure(device, new FogHistoryShape(fogGrid, maxDistance));
+				_view.FogHistory.Import(_resources);
 				fogCurrentHandle = _resources.CreateTransientTexture(CreateFogTextureDescriptor(fogGrid));
 				fogIntegratedHandle = _resources.CreateTransientTexture(CreateFogTextureDescriptor(fogGrid));
-				if (_view.FogHistoryTextures[_view.FogHistoryReadIndex] is IGfxTexture fogHistoryRead &&
-				    _view.FogHistoryTextures[fogWriteIndex] is IGfxTexture fogHistoryWrite)
-				{
-					fogHistoryReadHandle = _resources.ImportTexture(fogHistoryRead, false, _view.FogHistoryStates[_view.FogHistoryReadIndex]);
-					fogHistoryWriteHandle = _resources.ImportTexture(fogHistoryWrite, false, _view.FogHistoryStates[fogWriteIndex]);
-					fogHistoryValid = _view.FogHistoryValid && !frameShapeChanged;
-				}
+				fogHistoryReadHandle = _view.FogHistory.Previous();
+				fogHistoryWriteHandle = _view.FogHistory.Current();
+				fogHistoryValid = _view.FogHistory.IsValid;
 			}
 			else
 			{
@@ -848,54 +849,26 @@ internal sealed class RenderGraphFrameBuilder
 			fsr3Resources = new Fsr3FrameResources { TransparencyMask = transparencyMaskHandle };
 			if (taaEnabled)
 			{
-				EnsureTemporalHistoryResources(_renderer.GetGfxDevice(), sceneFramebufferSize, config.AntiAliasing.Mode);
-				var historyWriteIndex = 1 - _view.HistoryReadIndex;
-				if (_view.HistoryColorTextures[_view.HistoryReadIndex] is IGfxTexture historyColorRead &&
-				    _view.HistoryColorTextures[historyWriteIndex] is IGfxTexture historyColorWrite &&
-				    _view.HistoryDepthTextures[_view.HistoryReadIndex] is IGfxTexture historyDepthRead &&
-				    _view.HistoryDepthTextures[historyWriteIndex] is IGfxTexture historyDepthWrite)
-				{
-					historyColorReadHandle = _resources.ImportTexture(
-						historyColorRead,
-						takeOwnership: false,
-						initialState: _view.HistoryColorStates[_view.HistoryReadIndex]);
-					historyColorWriteHandle = _resources.ImportTexture(
-						historyColorWrite,
-						takeOwnership: false,
-						initialState: _view.HistoryColorStates[historyWriteIndex]);
-					historyDepthReadHandle = _resources.ImportTexture(
-						historyDepthRead,
-						takeOwnership: false,
-						initialState: _view.HistoryDepthStates[_view.HistoryReadIndex]);
-					historyDepthWriteHandle = _resources.ImportTexture(
-						historyDepthWrite,
-						takeOwnership: false,
-						initialState: _view.HistoryDepthStates[historyWriteIndex]);
-				}
-				else
+				var temporalHistoryShape = new TemporalHistoryShape(sceneFramebufferSize, config.AntiAliasing.Mode);
+				if (_view.TemporalHistory.Ensure(device, temporalHistoryShape))
 				{
 					_view.ResetTaaHistoryThisFrame = true;
-					_view.HistoryValid = false;
 				}
 
-				var writeIndex = 1 - _view.HistoryReadIndex;
-				if (config.AntiAliasing.UsesFsr3 &&
-				    _view.Fsr3CurrentLumaTextures[_view.HistoryReadIndex] is IGfxTexture currentLumaRead &&
-				    _view.Fsr3CurrentLumaTextures[writeIndex] is IGfxTexture currentLumaWrite &&
-				    _view.Fsr3AccumulationTextures[_view.HistoryReadIndex] is IGfxTexture accumulationRead &&
-				    _view.Fsr3AccumulationTextures[writeIndex] is IGfxTexture accumulationWrite)
+				_view.TemporalHistory.Import(_resources);
+				historyColorReadHandle = _view.TemporalHistory.Previous(TemporalHistorySlot.Color);
+				historyColorWriteHandle = _view.TemporalHistory.Current(TemporalHistorySlot.Color);
+				historyDepthReadHandle = _view.TemporalHistory.Previous(TemporalHistorySlot.Depth);
+				historyDepthWriteHandle = _view.TemporalHistory.Current(TemporalHistorySlot.Depth);
+
+				if (config.AntiAliasing.UsesFsr3)
 				{
-					var currentLumaReadHandle = _resources.ImportTexture(currentLumaRead, false,
-						_view.Fsr3CurrentLumaStates[_view.HistoryReadIndex]);
-					var currentLumaWriteHandle = _resources.ImportTexture(currentLumaWrite, false,
-						_view.Fsr3CurrentLumaStates[writeIndex]);
-					var accumulationReadHandle = _resources.ImportTexture(accumulationRead, false,
-						_view.Fsr3AccumulationStates[_view.HistoryReadIndex]);
-					var accumulationWriteHandle = _resources.ImportTexture(accumulationWrite, false,
-						_view.Fsr3AccumulationStates[writeIndex]);
+					EnsureFsr3HistoryResources(device, sceneFramebufferSize);
+					_view.Fsr3History.Import(_resources);
 					var frameInfoHandle = _resources.ImportTexture(
 						_view.Fsr3FrameInfoTexture ?? throw new InvalidOperationException("FSR3 frame info was not allocated."),
-						false, _view.Fsr3FrameInfoState);
+						takeOwnership: false,
+						initialState: _view.Fsr3FrameInfoState);
 					var lumaSpdMips = CreateFsr3SpdMips(sceneFramebufferSize);
 					var shadingSpdMips = CreateFsr3SpdMips(new Int2(
 						Math.Max(sceneFramebufferSize.X / 2, 1), Math.Max(sceneFramebufferSize.Y / 2, 1)));
@@ -906,8 +879,8 @@ internal sealed class RenderGraphFrameBuilder
 						DilatedDepth = CreateFsr3Texture(sceneFramebufferSize),
 						FarthestDepth = CreateFsr3Texture(sceneFramebufferSize),
 						ReconstructedPrevNearestDepth = CreateFsr3UintTexture(sceneFramebufferSize),
-						CurrentLumaRead = currentLumaReadHandle,
-						CurrentLumaWrite = currentLumaWriteHandle,
+						CurrentLumaRead = _view.Fsr3History.Previous(Fsr3HistorySlot.CurrentLuma),
+						CurrentLumaWrite = _view.Fsr3History.Current(Fsr3HistorySlot.CurrentLuma),
 						FarthestDepthMip1 = CreateFsr3Texture(new Int2(
 							Math.Max(sceneFramebufferSize.X / 2, 1), Math.Max(sceneFramebufferSize.Y / 2, 1))),
 						FrameInfo = frameInfoHandle,
@@ -918,8 +891,8 @@ internal sealed class RenderGraphFrameBuilder
 						// This target is physically half-resolution. Allocating it at full resolution makes
 						// FSR3's half-resolution UV clamp sample the unwritten portion of the resource.
 						ShadingChange = CreateFsr3Texture(GetFsr3ShadingChangeSize(sceneFramebufferSize)),
-						AccumulationRead = accumulationReadHandle,
-						AccumulationWrite = accumulationWriteHandle,
+						AccumulationRead = _view.Fsr3History.Previous(Fsr3HistorySlot.Accumulation),
+						AccumulationWrite = _view.Fsr3History.Current(Fsr3HistorySlot.Accumulation),
 						DilatedReactiveMasks = CreateFsr3Texture(sceneFramebufferSize),
 						NewLocks = CreateFsr3Texture(sceneFramebufferSize),
 						LumaHistoryRead = historyDepthReadHandle,
@@ -927,8 +900,12 @@ internal sealed class RenderGraphFrameBuilder
 						LumaInstability = CreateFsr3Texture(sceneFramebufferSize),
 						InternalHistoryRead = historyColorReadHandle,
 						InternalHistoryWrite = historyColorWriteHandle,
-						HistoryValid = _view.HistoryValid
+						HistoryValid = _view.TemporalHistory.IsValid && _view.Fsr3History.IsValid
 					};
+				}
+				else
+				{
+					_view.ReleaseFsr3HistoryResources();
 				}
 			}
 
@@ -985,17 +962,18 @@ internal sealed class RenderGraphFrameBuilder
 				var visibilityTileInteriorSize = DdgiUtilities.GetVisibilityTileInteriorSize(ddgiConfig);
 				var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(ddgiGridShape, visibilityTileInteriorSize);
 				EnsureDdgiHistoryResources(
-					_renderer.GetGfxDevice(),
-					ddgiGridShape,
-					ddgiConfig.Origin,
-					ddgiProbeSpacing,
-					visibilityTileInteriorSize);
+					device,
+					new DdgiHistoryShape(
+						ddgiGridShape,
+						ddgiConfig.Origin,
+						ddgiProbeSpacing,
+						visibilityTileInteriorSize));
 				ddgiRuntimeOrigin = DdgiUtilities.GetRuntimeOrigin(
 					ddgiConfig.Origin,
 					ddgiGridShape,
 					ddgiProbeSpacing,
 					cameraPosition);
-				if (_view.DdgiHistoryValid && _view.DdgiCommittedPlacementValid)
+				if (_view.DdgiHistory.IsValid && _view.DdgiCommittedPlacementValid)
 				{
 					ddgiScrollDelta = DdgiUtilities.GetScrollDelta(
 						_view.DdgiCommittedRuntimeOrigin,
@@ -1006,170 +984,108 @@ internal sealed class RenderGraphFrameBuilder
 						ddgiScrollDelta,
 						ddgiGridShape);
 				}
-				var ddgiWriteIndex = 1 - _view.DdgiHistoryReadIndex;
-				if (_view.DdgiIrradianceTextures[0, _view.DdgiHistoryReadIndex] is IGfxTexture ddgiIrradianceL0Read &&
-				    _view.DdgiIrradianceTextures[0, ddgiWriteIndex] is IGfxTexture ddgiIrradianceL0Write &&
-				    _view.DdgiIrradianceTextures[1, _view.DdgiHistoryReadIndex] is IGfxTexture ddgiIrradianceLyRead &&
-				    _view.DdgiIrradianceTextures[1, ddgiWriteIndex] is IGfxTexture ddgiIrradianceLyWrite &&
-				    _view.DdgiIrradianceTextures[2, _view.DdgiHistoryReadIndex] is IGfxTexture ddgiIrradianceLzRead &&
-				    _view.DdgiIrradianceTextures[2, ddgiWriteIndex] is IGfxTexture ddgiIrradianceLzWrite &&
-				    _view.DdgiIrradianceTextures[3, _view.DdgiHistoryReadIndex] is IGfxTexture ddgiIrradianceLxRead &&
-				    _view.DdgiIrradianceTextures[3, ddgiWriteIndex] is IGfxTexture ddgiIrradianceLxWrite &&
-				    _view.DdgiVisibilityTextures[_view.DdgiHistoryReadIndex] is IGfxTexture ddgiVisibilityRead &&
-				    _view.DdgiVisibilityTextures[ddgiWriteIndex] is IGfxTexture ddgiVisibilityWrite &&
-				    _view.DdgiProbeStateTextures[_view.DdgiHistoryReadIndex] is IGfxTexture ddgiProbeStateRead &&
-				    _view.DdgiProbeStateTextures[ddgiWriteIndex] is IGfxTexture ddgiProbeStateWrite &&
-				    _view.DdgiProbeActivityTexture is IGfxTexture ddgiProbeActivity &&
-				    _view.DdgiIrradianceEstimatorBuffer is IGfxBuffer ddgiIrradianceEstimator)
+				_view.DdgiHistory.Import(_resources);
+				ddgiTraceIrradianceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					irradianceAtlasSize.X,
+					irradianceAtlasSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+				ddgiTraceVisibilityHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					visibilityAtlasSize.X,
+					visibilityAtlasSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f)));
+				ddgiIrradianceEstimatorHandle = _resources.ImportBuffer(
+					_view.DdgiIrradianceEstimatorBuffer!,
+					takeOwnership: false,
+					initialState: _view.DdgiIrradianceEstimatorState);
+				ddgiIrradianceL0ReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Irradiance);
+				ddgiIrradianceL0WriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Irradiance);
+				ddgiIrradianceLyReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Irradiance + 1);
+				ddgiIrradianceLyWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Irradiance + 1);
+				ddgiIrradianceLzReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Irradiance + 2);
+				ddgiIrradianceLzWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Irradiance + 2);
+				ddgiIrradianceLxReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Irradiance + 3);
+				ddgiIrradianceLxWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Irradiance + 3);
+				ddgiVisibilityReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Visibility);
+				ddgiVisibilityWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Visibility);
+				ddgiProbeStateReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.ProbeState);
+				ddgiProbeStateWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.ProbeState);
+				ddgiProbeActivityHandle = _resources.ImportTexture(
+					_view.DdgiProbeActivityTexture!,
+					takeOwnership: false,
+					initialState: _view.DdgiProbeActivityState);
+				ddgiProbeActivityMarksHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					ddgiGridShape.AtlasColumns,
+					ddgiGridShape.AtlasRows,
+					TextureFormat.R32Uint,
+					TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+				ddgiFinalContributionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+				ddgiProbeBaseWeightDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiWeightedVisibilityDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiDominantProbeDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiDominantProbeCoordDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiProbeRelocationDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiProbeRelocationDecisionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					ddgiGridShape.AtlasColumns,
+					ddgiGridShape.AtlasRows,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+				ddgiProbeRelocationDecisionDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				if (DdgiUtilities.IsFinalGatherEnabled(config))
 				{
-					ddgiTraceIrradianceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						irradianceAtlasSize.X,
-						irradianceAtlasSize.Y,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
-					ddgiTraceVisibilityHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						visibilityAtlasSize.X,
-						visibilityAtlasSize.Y,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f)));
-					ddgiIrradianceEstimatorHandle = _resources.ImportBuffer(
-						ddgiIrradianceEstimator,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceEstimatorState);
-					ddgiIrradianceL0ReadHandle = _resources.ImportTexture(
-						ddgiIrradianceL0Read,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[0, _view.DdgiHistoryReadIndex]);
-					ddgiIrradianceL0WriteHandle = _resources.ImportTexture(
-						ddgiIrradianceL0Write,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[0, ddgiWriteIndex]);
-					ddgiIrradianceLyReadHandle = _resources.ImportTexture(
-						ddgiIrradianceLyRead,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[1, _view.DdgiHistoryReadIndex]);
-					ddgiIrradianceLyWriteHandle = _resources.ImportTexture(
-						ddgiIrradianceLyWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[1, ddgiWriteIndex]);
-					ddgiIrradianceLzReadHandle = _resources.ImportTexture(
-						ddgiIrradianceLzRead,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[2, _view.DdgiHistoryReadIndex]);
-					ddgiIrradianceLzWriteHandle = _resources.ImportTexture(
-						ddgiIrradianceLzWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[2, ddgiWriteIndex]);
-					ddgiIrradianceLxReadHandle = _resources.ImportTexture(
-						ddgiIrradianceLxRead,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[3, _view.DdgiHistoryReadIndex]);
-					ddgiIrradianceLxWriteHandle = _resources.ImportTexture(
-						ddgiIrradianceLxWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[3, ddgiWriteIndex]);
-					ddgiVisibilityReadHandle = _resources.ImportTexture(
-						ddgiVisibilityRead,
-						takeOwnership: false,
-						initialState: _view.DdgiVisibilityStates[_view.DdgiHistoryReadIndex]);
-					ddgiVisibilityWriteHandle = _resources.ImportTexture(
-						ddgiVisibilityWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiVisibilityStates[ddgiWriteIndex]);
-					ddgiProbeStateReadHandle = _resources.ImportTexture(
-						ddgiProbeStateRead,
-						takeOwnership: false,
-						initialState: _view.DdgiProbeStateStates[_view.DdgiHistoryReadIndex]);
-					ddgiProbeStateWriteHandle = _resources.ImportTexture(
-						ddgiProbeStateWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiProbeStateStates[ddgiWriteIndex]);
-					ddgiProbeActivityHandle = _resources.ImportTexture(
-						ddgiProbeActivity,
-						takeOwnership: false,
-						initialState: _view.DdgiProbeActivityState);
-					ddgiProbeActivityMarksHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						ddgiGridShape.AtlasColumns,
-						ddgiGridShape.AtlasRows,
-						TextureFormat.R32Uint,
-						TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-					ddgiFinalContributionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						sceneFramebufferSize.X,
-						sceneFramebufferSize.Y,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
-					ddgiProbeBaseWeightDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiWeightedVisibilityDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiDominantProbeDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiDominantProbeCoordDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiProbeRelocationDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiProbeRelocationDecisionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						ddgiGridShape.AtlasColumns,
-						ddgiGridShape.AtlasRows,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
-					ddgiProbeRelocationDecisionDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					if (DdgiUtilities.IsFinalGatherEnabled(config))
+					var finalGatherTraceSize = DdgiUtilities.GetFinalGatherTraceSize(
+						sceneFramebufferSize,
+						ddgiConfig.FinalGather);
+					var tracesAtFullResolution =
+						finalGatherTraceSize.X == sceneFramebufferSize.X &&
+						finalGatherTraceSize.Y == sceneFramebufferSize.Y;
+					ddgiFinalGatherTraceHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+					ddgiFinalGatherDenoisedHandle = ddgiFinalGatherTraceHandle;
+
+					if (DdgiUtilities.IsFinalGatherDenoiseEnabled(config))
 					{
-						var finalGatherTraceSize = DdgiUtilities.GetFinalGatherTraceSize(
-							sceneFramebufferSize,
-							ddgiConfig.FinalGather);
-						var tracesAtFullResolution =
-							finalGatherTraceSize.X == sceneFramebufferSize.X &&
-							finalGatherTraceSize.Y == sceneFramebufferSize.Y;
-						ddgiFinalGatherTraceHandle = CreateFinalGatherTexture(finalGatherTraceSize);
-						ddgiFinalGatherDenoisedHandle = ddgiFinalGatherTraceHandle;
-
-						if (DdgiUtilities.IsFinalGatherDenoiseEnabled(config))
+						_view.FinalGatherHistory.Ensure(device, finalGatherTraceSize);
+						_view.FinalGatherHistory.Import(_resources);
+						ddgiFinalGatherHistoryReadHandles = new RenderGraphResourceHandle[DdgiFinalGatherHistorySlot.Count];
+						ddgiFinalGatherHistoryWriteHandles = new RenderGraphResourceHandle[DdgiFinalGatherHistorySlot.Count];
+						for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
 						{
-							EnsureFinalGatherHistoryResources(_renderer.GetGfxDevice(), finalGatherTraceSize);
-							var finalGatherWriteIndex = 1 - _view.FinalGatherHistoryReadIndex;
-							ddgiFinalGatherHistoryReadHandles = new RenderGraphResourceHandle[DdgiFinalGatherHistorySlot.Count];
-							ddgiFinalGatherHistoryWriteHandles = new RenderGraphResourceHandle[DdgiFinalGatherHistorySlot.Count];
-							for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
-							{
-								ddgiFinalGatherHistoryReadHandles[slot] = _resources.ImportTexture(
-									_view.FinalGatherHistoryTextures[slot, _view.FinalGatherHistoryReadIndex]!,
-									takeOwnership: false,
-									initialState: _view.FinalGatherHistoryStates[slot, _view.FinalGatherHistoryReadIndex]);
-								ddgiFinalGatherHistoryWriteHandles[slot] = _resources.ImportTexture(
-									_view.FinalGatherHistoryTextures[slot, finalGatherWriteIndex]!,
-									takeOwnership: false,
-									initialState: _view.FinalGatherHistoryStates[slot, finalGatherWriteIndex]);
-							}
-							ddgiFinalGatherHistoryValid = _view.FinalGatherHistoryValid && frameShapeChanged == false;
-							ddgiFinalGatherIntegratedHandle = CreateFinalGatherTexture(finalGatherTraceSize);
-							ddgiFinalGatherFilterInputHandle = CreateFinalGatherTexture(finalGatherTraceSize);
-
-							// The first a-trous level writes the color history; later levels ping-pong between two
-							// intermediates and the last writes the finished target.
-							ddgiFinalGatherFilterIterations = DdgiUtilities.GetFinalGatherFilterIterations(ddgiConfig.FinalGather);
-							if (ddgiFinalGatherFilterIterations >= 3)
-							{
-								ddgiFinalGatherFilterAHandle = CreateFinalGatherTexture(finalGatherTraceSize);
-							}
-							if (ddgiFinalGatherFilterIterations >= 4)
-							{
-								ddgiFinalGatherFilterBHandle = CreateFinalGatherTexture(finalGatherTraceSize);
-							}
-							ddgiFinalGatherDenoisedHandle = ddgiFinalGatherFilterIterations > 1
-								? CreateFinalGatherTexture(finalGatherTraceSize)
-								: ddgiFinalGatherHistoryWriteHandles[DdgiFinalGatherHistorySlot.Color];
+							ddgiFinalGatherHistoryReadHandles[slot] = _view.FinalGatherHistory.Previous(slot);
+							ddgiFinalGatherHistoryWriteHandles[slot] = _view.FinalGatherHistory.Current(slot);
 						}
+						ddgiFinalGatherHistoryValid = _view.FinalGatherHistory.IsValid;
+						ddgiFinalGatherIntegratedHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+						ddgiFinalGatherFilterInputHandle = CreateFinalGatherTexture(finalGatherTraceSize);
 
-						ddgiFinalGatherIrradianceHandle = tracesAtFullResolution
-							? ddgiFinalGatherDenoisedHandle
-							: CreateFinalGatherTexture(sceneFramebufferSize);
+						// The first a-trous level writes the color history; later levels ping-pong between two
+						// intermediates and the last writes the finished target.
+						ddgiFinalGatherFilterIterations = DdgiUtilities.GetFinalGatherFilterIterations(ddgiConfig.FinalGather);
+						if (ddgiFinalGatherFilterIterations >= 3)
+						{
+							ddgiFinalGatherFilterAHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+						}
+						if (ddgiFinalGatherFilterIterations >= 4)
+						{
+							ddgiFinalGatherFilterBHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+						}
+						ddgiFinalGatherDenoisedHandle = ddgiFinalGatherFilterIterations > 1
+							? CreateFinalGatherTexture(finalGatherTraceSize)
+							: ddgiFinalGatherHistoryWriteHandles[DdgiFinalGatherHistorySlot.Color];
 					}
-				}
-				else
-				{
-					_view.DdgiHistoryValid = false;
+
+					ddgiFinalGatherIrradianceHandle = tracesAtFullResolution
+						? ddgiFinalGatherDenoisedHandle
+						: CreateFinalGatherTexture(sceneFramebufferSize);
 				}
 			}
 		}
@@ -3189,7 +3105,7 @@ internal sealed class RenderGraphFrameBuilder
 			context,
 			_view.FrameResources,
 			_renderer.GetGfxDevice(),
-			_view.HistoryValid,
+			_view.TemporalHistory.IsValid,
 			_view.ResetTaaHistoryThisFrame || context.SceneData.ResetHistory);
 		_temporalAntiAliasingPass.Record(context, in config);
 	}
@@ -3257,7 +3173,7 @@ internal sealed class RenderGraphFrameBuilder
 			_gpuDrawResources,
 			_rayTracingSceneResources,
 			context.SceneData,
-			_view.DdgiHistoryValid);
+			_view.DdgiHistory.IsValid);
 		_view.CurrentDdgiConfigValid = true;
 		_ddgiPass.RecordClassify(context, in _view.CurrentDdgiConfig);
 	}
@@ -3474,124 +3390,26 @@ internal sealed class RenderGraphFrameBuilder
 			_view.ColorPyramidValid = true;
 		}
 
-		if (_view.FrameResources.Config.AntiAliasing.Enabled == false || _view.FrameResources.SceneEnabled == false)
+		// Companion state is committed first, while IsImported still says whether this frame ran the effect.
+		if (_view.Fsr3History.IsImported)
 		{
-			_view.HistoryValid = false;
-		}
-		else if (_view.FrameResources.HistoryColorWrite.IsValid == false ||
-		         _view.FrameResources.HistoryDepthWrite.IsValid == false)
-		{
-			_view.HistoryValid = false;
-		}
-		else
-		{
-			if (_view.FrameResources.HistoryColorRead.IsValid)
-			{
-				_view.HistoryColorStates[_view.HistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.HistoryColorRead);
-			}
-
-			if (_view.FrameResources.HistoryDepthRead.IsValid)
-			{
-				_view.HistoryDepthStates[_view.HistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.HistoryDepthRead);
-			}
-
-			var writeIndex = 1 - _view.HistoryReadIndex;
-			_view.HistoryColorStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.HistoryColorWrite);
-			_view.HistoryDepthStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.HistoryDepthWrite);
-			if (_view.FrameResources.Config.AntiAliasing.UsesFsr3)
-			{
-				_view.Fsr3CurrentLumaStates[_view.HistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.Fsr3.CurrentLumaRead);
-				_view.Fsr3CurrentLumaStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.Fsr3.CurrentLumaWrite);
-				_view.Fsr3AccumulationStates[_view.HistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.Fsr3.AccumulationRead);
-				_view.Fsr3AccumulationStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.Fsr3.AccumulationWrite);
-				_view.Fsr3FrameInfoState = _resources.GetResourceState(_view.FrameResources.Fsr3.FrameInfo);
-				_view.Fsr3FrameIndex++;
-			}
-			_view.HistoryReadIndex = writeIndex;
-			_view.HistoryValid = true;
+			_view.Fsr3FrameInfoState = _resources.GetResourceState(_view.FrameResources.Fsr3.FrameInfo);
+			_view.Fsr3FrameIndex++;
 		}
 
-		if (_view.FrameResources.Config.VolumetricFog.Enabled &&
-		    _view.FrameResources.SceneEnabled &&
-		    _view.FrameResources.FogHistoryWrite.IsValid)
-		{
-			if (_view.FrameResources.FogHistoryRead.IsValid)
-			{
-				_view.FogHistoryStates[_view.FogHistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.FogHistoryRead);
-			}
-			var writeIndex = 1 - _view.FogHistoryReadIndex;
-			_view.FogHistoryStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.FogHistoryWrite);
-			_view.FogHistoryReadIndex = writeIndex;
-			_view.FogHistoryValid = true;
-		}
-		else
-		{
-			_view.FogHistoryValid = false;
-		}
-
-		CommitFinalGatherHistory();
-
-		if (HasRayTracedDdgi(_view.FrameResources.Config) == false || _view.FrameResources.SceneEnabled == false)
-		{
-			_view.DdgiHistoryValid = false;
-			return;
-		}
-
-		if (_view.FrameResources.DdgiIrradianceL0HistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiIrradianceLyHistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiIrradianceLzHistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiIrradianceLxHistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiVisibilityHistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiProbeStateWrite.IsValid == false ||
-		    _view.FrameResources.DdgiIrradianceEstimator.IsValid == false)
-		{
-			_view.DdgiHistoryValid = false;
-			return;
-		}
-
-		UpdateDdgiIrradianceState(0, _view.FrameResources.DdgiIrradianceL0HistoryRead, _view.DdgiHistoryReadIndex);
-		UpdateDdgiIrradianceState(1, _view.FrameResources.DdgiIrradianceLyHistoryRead, _view.DdgiHistoryReadIndex);
-		UpdateDdgiIrradianceState(2, _view.FrameResources.DdgiIrradianceLzHistoryRead, _view.DdgiHistoryReadIndex);
-		UpdateDdgiIrradianceState(3, _view.FrameResources.DdgiIrradianceLxHistoryRead, _view.DdgiHistoryReadIndex);
-
-		if (_view.FrameResources.DdgiVisibilityHistoryRead.IsValid)
-		{
-			_view.DdgiVisibilityStates[_view.DdgiHistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.DdgiVisibilityHistoryRead);
-		}
-
-		if (_view.FrameResources.DdgiProbeStateRead.IsValid)
-		{
-			_view.DdgiProbeStateStates[_view.DdgiHistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.DdgiProbeStateRead);
-		}
-		if (_view.FrameResources.DdgiProbeActivity.IsValid)
+		if (_view.DdgiHistory.IsImported)
 		{
 			_view.DdgiProbeActivityState = _resources.GetResourceState(_view.FrameResources.DdgiProbeActivity);
+			_view.DdgiIrradianceEstimatorState = _resources.GetResourceState(_view.FrameResources.DdgiIrradianceEstimator);
+			_view.DdgiCommittedRuntimeOrigin = _view.FrameResources.DdgiRuntimeOrigin;
+			_view.DdgiCommittedStorageOffset = _view.FrameResources.DdgiStorageOffset;
+			_view.DdgiCommittedPlacementValid = true;
 		}
 
-		var ddgiWriteIndex = 1 - _view.DdgiHistoryReadIndex;
-		UpdateDdgiIrradianceState(0, _view.FrameResources.DdgiIrradianceL0HistoryWrite, ddgiWriteIndex);
-		UpdateDdgiIrradianceState(1, _view.FrameResources.DdgiIrradianceLyHistoryWrite, ddgiWriteIndex);
-		UpdateDdgiIrradianceState(2, _view.FrameResources.DdgiIrradianceLzHistoryWrite, ddgiWriteIndex);
-		UpdateDdgiIrradianceState(3, _view.FrameResources.DdgiIrradianceLxHistoryWrite, ddgiWriteIndex);
-		_view.DdgiVisibilityStates[ddgiWriteIndex] = _resources.GetResourceState(_view.FrameResources.DdgiVisibilityHistoryWrite);
-		_view.DdgiProbeStateStates[ddgiWriteIndex] = _resources.GetResourceState(_view.FrameResources.DdgiProbeStateWrite);
-		_view.DdgiIrradianceEstimatorState = _resources.GetResourceState(_view.FrameResources.DdgiIrradianceEstimator);
-		_view.DdgiHistoryReadIndex = ddgiWriteIndex;
-		_view.DdgiHistoryValid = true;
-		_view.DdgiCommittedRuntimeOrigin = _view.FrameResources.DdgiRuntimeOrigin;
-		_view.DdgiCommittedStorageOffset = _view.FrameResources.DdgiStorageOffset;
-		_view.DdgiCommittedPlacementValid = true;
+		_view.CompleteHistories(_resources);
 	}
 
-	private void UpdateDdgiIrradianceState(int coefficientIndex, RenderGraphResourceHandle handle, int historyIndex)
-	{
-		if (handle.IsValid)
-		{
-			_view.DdgiIrradianceStates[coefficientIndex, historyIndex] = _resources.GetResourceState(handle);
-		}
-	}
-
-	private static TextureDescriptor CreateFogTextureDescriptor(Int3 grid) => new(
+	internal static TextureDescriptor CreateFogTextureDescriptor(Int3 grid) => new(
 		grid.X,
 		grid.Y,
 		TextureFormat.Rgba16Float,
@@ -3599,61 +3417,6 @@ internal sealed class RenderGraphFrameBuilder
 		new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f),
 		dimension: TextureDimension.Texture3D,
 		depth: grid.Z);
-
-	private void CommitFinalGatherHistory()
-	{
-		var historyRead = _view.FrameResources.DdgiFinalGatherHistoryRead;
-		var historyWrite = _view.FrameResources.DdgiFinalGatherHistoryWrite;
-		if (historyRead is null || historyWrite is null)
-		{
-			_view.FinalGatherHistoryValid = false;
-			return;
-		}
-
-		var readIndex = _view.FinalGatherHistoryReadIndex;
-		var writeIndex = 1 - readIndex;
-		for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
-		{
-			_view.FinalGatherHistoryStates[slot, readIndex] = _resources.GetResourceState(historyRead[slot]);
-			_view.FinalGatherHistoryStates[slot, writeIndex] = _resources.GetResourceState(historyWrite[slot]);
-		}
-
-		_view.FinalGatherHistoryReadIndex = writeIndex;
-		_view.FinalGatherHistoryValid = true;
-	}
-
-	private void EnsureFinalGatherHistoryResources(IGfxDevice device, Int2 traceSize)
-	{
-		var changed = _view.FinalGatherHistoryDevice is not null &&
-		              (ReferenceEquals(_view.FinalGatherHistoryDevice, device) == false ||
-		               _view.FinalGatherHistoryBackendKind != device.BackendKind ||
-		               _view.FinalGatherHistorySize.X != traceSize.X ||
-		               _view.FinalGatherHistorySize.Y != traceSize.Y);
-		if (changed)
-		{
-			_view.ReleaseFinalGatherHistoryResources();
-		}
-		if (_view.FinalGatherHistoryTextures[0, 0] is not null) return;
-
-		for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
-		{
-			for (var i = 0; i < 2; i++)
-			{
-				_view.FinalGatherHistoryTextures[slot, i] = device.CreateTexture(new TextureDescriptor(
-					traceSize.X,
-					traceSize.Y,
-					DdgiFinalGatherHistorySlot.GetFormat(slot),
-					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-				_view.FinalGatherHistoryStates[slot, i] = ResourceState.UnorderedAccess;
-			}
-		}
-		_view.FinalGatherHistoryDevice = device;
-		_view.FinalGatherHistoryBackendKind = device.BackendKind;
-		_view.FinalGatherHistorySize = traceSize;
-		_view.FinalGatherHistoryReadIndex = 0;
-		_view.FinalGatherHistoryValid = false;
-	}
 
 	private RenderGraphResourceHandle CreateFinalGatherTexture(Int2 size)
 	{
@@ -3663,96 +3426,6 @@ internal sealed class RenderGraphFrameBuilder
 			TextureFormat.Rgba16Float,
 			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-	}
-
-	private void EnsureFogHistoryResources(IGfxDevice device, Int3 grid, float maxDistance)
-	{
-		var changed = _view.FogHistoryDevice is not null &&
-		              (!ReferenceEquals(_view.FogHistoryDevice, device) ||
-		               _view.FogHistoryBackendKind != device.BackendKind ||
-		               !_view.FogHistoryGrid.Equals(grid) ||
-		               MathF.Abs(_view.FogHistoryMaxDistance - maxDistance) > 1e-5f);
-		if (changed) _view.ReleaseFogHistoryResources();
-		if (_view.FogHistoryTextures[0] is not null && _view.FogHistoryTextures[1] is not null) return;
-		for (var i = 0; i < 2; i++)
-		{
-			_view.FogHistoryTextures[i] = device.CreateTexture(CreateFogTextureDescriptor(grid));
-			_view.FogHistoryStates[i] = ResourceState.UnorderedAccess;
-		}
-		_view.FogHistoryDevice = device;
-		_view.FogHistoryBackendKind = device.BackendKind;
-		_view.FogHistoryGrid = grid;
-		_view.FogHistoryMaxDistance = maxDistance;
-		_view.FogHistoryReadIndex = 0;
-		_view.FogHistoryValid = false;
-	}
-
-	private void EnsureTemporalHistoryResources(IGfxDevice device, Int2 sceneFramebufferSize, AntiAliasingMode mode)
-	{
-		var deviceChanged = _view.HistoryDevice is not null && ReferenceEquals(_view.HistoryDevice, device) == false;
-		var backendChanged = _view.HistoryBackendKind.HasValue && _view.HistoryBackendKind.Value != device.BackendKind;
-		var sizeChanged = _view.HistorySize.X != sceneFramebufferSize.X || _view.HistorySize.Y != sceneFramebufferSize.Y;
-		if (deviceChanged || backendChanged || sizeChanged || _view.HistoryMode != mode)
-		{
-			_view.ReleaseTemporalHistoryResources();
-		}
-
-		if (_view.HistoryColorTextures[0] is not null &&
-		    _view.HistoryColorTextures[1] is not null &&
-		    _view.HistoryDepthTextures[0] is not null &&
-		    _view.HistoryDepthTextures[1] is not null)
-		{
-			return;
-		}
-
-		for (var i = 0; i < 2; i++)
-		{
-			_view.HistoryColorTextures[i] = device.CreateTexture(new TextureDescriptor(
-				sceneFramebufferSize.X,
-				sceneFramebufferSize.Y,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
-			// TAA stores view depth here, zero for sky; FSR3 reuses the texture as its luma history.
-			_view.HistoryDepthTextures[i] = device.CreateTexture(new TextureDescriptor(
-				sceneFramebufferSize.X,
-				sceneFramebufferSize.Y,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-			if (mode == AntiAliasingMode.Fsr3)
-			{
-				_view.Fsr3CurrentLumaTextures[i] = device.CreateTexture(new TextureDescriptor(
-					sceneFramebufferSize.X, sceneFramebufferSize.Y, TextureFormat.Rgba16Float,
-					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-				_view.Fsr3AccumulationTextures[i] = device.CreateTexture(new TextureDescriptor(
-					sceneFramebufferSize.X, sceneFramebufferSize.Y, TextureFormat.Rgba16Float,
-					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-			}
-			_view.HistoryColorStates[i] = ResourceState.UnorderedAccess;
-			_view.HistoryDepthStates[i] = ResourceState.UnorderedAccess;
-			_view.Fsr3CurrentLumaStates[i] = ResourceState.UnorderedAccess;
-			_view.Fsr3AccumulationStates[i] = ResourceState.UnorderedAccess;
-		}
-
-		if (mode == AntiAliasingMode.Fsr3)
-		{
-			_view.Fsr3FrameInfoTexture = device.CreateTexture(new TextureDescriptor(
-				1, 1, TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-			_view.Fsr3FrameInfoState = ResourceState.UnorderedAccess;
-		}
-		_view.HistoryMode = mode;
-
-		_view.HistoryDevice = device;
-		_view.HistoryBackendKind = device.BackendKind;
-		_view.HistorySize = sceneFramebufferSize;
-		_view.HistoryReadIndex = 0;
-		_view.HistoryValid = false;
-		_view.ResetTaaHistoryThisFrame = true;
 	}
 
 	private RenderGraphResourceHandle CreateFsr3Texture(Int2 size) =>
@@ -3832,78 +3505,46 @@ internal sealed class RenderGraphFrameBuilder
 		_view.ColorPyramidValid = false;
 	}
 
-	private void EnsureDdgiHistoryResources(
-		IGfxDevice device,
-		DdgiGridShape gridShape,
-		Vector3 latticeAnchor,
-		float probeSpacing,
-		int visibilityTileInteriorSize)
+	private void EnsureFsr3HistoryResources(IGfxDevice device, Int2 sceneFramebufferSize)
 	{
-		var deviceChanged = _view.DdgiHistoryDevice is not null && ReferenceEquals(_view.DdgiHistoryDevice, device) == false;
-		var backendChanged = _view.DdgiHistoryBackendKind.HasValue && _view.DdgiHistoryBackendKind.Value != device.BackendKind;
-		var shapeChanged = _view.DdgiHistoryGridShape.Equals(gridShape) == false;
-		var latticeAnchorChanged = _view.DdgiHistoryDevice is not null && _view.DdgiHistoryLatticeAnchor != latticeAnchor;
-		var probeSpacingChanged = _view.DdgiHistoryDevice is not null &&
-		                          MathF.Abs(_view.DdgiHistoryProbeSpacing - probeSpacing) > 1e-6f;
-		var visibilityResolutionChanged = _view.DdgiHistoryDevice is not null &&
-		                                  _view.DdgiHistoryVisibilityTileInteriorSize != visibilityTileInteriorSize;
-		if (deviceChanged ||
-		    backendChanged ||
-		    shapeChanged ||
-		    latticeAnchorChanged ||
-		    probeSpacingChanged ||
-		    visibilityResolutionChanged)
+		var previousDevice = _view.Fsr3History.Device;
+		if (_view.Fsr3History.Ensure(device, sceneFramebufferSize) == false &&
+		    _view.Fsr3FrameInfoTexture is not null)
 		{
-			_view.ReleaseDdgiHistoryResources();
+			return;
 		}
 
-		var irradianceTexturesReady = true;
-		for (var coefficientIndex = 0; coefficientIndex < DdgiShCoefficientCount; coefficientIndex++)
+		// The frame info and frame index describe the accumulation in the history, so they restart with it.
+		if (_view.Fsr3FrameInfoTexture is not null)
 		{
-			irradianceTexturesReady &= _view.DdgiIrradianceTextures[coefficientIndex, 0] is not null &&
-			                           _view.DdgiIrradianceTextures[coefficientIndex, 1] is not null;
+			TemporalResourceRetirement.RetireTexture(previousDevice, _view.Fsr3FrameInfoTexture, _view.Fsr3FrameInfoState);
 		}
 
-		if (irradianceTexturesReady &&
-		    _view.DdgiVisibilityTextures[0] is not null &&
-		    _view.DdgiVisibilityTextures[1] is not null &&
-		    _view.DdgiProbeStateTextures[0] is not null &&
-		    _view.DdgiProbeStateTextures[1] is not null &&
+		_view.Fsr3FrameInfoTexture = device.CreateTexture(new TextureDescriptor(
+			1,
+			1,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+		_view.Fsr3FrameInfoState = ResourceState.UnorderedAccess;
+		_view.Fsr3FrameIndex = 0;
+	}
+
+	private void EnsureDdgiHistoryResources(IGfxDevice device, DdgiHistoryShape shape)
+	{
+		var previousDevice = _view.DdgiHistory.Device;
+		if (_view.DdgiHistory.Ensure(device, shape) == false &&
 		    _view.DdgiProbeActivityTexture is not null &&
 		    _view.DdgiIrradianceEstimatorBuffer is not null)
 		{
 			return;
 		}
 
-		var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, visibilityTileInteriorSize);
-		var shCoefficientTextureSize = DdgiUtilities.GetShCoefficientTextureSize(gridShape);
-		for (var i = 0; i < 2; i++)
-		{
-			for (var coefficientIndex = 0; coefficientIndex < DdgiShCoefficientCount; coefficientIndex++)
-			{
-				_view.DdgiIrradianceTextures[coefficientIndex, i] = device.CreateTexture(new TextureDescriptor(
-					shCoefficientTextureSize.X,
-					shCoefficientTextureSize.Y,
-					TextureFormat.Rgba16Float,
-					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-				_view.DdgiIrradianceStates[coefficientIndex, i] = ResourceState.UnorderedAccess;
-			}
-			_view.DdgiVisibilityTextures[i] = device.CreateTexture(new TextureDescriptor(
-				visibilityAtlasSize.X,
-				visibilityAtlasSize.Y,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f)));
-			_view.DdgiProbeStateTextures[i] = device.CreateTexture(new TextureDescriptor(
-				gridShape.AtlasColumns,
-				gridShape.AtlasRows,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-			_view.DdgiVisibilityStates[i] = ResourceState.UnorderedAccess;
-			_view.DdgiProbeStateStates[i] = ResourceState.UnorderedAccess;
-		}
+		// The activity texture, estimator and committed placement describe the probes the history held, so they
+		// restart with it.
+		_view.ReleaseDdgiCompanionResources(previousDevice);
+
+		var shCoefficientTextureSize = DdgiUtilities.GetShCoefficientTextureSize(shape.GridShape);
 		_view.DdgiProbeActivityTexture = device.CreateTexture(new TextureDescriptor(
 			shCoefficientTextureSize.X,
 			shCoefficientTextureSize.Y,
@@ -3912,19 +3553,10 @@ internal sealed class RenderGraphFrameBuilder
 			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 		_view.DdgiProbeActivityState = ResourceState.UnorderedAccess;
 		_view.DdgiIrradianceEstimatorBuffer = device.CreateBuffer(new BufferDescriptor(
-			DdgiUtilities.GetIrradianceEstimatorBufferSize(gridShape),
+			DdgiUtilities.GetIrradianceEstimatorBufferSize(shape.GridShape),
 			BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 		_view.DdgiIrradianceEstimatorState = ResourceState.UnorderedAccess;
-
-		_view.DdgiHistoryDevice = device;
-		_view.DdgiHistoryBackendKind = device.BackendKind;
-		_view.DdgiHistoryGridShape = gridShape;
-		_view.DdgiHistoryLatticeAnchor = latticeAnchor;
-		_view.DdgiHistoryProbeSpacing = probeSpacing;
-		_view.DdgiHistoryVisibilityTileInteriorSize = visibilityTileInteriorSize;
-		_view.DdgiHistoryReadIndex = 0;
-		_view.DdgiHistoryValid = false;
 	}
 
 	private static bool HasAmbientOcclusion(RenderConfig config)

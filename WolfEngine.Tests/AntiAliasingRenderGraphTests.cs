@@ -31,7 +31,7 @@ public sealed class AntiAliasingRenderGraphTests
 			Assert.That(names.Contains("CAS Sharpen"), Is.EqualTo(usesTaa && cas));
 			Assert.That(Resources(builder).Fsr3.InternalHistoryWrite.IsValid, Is.EqualTo(usesFsr3));
 			Assert.That(Resources(builder).HistoryColorWrite.IsValid, Is.EqualTo(enabled));
-			Assert.That(ViewState(builder).Fsr3CurrentLumaTextures[0] is not null, Is.EqualTo(usesFsr3));
+			Assert.That(ViewState(builder).Fsr3History.IsAllocated, Is.EqualTo(usesFsr3));
 		});
 		var producer = graph.Passes.Single(pass => pass.Name == (usesTaa && cas ? "CAS Sharpen" : "Tonemapping"));
 		Assert.That(graph.Passes.Single(pass => pass.Name == "Copy To Final").Reads, Does.Contain(producer.Writes.Single()));
@@ -52,17 +52,17 @@ public sealed class AntiAliasingRenderGraphTests
 		{
 			BeginFrame(builder, mode);
 			Assert.That(ViewState(builder).ResetTaaHistoryThisFrame, Is.True);
-			Assert.That(ViewState(builder).HistoryValid, Is.False);
+			Assert.That(ViewState(builder).TemporalHistory.IsValid, Is.False);
 			builder.CompleteFrame();
 			BeginFrame(builder, mode);
 			Assert.That(ViewState(builder).ResetTaaHistoryThisFrame, Is.False);
-			Assert.That(ViewState(builder).HistoryValid, Is.True);
+			Assert.That(ViewState(builder).TemporalHistory.IsValid, Is.True);
 			builder.CompleteFrame();
 		}
 		BeginFrame(builder, AntiAliasingMode.Taa, enabled: false);
-		Assert.That(ViewState(builder).HistoryValid, Is.False);
-		Assert.That(ViewState(builder).HistoryColorTextures[0], Is.Null);
-		Assert.That(ViewState(builder).Fsr3CurrentLumaTextures[0], Is.Null);
+		Assert.That(ViewState(builder).TemporalHistory.IsValid, Is.False);
+		Assert.That(ViewState(builder).TemporalHistory.IsAllocated, Is.False);
+		Assert.That(ViewState(builder).Fsr3History.IsAllocated, Is.False);
 		BeginFrame(builder, AntiAliasingMode.Taa);
 		Assert.That(ViewState(builder).ResetTaaHistoryThisFrame, Is.True);
 	}
@@ -77,16 +77,16 @@ public sealed class AntiAliasingRenderGraphTests
 		builder.CompleteFrame();
 		BeginFrame(builder, AntiAliasingMode.Taa);
 		builder.CompleteFrame();
-		Assert.That(ViewState(builder).HistoryValid, Is.True, "the primary view should have accumulated history");
+		Assert.That(ViewState(builder).TemporalHistory.IsValid, Is.True, "the primary view should have accumulated history");
 
 		var second = builder.GetViewStateForTest(RenderViewId.FromIndex(1));
 
 		Assert.Multiple(() =>
 		{
 			Assert.That(second, Is.Not.SameAs(ViewState(builder)));
-			Assert.That(second.HistoryValid, Is.False);
-			Assert.That(second.HistoryColorTextures[0], Is.Null);
-			Assert.That(second.HistorySize, Is.EqualTo(Int2.Zero));
+			Assert.That(second.TemporalHistory.IsValid, Is.False);
+			Assert.That(second.TemporalHistory.IsAllocated, Is.False);
+			Assert.That(second.TemporalHistory.Shape.Size, Is.EqualTo(Int2.Zero));
 		});
 	}
 
@@ -123,7 +123,9 @@ public sealed class AntiAliasingRenderGraphTests
 		var primary = ViewState(builder);
 		var secondId = RenderViewId.FromIndex(1);
 		var second = builder.GetViewStateForTest(secondId);
-		second.HistoryValid = true;
+		ViewHistoryTests.AccumulateOneFrame(
+			second.TemporalHistory,
+			new TemporalHistoryShape(new Int2(8, 8), AntiAliasingMode.Taa));
 
 		builder.ReleaseView(secondId);
 
@@ -131,7 +133,7 @@ public sealed class AntiAliasingRenderGraphTests
 		{
 			// A later view reusing the id must not inherit the released view's history.
 			Assert.That(builder.GetViewStateForTest(secondId), Is.Not.SameAs(second));
-			Assert.That(builder.GetViewStateForTest(secondId).HistoryValid, Is.False);
+			Assert.That(builder.GetViewStateForTest(secondId).TemporalHistory.IsValid, Is.False);
 			Assert.That(ViewState(builder), Is.SameAs(primary), "releasing another view must not disturb the primary");
 		});
 
