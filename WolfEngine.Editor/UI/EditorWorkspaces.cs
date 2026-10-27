@@ -5,6 +5,10 @@ namespace WolfEngine.Editor.UI;
 public static class EditorWindowIds
 {
 	public const string Animation = "animation";
+	public const string AnimationClipViewport = "animation-clip-viewport";
+	public const string AnimationClipBones = "animation-clip-bones";
+	public const string AnimationClipInspector = "animation-clip-inspector";
+	public const string AnimationClipTimeline = "animation-clip-timeline";
 	public const string Scene = "scene";
 	public const string Entities = "entities";
 	public const string Components = "components";
@@ -19,7 +23,17 @@ public static class EditorWindowIds
 	public static readonly HashSet<string> All =
 	[
 		Animation, Scene, Entities, Components, Assets, AssetEditor, Log, Profiler,
-		MaterialImporter, Preferences, ProjectSettings
+		MaterialImporter, Preferences, ProjectSettings,
+		AnimationClipViewport, AnimationClipBones, AnimationClipInspector, AnimationClipTimeline
+	];
+
+	/// <summary>The panels that make up the clip editor, in the order the Animate workspace opens them.</summary>
+	public static readonly string[] AnimationClipEditor =
+	[
+		AnimationClipViewport,
+		AnimationClipBones,
+		AnimationClipInspector,
+		AnimationClipTimeline
 	];
 }
 
@@ -60,6 +74,10 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 	internal static readonly Guid SceneWorkspaceId = Guid.Parse("35cc1006-e127-405e-8368-e55b9a8b2531");
 	internal static readonly Guid AssetsWorkspaceId = Guid.Parse("ca584798-3557-40f4-a1ca-b6c334f4a62c");
 	internal static readonly Guid AnimationWorkspaceId = Guid.Parse("b3181fbd-d60e-4fde-b116-78fafb25b105");
+	internal static readonly Guid AnimateWorkspaceId = Guid.Parse("6f0c2a8e-4b1d-4e7a-9c35-2d8f1e6b7a90");
+	internal const string AnimationGraphWorkspaceName = "Animation Graph";
+	internal const string AnimateWorkspaceName = "Animate";
+	private const string LegacyAnimationWorkspaceName = "Animation";
 	private const int CurrentVersion = 1;
 	private static readonly TimeSpan IniSaveDelay = TimeSpan.FromMilliseconds(500);
 
@@ -221,14 +239,50 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 			_workspaces.Add(new EditorWorkspace(AssetsWorkspaceId, "Assets",
 				[EditorWindowIds.Assets, EditorWindowIds.Components, EditorWindowIds.AssetEditor, EditorWindowIds.Log]));
 		}
-        if (preferences?.AnimationWorkspaceSeeded != true && !_workspaces.Any(w => w.Id == AnimationWorkspaceId || string.Equals(w.Name, "Animation", StringComparison.OrdinalIgnoreCase)))
-            _workspaces.Add(new EditorWorkspace(AnimationWorkspaceId, "Animation",
+		if (preferences?.AnimationGraphWorkspaceRenamed != true)
+		{
+			RenameLegacyAnimationWorkspace();
+		}
+
+        if (preferences?.AnimationWorkspaceSeeded != true && !_workspaces.Any(w => w.Id == AnimationWorkspaceId || string.Equals(w.Name, AnimationGraphWorkspaceName, StringComparison.OrdinalIgnoreCase)))
+            _workspaces.Add(new EditorWorkspace(AnimationWorkspaceId, AnimationGraphWorkspaceName,
                 [EditorWindowIds.Animation]));
+
+		// Seeded once, like the graph workspace, so deleting it is respected on later launches.
+		if (preferences?.AnimateWorkspaceSeeded != true &&
+		    _workspaces.Any(workspace =>
+			    workspace.Id == AnimateWorkspaceId ||
+			    string.Equals(workspace.Name, AnimateWorkspaceName, StringComparison.OrdinalIgnoreCase)) == false)
+		{
+			_workspaces.Add(new EditorWorkspace(AnimateWorkspaceId, AnimateWorkspaceName, EditorWindowIds.AnimationClipEditor));
+		}
+
         _activeId = preferences?.ActiveWorkspaceId is { } active && _workspaces.Any(workspace => workspace.Id == active)
 			? active
 			: _workspaces[0].Id;
         if (preferences is not null) EditorPreferences.SetWorkspaceImGuiSettings(preferences.ImGuiSettings);
 		Persist(saveToDisk: false);
+	}
+
+	/// <summary>
+	/// The graph workspace used to be called "Animation". Rename it once now that clip authoring has
+	/// its own workspace, unless the user already renamed it or another workspace took the new name.
+	/// </summary>
+	private void RenameLegacyAnimationWorkspace()
+	{
+		var workspace = _workspaces.FirstOrDefault(candidate => candidate.Id == AnimationWorkspaceId);
+		if (workspace is null ||
+		    string.Equals(workspace.Name, LegacyAnimationWorkspaceName, StringComparison.Ordinal) == false)
+		{
+			return;
+		}
+
+		if (_workspaces.Any(candidate => string.Equals(candidate.Name, AnimationGraphWorkspaceName, StringComparison.OrdinalIgnoreCase)))
+		{
+			return;
+		}
+
+		workspace.Name = AnimationGraphWorkspaceName;
 	}
 
 	private bool TryNormalizeName(string name, Guid? exceptId, out string normalized, out string error)
@@ -252,6 +306,8 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 		{
 			Version = CurrentVersion,
 			AnimationWorkspaceSeeded = true,
+			AnimationGraphWorkspaceRenamed = true,
+			AnimateWorkspaceSeeded = true,
 			ActiveWorkspaceId = _activeId,
 			ImGuiSettings = EditorPreferences.GetWorkspaceSettings()?.ImGuiSettings ?? string.Empty,
 			Workspaces = _workspaces.Select(workspace => new EditorWorkspacePreference

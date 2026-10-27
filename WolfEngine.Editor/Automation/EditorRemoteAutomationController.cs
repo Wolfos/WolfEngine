@@ -18,7 +18,7 @@ using WolfEngine.Build;
 namespace WolfEngine.Editor.Automation;
 
 /// <summary>Direct in-process automation API. Mutations are dispatched onto the editor thread.</summary>
-public sealed class EditorRemoteAutomationController
+public sealed partial class EditorRemoteAutomationController
 {
 	private readonly string _projectPath;
 	private readonly EditorCameraSystem _cameraSystem;
@@ -50,6 +50,7 @@ public sealed class EditorRemoteAutomationController
 	private bool _initialized;
 
 	private readonly IGameBuildService _gameBuildService;
+	private readonly AnimationClipEditorSession _clipEditor;
 
 	public EditorRemoteAutomationController(
 		string projectPath,
@@ -75,8 +76,10 @@ public sealed class EditorRemoteAutomationController
 		EditorCameraSystem cameraSystem,
 		IImGuiInputSink imguiInput,
 		SceneLoadRequests sceneLoadRequests,
-		IGameBuildService gameBuildService)
+		IGameBuildService gameBuildService,
+		AnimationClipEditorSession clipEditor)
 	{
+		_clipEditor = clipEditor;
 		_sceneLoadRequests = sceneLoadRequests;
 		_gameBuildService = gameBuildService;
 		_cameraSystem = cameraSystem;

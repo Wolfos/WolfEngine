@@ -65,6 +65,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private readonly IRenderer _renderer;
 	private readonly IEditorOperationService _operationService;
 	private readonly IFileDialogService _fileDialogService;
+	private readonly IEditorDocumentEditor[] _documentEditors;
 	private bool _leftCtrlDown;
 	private bool _rightCtrlDown;
 	private bool _leftShiftDown;
@@ -99,7 +100,8 @@ public sealed class EditorCommandService : IEditorCommandService
 		IRenderer renderer,
 		IEditorOperationService operationService,
 		IFileDialogService fileDialogService,
-		IInputSystem inputSystem)
+		IInputSystem inputSystem,
+		IEnumerable<IEditorDocumentEditor>? documentEditors = null)
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
@@ -113,6 +115,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
 		_fileDialogService = fileDialogService ?? throw new ArgumentNullException(nameof(fileDialogService));
 		ArgumentNullException.ThrowIfNull(inputSystem);
+		_documentEditors = documentEditors?.ToArray() ?? [];
 
 		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRedo", InputActionBinding.KeyY, callback => _redoPressedThisFrame |= callback.Value);
@@ -326,6 +329,22 @@ public sealed class EditorCommandService : IEditorCommandService
 		return _undoRedoService.Undo();
 	}
 
+	/// <summary>A document editor with keyboard focus takes undo, redo and save away from the scene.</summary>
+	private bool TryGetFocusedDocument(out IEditorDocumentEditor target)
+	{
+		foreach (var candidate in _documentEditors)
+		{
+			if (candidate.HasShortcutFocus)
+			{
+				target = candidate;
+				return true;
+			}
+		}
+
+		target = null!;
+		return false;
+	}
+
 	public bool Redo()
 	{
 		return _undoRedoService.Redo();
@@ -368,7 +387,17 @@ public sealed class EditorCommandService : IEditorCommandService
 			_backspacePressedThisFrame,
 			io.WantTextInput,
 			OperatingSystem.IsMacOS());
-		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, _interactionState.FocusedWindow);
+		// A focused document editor owns every selection and history shortcut, so none of them can
+		// reach the scene through the sticky focused window while that editor has the keyboard.
+		var hasDocument = TryGetFocusedDocument(out var document);
+		var focusedWindow = hasDocument ? EditorFocusedWindow.Document : _interactionState.FocusedWindow;
+		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, focusedWindow);
+		if (hasDocument)
+		{
+			RunDocumentShortcut(document, shortcut);
+			ResetShortcutPresses();
+			return;
+		}
 
 		switch (shortcut)
 		{
@@ -398,6 +427,40 @@ public sealed class EditorCommandService : IEditorCommandService
 				break;
 		}
 
+		ResetShortcutPresses();
+	}
+
+	/// <summary>
+	/// Shortcuts while a document editor has focus. Refresh still works everywhere; scene-only commands
+	/// such as New Scene do nothing rather than act on a window the user is not looking at.
+	/// </summary>
+	private void RunDocumentShortcut(IEditorDocumentEditor document, EditorShortcutCommand shortcut)
+	{
+		switch (shortcut)
+		{
+			case EditorShortcutCommand.Undo:
+				document.Undo();
+				break;
+			case EditorShortcutCommand.Redo:
+				document.Redo();
+				break;
+			case EditorShortcutCommand.SaveScene:
+				document.Save();
+				break;
+			case EditorShortcutCommand.RefreshAssetDatabase:
+				RefreshAssetDatabase();
+				break;
+			case EditorShortcutCommand.DuplicateFocusedSelection:
+				document.DuplicateSelection();
+				break;
+			case EditorShortcutCommand.DeleteFocusedSelection:
+				document.DeleteSelection();
+				break;
+		}
+	}
+
+	private void ResetShortcutPresses()
+	{
 		_undoPressedThisFrame = false;
 		_redoPressedThisFrame = false;
 		_newPressedThisFrame = false;
@@ -410,6 +473,11 @@ public sealed class EditorCommandService : IEditorCommandService
 
 	public void DrawPendingDialogs()
 	{
+		foreach (var editor in _documentEditors)
+		{
+			editor.DrawDialogs();
+		}
+
 		if (_openUnsavedScenePopup)
 		{
 			ImGui.OpenPopup(UnsavedScenePopupId);

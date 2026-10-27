@@ -311,6 +311,16 @@ public sealed class AnimationClipDocument
 		Clip.Loop = loop;
 	}
 
+	public void SetSkeleton(Guid skeletonId)
+	{
+		using var transaction = BeginTransaction("Change Skeleton");
+
+		Clip.Skeleton = new AssetRef<Skeleton>
+		{
+			NodeId = skeletonId
+		};
+	}
+
 	public void SetPreviewModel(Guid modelId)
 	{
 		using var transaction = BeginTransaction("Change Preview Model");

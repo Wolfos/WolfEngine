@@ -40,6 +40,151 @@ public sealed class AuthoredAnimationClipFile
 	/// <summary>Kept and round-tripped unchanged; the clip editor does not edit these yet.</summary>
 	public List<AuthoredPropertyTrack> PropertyTracks { get; set; } = [];
 
+	/// <summary>
+	/// Converts a runtime clip, typically an imported one, into an editable clip at the given frame
+	/// rate. A track whose keys all sit on frames and that interpolates linearly or in steps is copied
+	/// as it is; any other track is resampled to a linear key on every frame, which preserves its
+	/// motion at the cost of density. Property tracks are carried over unchanged.
+	/// </summary>
+	public static AuthoredAnimationClipFile FromClip(AnimationClip clip, int framesPerSecond)
+	{
+		ArgumentNullException.ThrowIfNull(clip);
+
+		framesPerSecond = Math.Clamp(framesPerSecond, 1, MaxFramesPerSecond);
+		var lengthFrames = Math.Max(0, (int)MathF.Round(clip.Duration * framesPerSecond));
+		var file = new AuthoredAnimationClipFile
+		{
+			FramesPerSecond = framesPerSecond,
+			LengthFrames = lengthFrames,
+			Loop = clip.Loop
+		};
+
+		var seen = new HashSet<AnimationBinding>();
+		foreach (var track in clip.TransformTracks)
+		{
+			// The editable format allows one track per target; a duplicate in an import would never play anyway.
+			if (seen.Add(track.Binding) == false)
+			{
+				continue;
+			}
+
+			var authored = new AuthoredTransformTrack
+			{
+				Kind = track.Binding.Kind,
+				Path = track.Binding.Path,
+				Property = track.Binding.Property
+			};
+
+			var aligned =
+				IsFrameAligned(track.Position.Times, track.Position.Interpolation, framesPerSecond, lengthFrames) &&
+				IsFrameAligned(track.Rotation.Times, track.Rotation.Interpolation, framesPerSecond, lengthFrames) &&
+				IsFrameAligned(track.Scale.Times, track.Scale.Interpolation, framesPerSecond, lengthFrames);
+			if (aligned)
+			{
+				authored.Position = CopyKeys(track.Position.Times, track.Position.Values, track.Position.Interpolation, framesPerSecond);
+				authored.Rotation = CopyKeys(track.Rotation.Times, track.Rotation.Values, track.Rotation.Interpolation, framesPerSecond);
+				authored.Scale = CopyKeys(track.Scale.Times, track.Scale.Values, track.Scale.Interpolation, framesPerSecond);
+			}
+			else
+			{
+				authored.Position = ResampleVector(track.Position, framesPerSecond, lengthFrames);
+				authored.Rotation = ResampleRotation(track.Rotation, framesPerSecond, lengthFrames);
+				authored.Scale = ResampleVector(track.Scale, framesPerSecond, lengthFrames);
+			}
+
+			if (authored.HasKeys())
+			{
+				file.TransformTracks.Add(authored);
+			}
+		}
+
+		foreach (var track in clip.PropertyTracks)
+		{
+			file.PropertyTracks.Add(AuthoredPropertyTrack.FromRuntime(track));
+		}
+
+		return file;
+	}
+
+	private const float FrameAlignmentTolerance = 1e-3f;
+
+	private static bool IsFrameAligned(float[] times, CurveInterpolation interpolation, int framesPerSecond, int lengthFrames)
+	{
+		if (times.Length == 0)
+		{
+			return true;
+		}
+
+		if (interpolation == CurveInterpolation.CubicHermite)
+		{
+			return false;
+		}
+
+		foreach (var time in times)
+		{
+			var exact = time * framesPerSecond;
+			var frame = MathF.Round(exact);
+			if (MathF.Abs(exact - frame) > FrameAlignmentTolerance || frame < 0 || frame > lengthFrames)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static AuthoredKeyCurve<T> CopyKeys<T>(float[] times, T[] values, CurveInterpolation interpolation, int framesPerSecond)
+		where T : struct
+	{
+		var curve = new AuthoredKeyCurve<T>
+		{
+			Interpolation = interpolation
+		};
+
+		for (var i = 0; i < times.Length; i++)
+		{
+			curve.Set((int)MathF.Round(times[i] * framesPerSecond), values[i]);
+		}
+
+		return curve;
+	}
+
+	private static AuthoredKeyCurve<Vector3> ResampleVector(Vector3Curve source, int framesPerSecond, int lengthFrames)
+	{
+		var curve = new AuthoredKeyCurve<Vector3>();
+		if (source.IsEmpty)
+		{
+			return curve;
+		}
+
+		var cursor = 0;
+		for (var frame = 0; frame <= lengthFrames; frame++)
+		{
+			curve.Frames.Add(frame);
+			curve.Values.Add(source.Evaluate((float)frame / framesPerSecond, ref cursor, Vector3.Zero));
+		}
+
+		return curve;
+	}
+
+	private static AuthoredKeyCurve<Quaternion> ResampleRotation(QuaternionCurve source, int framesPerSecond, int lengthFrames)
+	{
+		var curve = new AuthoredKeyCurve<Quaternion>();
+		if (source.IsEmpty)
+		{
+			return curve;
+		}
+
+		var cursor = 0;
+		for (var frame = 0; frame <= lengthFrames; frame++)
+		{
+			curve.Frames.Add(frame);
+			curve.Values.Add(source.Evaluate((float)frame / framesPerSecond, ref cursor, Quaternion.Identity));
+		}
+
+		return curve;
+	}
+
 	public static string GetClipName(string path)
 	{
 		var fileName = System.IO.Path.GetFileName(path);

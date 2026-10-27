@@ -320,4 +320,75 @@ public sealed class EditorAutomationTools
     [McpServerTool(Name = "capture_animation_preview"), Description("Capture the isolated animation preview render view without editor UI. Keep the Animation window visible.")]
     public Task<FrameCaptureResult> CaptureAnimationPreview(string outputPath, CancellationToken cancellationToken) => _controller.CaptureAnimationPreviewAsync(outputPath, cancellationToken);
 
+	[McpServerTool(Name = "open_clip_editor"), Description("Open an animation clip asset in the Animate workspace. Authored .anim.json clips are editable; imported clips open read-only. If the open clip has unsaved edits, a prompt is shown unless discardUnsavedChanges is true.")]
+	public Task<AnimationClipEditorStateResult> OpenClipEditor(string assetId, bool discardUnsavedChanges = false, CancellationToken cancellationToken = default) =>
+		_controller.OpenClipEditorAsync(Guid.Parse(assetId), discardUnsavedChanges, cancellationToken);
+
+	[McpServerTool(Name = "create_clip"), Description("Create an authored .anim.json clip in a project folder, bound to a skeleton asset, and open it. Unsaved edits to the previously open clip are discarded.")]
+	public Task<AnimationClipEditorStateResult> CreateClip(string folder, string name, string skeletonId, CancellationToken cancellationToken = default) =>
+		_controller.CreateClipAsync(folder, name, Guid.Parse(skeletonId), cancellationToken);
+
+	[McpServerTool(Name = "duplicate_clip"), Description("Copy an imported clip into a new editable .anim.json next to its source and open it. Keys off frame boundaries or with tangents are resampled to one key per frame.")]
+	public Task<AnimationClipEditorStateResult> DuplicateClip(string assetId, CancellationToken cancellationToken = default) =>
+		_controller.DuplicateClipAsync(Guid.Parse(assetId), cancellationToken);
+
+	[McpServerTool(Name = "select_bone"), Description("Select a bone in the clip editor by name, or clear the selection when bone is omitted.")]
+	public Task<AnimationClipEditorStateResult> SelectBone(string? bone = null, CancellationToken cancellationToken = default) =>
+		_controller.SelectClipBoneAsync(bone, cancellationToken);
+
+	[McpServerTool(Name = "set_bone_local_transform"), Description("Set a bone's local transform at the playhead like the inspector does: an unkeyed edit, or a key when Auto Key is on. Pass three numbers for any of position, rotationDegrees (Euler) and scale; omitted parts keep their value.")]
+	public Task<AnimationClipEditorStateResult> SetBoneLocalTransform(
+		string bone,
+		float[]? position = null,
+		float[]? rotationDegrees = null,
+		float[]? scale = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetClipBoneLocalTransformAsync(bone, ToVector(position), ToVector(rotationDegrees), ToVector(scale), cancellationToken);
+
+	[McpServerTool(Name = "set_playhead"), Description("Move the clip editor playhead to a frame and stop playback. Moving to a different frame discards unkeyed edits.")]
+	public Task<AnimationClipEditorStateResult> SetPlayhead(int frame, CancellationToken cancellationToken = default) =>
+		_controller.SetClipPlayheadAsync(frame, cancellationToken);
+
+	[McpServerTool(Name = "set_auto_key"), Description("Turn the clip editor's Auto Key on or off.")]
+	public Task<AnimationClipEditorStateResult> SetAutoKey(bool enabled, CancellationToken cancellationToken = default) =>
+		_controller.SetClipAutoKeyAsync(enabled, cancellationToken);
+
+	[McpServerTool(Name = "set_key"), Description("Key a bone's current local transform, including unkeyed edits, at the playhead. Omit bone to key the selected bone.")]
+	public Task<AnimationClipEditorStateResult> SetKey(string? bone = null, CancellationToken cancellationToken = default) =>
+		_controller.SetClipKeyAsync(bone, cancellationToken);
+
+	[McpServerTool(Name = "edit_clip_keys"), Description("Select dopesheet keys given as bone@frame, then apply operation: select, move, duplicate or delete. Move and duplicate shift by frameDelta and fail if a key would leave the clip.")]
+	public Task<AnimationClipEditorStateResult> EditClipKeys(string operation, string[] keys, int frameDelta = 0, CancellationToken cancellationToken = default) =>
+		_controller.EditClipKeysAsync(operation, keys, frameDelta, cancellationToken);
+
+	[McpServerTool(Name = "clip_history"), Description("Undo or redo in the open clip's own history, separate from scene undo. operation is undo or redo.")]
+	public Task<AnimationClipEditorStateResult> ClipHistory(string operation, CancellationToken cancellationToken = default) =>
+		_controller.ClipHistoryAsync(operation, cancellationToken);
+
+	[McpServerTool(Name = "save_clip"), Description("Save the open clip to its .anim.json file and reimport it.")]
+	public Task<AnimationClipEditorStateResult> SaveClip(CancellationToken cancellationToken = default) =>
+		_controller.SaveClipAsync(cancellationToken);
+
+	[McpServerTool(Name = "get_clip_editor_state"), Description("Inspect the clip editor: open clip, dirty state, playhead, selection, keyed frames per bone, unkeyed bones, the selected bone's local transform and a hash of the preview pose.")]
+	public Task<AnimationClipEditorStateResult> GetClipEditorState(CancellationToken cancellationToken = default) =>
+		_controller.GetClipEditorStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "capture_clip_preview"), Description("Capture the clip editor's preview render view without editor UI. Keep the Clip Viewport visible and wait for render frames after changes.")]
+	public Task<FrameCaptureResult> CaptureClipPreview(string outputPath, CancellationToken cancellationToken = default) =>
+		_controller.CaptureClipPreviewAsync(outputPath, cancellationToken);
+
+	private static System.Numerics.Vector3? ToVector(float[]? values)
+	{
+		if (values is null)
+		{
+			return null;
+		}
+
+		if (values.Length != 3)
+		{
+			throw new ArgumentException("Vectors take exactly three numbers.");
+		}
+
+		return new System.Numerics.Vector3(values[0], values[1], values[2]);
+	}
 }

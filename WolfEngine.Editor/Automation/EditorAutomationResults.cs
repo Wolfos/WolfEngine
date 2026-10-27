@@ -205,3 +205,36 @@ public sealed record AnimationGraphInspectionResult(string? Diagnostic, float Ti
 {
     public ulong PoseHash { get; init; }
 }
+
+/// <summary>The clip editor as automation sees it: the open clip, selection, playhead, keys and preview pose.</summary>
+/// <param name="KeyFrames">Keyed frames per bone name.</param>
+/// <param name="UnkeyedBones">Bones with edits that are shown but not keyed.</param>
+/// <param name="SelectedBoneLocal">The selected bone's local transform at the playhead, as position, Euler degrees and scale.</param>
+/// <param name="PreviewPoseHash">Hash of the preview pose, or zero without a preview. Changes whenever any bone moves.</param>
+public sealed record AnimationClipEditorStateResult(
+	string? AssetId,
+	string ClipName,
+	string? Diagnostic,
+	bool IsReadOnly,
+	bool IsDirty,
+	bool IsPromptPending,
+	int FramesPerSecond,
+	int LengthFrames,
+	bool Loop,
+	float PlayheadFrame,
+	bool IsPlaying,
+	bool AutoKey,
+	string? SkeletonId,
+	int SkeletonBoneCount,
+	string? PreviewModelId,
+	string? SelectedBone,
+	AnimationClipBoneTransformResult? SelectedBoneLocal,
+	IReadOnlyDictionary<string, int[]> KeyFrames,
+	IReadOnlyList<string> UnkeyedBones,
+	int SelectedKeyCount,
+	bool CanUndo,
+	bool CanRedo,
+	ulong PreviewPoseHash);
+
+public sealed record AnimationClipBoneTransformResult(float[] Position, float[] RotationDegrees, float[] Scale);
+
