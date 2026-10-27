@@ -15,13 +15,16 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     private readonly IEditorProjectService _project;
     private readonly IProjectAssetPipelineService _pipeline;
     private readonly IAssetSelectionService _selection;
+    private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
+    private readonly IIconManager _icons;
     private readonly IEditorWorkspaceService _workspaces;
     private readonly IRenderViewHost _host;
     private readonly EditorRenderViews _views;
     private readonly EditorViewportStateBus _viewUi;
     private readonly Dictionary<Guid, AnimationDocument> _documents = new();
     private AnimationDocument? _document;
-    private Guid _assetId, _selectedNode, _connectFrom, _modelId, _setId;
+    private Guid _assetId, _selectedNode, _connectFrom, _modelId;
+    private AssetRef<AnimationSet> _previewSet;
     private Guid _contextNode;
     private Vector2 _contextCanvasPosition;
     private string? _gestureSnapshot;
@@ -38,8 +41,19 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     public string? Diagnostic => _diagnostic;
     public RenderViewId? PreviewView => _preview?.View;
     public AnimationWindow(IEditorProjectService project, IProjectAssetPipelineService pipeline, IAssetSelectionService selection,
-        IEditorWorkspaceService workspaces, IRenderViewHost host, EditorRenderViews views, EditorViewportStateBus viewUi)
-    { _project = project; _pipeline = pipeline; _selection = selection; _workspaces = workspaces; _host = host; _views = views; _viewUi = viewUi; }
+        IEditorWorkspaceService workspaces, IRenderViewHost host, EditorRenderViews views, EditorViewportStateBus viewUi,
+        IPropertyDrawerRegistry propertyDrawerRegistry, IIconManager icons)
+    {
+        _project = project;
+        _pipeline = pipeline;
+        _selection = selection;
+        _workspaces = workspaces;
+        _host = host;
+        _views = views;
+        _viewUi = viewUi;
+        _propertyDrawerRegistry = propertyDrawerRegistry;
+        _icons = icons;
+    }
     public void Open(AssetDatabaseEntry asset)
     {
         CheckProject();
@@ -59,7 +73,9 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     {
         if (_projectPath == _project.ProjectRootPath) return;
         DisposePreview(); _documents.Clear(); _document = null; _projectPath = _project.ProjectRootPath;
-        _assetId = _modelId = _setId = Guid.Empty; _liveEntity = default;
+        _assetId = _modelId = Guid.Empty;
+        _previewSet = default;
+        _liveEntity = default;
     }
     public override void OnHidden() { CheckProject(); if (_preview is not null) _viewUi.PublishUiState(_preview.View, SceneViewportUiState.Hidden); }
     public void Dispose() => DisposePreview();
@@ -125,34 +141,11 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         try { _document.Save(); var source = _project.TryGetAsset(_assetId, out var asset) ? asset.RelativeSourcePath : null; if (source is not null) _project.RefreshAssetSource(source); }
         catch (Exception exception) { _diagnostic = exception.Message; }
     }
-    public static bool DataAssetChoice<T>(IEditorProjectService project, string label, ref Guid id) where T : IDataAsset
+    private bool DrawAssetRef<T>(string label, ref AssetRef<T> value)
     {
-        var current = project.TryGetAsset(id, out var selected) ? selected.RelativeSourcePath : "None";
-        var changed = false;
-        if (ImGui.BeginCombo(label, current))
-        {
-            if (ImGui.Selectable("None", id == Guid.Empty)) { id = Guid.Empty; changed = true; }
-            foreach (var asset in project.CurrentAssetDatabase.Assets)
-                if (asset.Type == AssetType.DataAsset && asset.TryGetSummary<DataAssetSummary>(out var summary) &&
-                    summary.DataAssetType.StartsWith(typeof(T).FullName + ",", StringComparison.Ordinal) &&
-                    ImGui.Selectable(asset.RelativeSourcePath + "##" + asset.Id, id == asset.Id))
-                { id = asset.Id; changed = true; }
-            ImGui.EndCombo();
-        }
-        return changed;
-    }
-    public static bool AssetChoice(IEditorProjectService project, string label, AssetType type, ref Guid id)
-    {
-        var current = project.TryGetAsset(id, out var selected) ? selected.RelativeSourcePath : "None";
-        var changed = false;
-        if (ImGui.BeginCombo(label, current))
-        {
-            if (ImGui.Selectable("None", id == Guid.Empty)) { id = Guid.Empty; changed = true; }
-            foreach (var asset in project.CurrentAssetDatabase.Assets)
-                if (asset.Type == type && ImGui.Selectable(asset.RelativeSourcePath + "##" + asset.Id, id == asset.Id)) { id = asset.Id; changed = true; }
-            ImGui.EndCombo();
-        }
-        return changed;
+        var selectionButton = new AssetLinkSelectionButton(_icons.Get("search"), assetId => _selection.Select(assetId));
+
+        return _propertyDrawerRegistry.DrawAssetRef(label, ref value, selectionButton);
     }
     private void DrawGraph(AnimationGraph graph)
     {
@@ -311,7 +304,14 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
             var sequence = node.SequenceParameter; ParameterChoice(graph, "Action sequence", ref sequence); node.SequenceParameter = sequence;
         }
         var restart = node.RestartOnActivation; if (ImGui.Checkbox("Restart when activated", ref restart)) node.RestartOnActivation = restart;
-        if (node.Kind == AnimationNodeKind.MaskedBlend) { var mask = node.MaskId; DataAssetChoice<BoneMask>(_project, "Bone mask", ref mask); node.MaskId = mask; }
+        if (node.Kind == AnimationNodeKind.MaskedBlend)
+        {
+            var mask = node.Mask;
+            if (DrawAssetRef("Bone mask", ref mask))
+            {
+                node.Mask = mask;
+            }
+        }
         for (var i = 0; i < node.Inputs.Count; i++)
         {
             ImGui.PushID(i); var input = node.Inputs[i];
@@ -374,7 +374,8 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     }
     private void DrawPreview()
     {
-        var model = _modelId; var set = _setId;
+        var model = _modelId;
+        var set = _previewSet;
         var changed = false;
         var current = _project.TryGetAsset(model, out var modelAsset) ? modelAsset.RelativeSourcePath : "None";
         if (ImGui.BeginCombo("Preview model / prefab", current))
@@ -384,8 +385,9 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
                 if (asset.Type is AssetType.Model3D or AssetType.Prefab && ImGui.Selectable(asset.RelativeSourcePath + "##" + asset.Id, model == asset.Id)) { model = asset.Id; changed = true; }
             ImGui.EndCombo();
         }
-        changed |= DataAssetChoice<AnimationSet>(_project, "Preview clip set", ref set);
-        _modelId = model; _setId = set;
+        changed |= DrawAssetRef("Preview clip set", ref set);
+        _modelId = model;
+        _previewSet = set;
         if (changed || _document?.Revision != _compiledRevision) TryCompilePreview();
         if (_preview is null) return;
         var instance = _preview.Instance;
@@ -413,7 +415,7 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         try
         {
             var graph = (AnimationGraph)_document.Asset;
-            var clips = _setId == Guid.Empty ? null : AssetDatabase.GetInstance<AnimationSet>(_setId);
+            var clips = _previewSet.IsValid ? _previewSet.Asset : null;
             object? Resolve(Guid id, Type type) => id == _assetId && type == typeof(AnimationGraph) ? graph : Animator.Resolve(id, type);
             var preview = new AnimationPreviewScene(_host, _views, _viewUi, _pipeline, _project, _modelId, graph, clips, Resolve);
             var previous = _preview?.Instance;
@@ -440,7 +442,12 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     public void ConfigurePreview(Guid assetId, Guid modelId, Guid setId)
     {
         if (!_project.TryGetAsset(assetId, out var asset)) throw new InvalidOperationException("Animation asset is missing.");
-        Open(asset); _modelId = modelId; _setId = setId;
+        Open(asset);
+        _modelId = modelId;
+        _previewSet = new AssetRef<AnimationSet>
+        {
+            NodeId = setId
+        };
         if (!TryCompilePreview()) throw new InvalidOperationException(_diagnostic ?? "Preview could not compile.");
     }
     public void EditGraph(string operation, Guid nodeId, int inputIndex, Guid inputId)

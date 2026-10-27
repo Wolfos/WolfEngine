@@ -2,7 +2,6 @@ using System.Collections;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Editor.Projects;
@@ -59,8 +58,6 @@ internal static class AssetDependencyCollector
 
 				if (visitedTypes.Add(type) == false) continue;
 			}
-
-			AddAnimationDependencies(entry.Value, AddDependency);
 
 			switch (plan.TypeInfo.Kind)
 			{
@@ -143,34 +140,6 @@ internal static class AssetDependencyCollector
 		}
 
 		return new TraversalPlan(typeInfo, assetIdGetter, dictionaryValueGetter);
-	}
-
-	private static void AddAnimationDependencies(object value, Action<Guid> addDependency)
-	{
-		// These authoring formats predate AssetRef<T>. Keep their GUID representation compatible.
-		switch (value)
-		{
-			case AnimationSet set:
-				addDependency(set.SkeletonId);
-				foreach (var clipId in set.Clips.Values)
-				{
-					addDependency(clipId);
-				}
-
-				break;
-
-			case AnimationSequence sequence:
-				addDependency(sequence.ClipId);
-				break;
-
-			case BoneMask mask:
-				addDependency(mask.SkeletonId);
-				break;
-
-			case AnimationNode node:
-				addDependency(node.MaskId);
-				break;
-		}
 	}
 
 	private sealed record TraversalPlan(

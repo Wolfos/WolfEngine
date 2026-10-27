@@ -150,9 +150,9 @@ public sealed class DataAssetEditor
 
 	private bool DrawAnimationSet(AnimationSet set)
 	{
-		var skeleton = set.SkeletonId;
-		var changed = AnimationWindow.AssetChoice(_projectService, "Skeleton", AssetType.Skeleton, ref skeleton);
-		set.SkeletonId = skeleton;
+		var skeleton = set.Skeleton;
+		var changed = DrawAssetRef("Skeleton", ref skeleton);
+		set.Skeleton = skeleton;
 		foreach (var slot in set.Clips.Keys.ToArray())
 		{
 			ImGui.PushID(slot);
@@ -165,10 +165,10 @@ public sealed class DataAssetEditor
 				set.Clips.Add(name, clip);
 				changed = true;
 			}
-			var id = set.Clips.GetValueOrDefault(name, set.Clips.GetValueOrDefault(slot));
-			if (AnimationWindow.DataAssetChoice<AnimationSequence>(_projectService, "Clip", ref id))
+			var sequence = set.Clips.GetValueOrDefault(name, set.Clips.GetValueOrDefault(slot));
+			if (DrawAssetRef("Clip", ref sequence))
 			{
-				set.Clips[name] = id;
+				set.Clips[name] = sequence;
 				changed = true;
 			}
 			if (ImGui.Button("Remove slot")) { set.Clips.Remove(name); changed = true; }
@@ -178,7 +178,7 @@ public sealed class DataAssetEditor
 		{
 			var name = "Clip" + set.Clips.Count;
 			while (set.Clips.ContainsKey(name)) name += "_";
-			set.Clips.Add(name, Guid.Empty);
+			set.Clips.Add(name, default);
 			changed = true;
 		}
 		return changed;
@@ -189,10 +189,12 @@ public sealed class DataAssetEditor
 		var changed = false;
 		var speed = sequence.PlaybackSpeed;
 		if (ImGui.InputFloat("Playback speed", ref speed)) { sequence.PlaybackSpeed = speed; changed = true; }
-		var clipId = sequence.ClipId;
-		changed |= AnimationWindow.AssetChoice(_projectService, "Imported clip", AssetType.AnimationClip, ref clipId);
-		sequence.ClipId = clipId;
-		var duration = sequence.ClipId == Guid.Empty ? 1f : AssetDatabase.GetInstance<AnimationClip>(sequence.ClipId)?.Duration ?? 1f;
+		var clip = sequence.Clip;
+		changed |= DrawAssetRef("Imported clip", ref clip);
+		sequence.Clip = clip;
+		var duration = sequence.Clip.IsValid
+			? sequence.Clip.Asset?.Duration ?? 1f
+			: 1f;
 		ImGui.SliderFloat("Timeline seconds", ref _clipScrubTime, 0, Math.Max(duration, .01f));
 		for (var i = 0; i < sequence.Curves.Count; i++)
 		{
@@ -287,9 +289,9 @@ public sealed class DataAssetEditor
 
 	private bool DrawBoneMask(BoneMask mask)
 	{
-		var skeleton = mask.SkeletonId;
-		var changed = AnimationWindow.AssetChoice(_projectService, "Skeleton", AssetType.Skeleton, ref skeleton);
-		mask.SkeletonId = skeleton;
+		var skeleton = mask.Skeleton;
+		var changed = DrawAssetRef("Skeleton", ref skeleton);
+		mask.Skeleton = skeleton;
 		for (var i = 0; i < mask.Bones.Count; i++)
 		{
 			ImGui.PushID(i);
@@ -444,15 +446,25 @@ public sealed class DataAssetEditor
 		return true;
 	}
 
+	private bool DrawAssetRef<T>(string label, ref AssetRef<T> value)
+	{
+		return _propertyDrawerRegistry.DrawAssetRef(label, ref value, CreateAssetLinkSelectionButton());
+	}
+
 	private PropertyDrawerContext CreatePropertyDrawerContext(string label, Type valueType, object? value)
 	{
 		return new PropertyDrawerContext(
 			label,
 			valueType,
 			value,
-			AssetLinkSelectionButton: new AssetLinkSelectionButton(
-				_icons.Get("search"),
-				assetId => _assetSelectionService.Select(assetId)));
+			AssetLinkSelectionButton: CreateAssetLinkSelectionButton());
+	}
+
+	private AssetLinkSelectionButton CreateAssetLinkSelectionButton()
+	{
+		return new AssetLinkSelectionButton(
+			_icons.Get("search"),
+			assetId => _assetSelectionService.Select(assetId));
 	}
 
 	internal PropertyDrawerResult DrawValue(string label, Type valueType, object? value)

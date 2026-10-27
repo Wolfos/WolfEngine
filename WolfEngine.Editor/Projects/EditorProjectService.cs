@@ -194,6 +194,9 @@ public sealed class EditorProjectService : IEditorProjectService
 			var manifest = EditorProjectManifestFile.Load(fullProjectRoot);
 			ValidateManifest(fullProjectRoot, manifest);
 			var shouldRebuildAssetDatabase = Directory.Exists(libraryPath) == false;
+
+			// Upgrade sources before importing them; the importer cannot read the old reference shape.
+			var migratedAnimationAssets = AnimationAssetRefMigration.UpgradeProject(fullProjectRoot);
 			_projectRootPath = fullProjectRoot;
 			_shaderProvider?.SetProjectRoot(_projectRootPath);
 			_projectManifest = manifest;
@@ -204,6 +207,11 @@ public sealed class EditorProjectService : IEditorProjectService
 			if (shouldRebuildAssetDatabase)
 			{
 				_notificationService?.ReportInfo("Library folder was missing. Rebuilt the asset database from project sources.");
+			}
+
+			if (migratedAnimationAssets > 0)
+			{
+				_notificationService?.ReportInfo($"Upgraded {migratedAnimationAssets} animation assets to asset references.");
 			}
 			ClearUndoHistory();
 			return true;

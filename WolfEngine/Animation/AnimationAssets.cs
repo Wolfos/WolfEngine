@@ -72,7 +72,7 @@ public sealed class AnimationNode
 	public bool RestartOnActivation { get; set; } = true;
 	public string TimeParameter { get; set; } = "";
 	public string SequenceParameter { get; set; } = "";
-	public Guid MaskId { get; set; }
+	public AssetRef<BoneMask> Mask { get; set; }
 	public List<float> Thresholds { get; set; } = [];
 	public List<AnimationTransition> Transitions { get; set; } = [];
 	public string Curve { get; set; } = "";
@@ -91,8 +91,9 @@ public sealed class AnimationNodeLayout
 public sealed class AnimationGraph
 {
 	public const string Extension = ".animgraph.json";
+	public const int CurrentVersion = 2;
 
-	public int Version { get; set; } = 1;
+	public int Version { get; set; } = CurrentVersion;
 	public List<AnimationParameter> Parameters { get; set; } = [];
 	public List<AnimationNode> Nodes { get; set; } = [];
 	public Guid Output { get; set; }
@@ -104,10 +105,11 @@ public sealed class AnimationSet : IDataAsset
 {
 	public const string Extension = DataAssetFile.FileExtension;
 	public const string LegacyExtension = ".animset.json";
+	public const int CurrentVersion = 2;
 
-	public int Version { get; set; } = 1;
-	public Guid SkeletonId { get; set; }
-	public Dictionary<string, Guid> Clips { get; set; } = new(StringComparer.Ordinal);
+	public int Version { get; set; } = CurrentVersion;
+	public AssetRef<Skeleton> Skeleton { get; set; }
+	public Dictionary<string, AssetRef<AnimationSequence>> Clips { get; set; } = new(StringComparer.Ordinal);
 }
 
 public sealed class AnimationMarker
@@ -138,9 +140,10 @@ public sealed class AnimationSequence : IDataAsset
 {
 	public const string Extension = DataAssetFile.FileExtension;
 	public const string LegacyExtension = ".animclip.json";
+	public const int CurrentVersion = 2;
 
-	public int Version { get; set; } = 1;
-	public Guid ClipId { get; set; }
+	public int Version { get; set; } = CurrentVersion;
+	public AssetRef<AnimationClip> Clip { get; set; }
 	public float PlaybackSpeed { get; set; } = 1;
 	public List<AnimationCurve> Curves { get; set; } = [];
 	public List<AnimationMarker> Markers { get; set; } = [];
@@ -158,9 +161,10 @@ public sealed class BoneMask : IDataAsset
 {
 	public const string Extension = DataAssetFile.FileExtension;
 	public const string LegacyExtension = ".bonemask.json";
+	public const int CurrentVersion = 2;
 
-	public int Version { get; set; } = 1;
-	public Guid SkeletonId { get; set; }
+	public int Version { get; set; } = CurrentVersion;
+	public AssetRef<Skeleton> Skeleton { get; set; }
 	public List<BoneMaskEntry> Bones { get; set; } = [];
 
 	public float[] Compile(Skeleton skeleton)

@@ -18,10 +18,10 @@ public sealed class AnimationGraphTests
         foreach (var item in clips ?? [])
         {
             var clipId = Guid.NewGuid(); var sequenceId = Guid.NewGuid(); assets[clipId] = item.Value;
-            var sequence = sequences?.GetValueOrDefault(item.Key) ?? new AnimationSequence(); sequence.ClipId = clipId;
-            assets[sequenceId] = sequence; set.Clips[item.Key] = sequenceId;
+            var sequence = sequences?.GetValueOrDefault(item.Key) ?? new AnimationSequence(); sequence.Clip = new() { NodeId = clipId };
+            assets[sequenceId] = sequence; set.Clips[item.Key] = new() { NodeId = sequenceId };
         }
-        if (mask is not null) foreach (var node in graph.Nodes.Where(n => n.Kind == AnimationNodeKind.MaskedBlend)) { node.MaskId = Guid.NewGuid(); assets[node.MaskId] = mask; }
+        if (mask is not null) foreach (var node in graph.Nodes.Where(n => n.Kind == AnimationNodeKind.MaskedBlend)) { node.Mask = new() { NodeId = Guid.NewGuid() }; assets[node.Mask.NodeId] = mask; }
         return AnimationGraphCompiler.Compile(graph, _skeleton, set, (id, _) => assets.GetValueOrDefault(id));
     }
     private static AnimationGraph Graph(AnimationNode result, params AnimationNode[] nodes)

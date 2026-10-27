@@ -43,8 +43,8 @@ public static class AnimationLegacyMigration
                         var graph = new AnimationGraph { Nodes = [clip, output], Output = output.Id,
                             Parameters = [new() { Name = "Playing", Type = AnimationParameterType.Bool, Default = playing ? 1 : 0 }],
                             Layout = [new() { NodeId = clip.Id, X = 20, Y = 20 }, new() { NodeId = output.Id, X = 250, Y = 20 }] };
-                        Write(sequenceId, key + ".clip" + AnimationSequence.Extension, new AnimationSequence { ClipId = clipId }, AssetType.DataAsset);
-                        Write(setId, key + ".set" + AnimationSet.Extension, new AnimationSet { SkeletonId = skeletonId, Clips = new() { ["Clip"] = sequenceId } }, AssetType.DataAsset);
+                        Write(sequenceId, key + ".clip" + AnimationSequence.Extension, new AnimationSequence { Clip = new() { NodeId = clipId } }, AssetType.DataAsset);
+                        Write(setId, key + ".set" + AnimationSet.Extension, new AnimationSet { Skeleton = new() { NodeId = skeletonId }, Clips = new() { ["Clip"] = new() { NodeId = sequenceId } } }, AssetType.DataAsset);
                         Write(graphId, key + AnimationGraph.Extension, graph, AssetType.AnimationGraph);
                         data["GraphAsset"] = new JsonObject { ["NodeId"] = graphId }; data["ClipSetAsset"] = new JsonObject { ["NodeId"] = setId };
                     }
@@ -86,7 +86,11 @@ public static class AnimationLegacyMigration
                 var newPath = oldPath[..^".json".Length] + DataAssetFile.FileExtension;
                 if (File.Exists(newPath))
                     throw new IOException($"Cannot migrate '{oldPath}': '{newPath}' already exists.");
-                var asset = (IDataAsset)AnimationAssetJson.Read(oldPath, type);
+                var source = JsonNode.Parse(File.ReadAllText(oldPath)) as JsonObject
+                    ?? throw new InvalidOperationException($"Animation asset '{oldPath}' is empty.");
+                AnimationAssetRefMigration.UpgradeDataAssetData(source, type);
+                var asset = (IDataAsset)(source.Deserialize(type, AnimationAssetJson.Options)
+                    ?? throw new InvalidOperationException($"Animation asset '{oldPath}' is empty."));
                 var metadata = metadataStore.Load(oldPath + ".meta");
                 store.SaveAsset(newPath, type, asset);
                 metadata.ImporterId = AssetImporterIds.DataAsset;

@@ -31,6 +31,30 @@ public interface IPropertyDrawerRegistry
 	PropertyDrawerResult Draw(PropertyDrawerContext context);
 }
 
+public static class PropertyDrawerRegistryExtensions
+{
+	/// <summary>Draws a hand-placed asset field with the same picker the generic inspectors use.</summary>
+	public static bool DrawAssetRef<T>(
+		this IPropertyDrawerRegistry registry,
+		string label,
+		ref AssetRef<T> value,
+		AssetLinkSelectionButton? selectionButton = null)
+	{
+		var result = registry.Draw(new PropertyDrawerContext(
+			label,
+			typeof(AssetRef<T>),
+			value,
+			AssetLinkSelectionButton: selectionButton));
+		if (result.Changed == false || result.Value is not AssetRef<T> nextValue)
+		{
+			return false;
+		}
+
+		value = nextValue;
+		return true;
+	}
+}
+
 public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 {
 	private const string AssetLinkPickerPopupId = "AssetLinkPickerPopup";

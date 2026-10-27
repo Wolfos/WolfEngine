@@ -16,7 +16,9 @@ public static class Program
 	{
 		if (args.Length == 2 && args[0] == "--migrate-animation")
         {
-            Console.WriteLine($"Migrated {AnimationLegacyMigration.UpgradeProject(Path.GetFullPath(args[1]))} animator components and animation assets.");
+            var projectRoot = Path.GetFullPath(args[1]);
+            Console.WriteLine($"Migrated {AnimationLegacyMigration.UpgradeProject(projectRoot)} animator components and animation assets.");
+            Console.WriteLine($"Upgraded {AnimationAssetRefMigration.UpgradeProject(projectRoot)} animation assets to asset references.");
             return;
         }
         using var application = EditorApplication.Create();

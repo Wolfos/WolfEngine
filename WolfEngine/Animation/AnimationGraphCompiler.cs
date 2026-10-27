@@ -46,7 +46,8 @@ public sealed class CompiledAnimationGraph
 	internal CompiledAnimationGraph(AnimationGraph graph, Skeleton skeleton, AnimationSet? set, Func<Guid, Type, object?> resolve)
 	{
 		Skeleton = skeleton;
-		if (graph.Version != 1 || (set is not null && set.Version != 1))
+		if (graph.Version != AnimationGraph.CurrentVersion ||
+		    (set is not null && set.Version != AnimationSet.CurrentVersion))
 		{
 			throw new InvalidOperationException("Unsupported animation asset version.");
 		}
@@ -147,23 +148,24 @@ public sealed class CompiledAnimationGraph
 
 			if (node.Kind == AnimationNodeKind.Clip)
 			{
-				if (set is null || set.Clips.TryGetValue(node.ClipSlot, out var sequenceId) == false)
+				if (set is null || set.Clips.TryGetValue(node.ClipSlot, out var sequenceRef) == false)
 				{
 					throw new InvalidOperationException($"Missing clip slot '{node.ClipSlot}'.");
 				}
 
-				var sequence = resolve(sequenceId, typeof(AnimationSequence)) as AnimationSequence
+				var sequence = resolve(sequenceRef.NodeId, typeof(AnimationSequence)) as AnimationSequence
 					?? throw new InvalidOperationException($"Unresolved sequence '{node.ClipSlot}'.");
-				var clip = resolve(sequence.ClipId, typeof(AnimationClip)) as AnimationClip
+				var clip = resolve(sequence.Clip.NodeId, typeof(AnimationClip)) as AnimationClip
 					?? throw new InvalidOperationException($"Unresolved imported clip '{node.ClipSlot}'.");
 				Clips[i] = new BoundAnimationClip(clip, sequence, skeleton, transforms, properties, curveNames);
 			}
 
 			if (node.Kind == AnimationNodeKind.MaskedBlend)
 			{
-				var mask = resolve(node.MaskId, typeof(BoneMask)) as BoneMask
+				var mask = resolve(node.Mask.NodeId, typeof(BoneMask)) as BoneMask
 					?? throw new InvalidOperationException($"Missing mask for '{node.Name}'.");
-				if (mask.SkeletonId != Guid.Empty && ReferenceEquals(resolve(mask.SkeletonId, typeof(Skeleton)), skeleton) == false)
+				if (mask.Skeleton.IsValid &&
+				    ReferenceEquals(resolve(mask.Skeleton.NodeId, typeof(Skeleton)), skeleton) == false)
 				{
 					throw new InvalidOperationException($"Mask '{node.Name}' targets another skeleton.");
 				}
@@ -241,7 +243,9 @@ public sealed class CompiledAnimationGraph
 			}
 		}
 
-		if (set?.SkeletonId is { } skeletonId && skeletonId != Guid.Empty && ReferenceEquals(resolve(skeletonId, typeof(Skeleton)), skeleton) == false)
+		if (set is not null &&
+		    set.Skeleton.IsValid &&
+		    ReferenceEquals(resolve(set.Skeleton.NodeId, typeof(Skeleton)), skeleton) == false)
 		{
 			throw new InvalidOperationException("Clip set targets a different skeleton.");
 		}
