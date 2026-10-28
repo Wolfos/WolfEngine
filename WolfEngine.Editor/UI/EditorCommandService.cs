@@ -1,4 +1,5 @@
 using ImGuiNET;
+using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Input;
 using WolfEngine.Rendering.Shaders;
@@ -22,6 +23,7 @@ public interface IEditorCommandService
 	void BindDeletionHandlers(IEditorEntityDeletionHandler? entityDeletionHandler, IEditorAssetDeletionHandler? assetDeletionHandler);
 	bool RequestNewScene();
 	bool RequestLoadScene(Guid assetId);
+	bool RestoreLastScene();
 	Task LoadSceneForAutomationAsync(Guid assetId, CancellationToken cancellationToken = default);
 	Guid? LoadingSceneAssetId { get; }
 	bool SaveScene();
@@ -169,6 +171,25 @@ public sealed class EditorCommandService : IEditorCommandService
 		return QueueSceneReplacement(new PendingSceneReplacement(PendingSceneReplacementKind.LoadScene, assetId));
 	}
 
+	public bool RestoreLastScene()
+	{
+		if (_projectService.HasOpenProject == false ||
+			string.IsNullOrWhiteSpace(_projectService.ProjectRootPath))
+		{
+			return false;
+		}
+
+		var assetId = EditorPreferences.GetLastSceneAssetId(_projectService.ProjectRootPath);
+		if (assetId.HasValue == false ||
+			_projectService.TryGetAsset(assetId.Value, out var asset) == false ||
+			asset.Type != AssetType.Scene)
+		{
+			return false;
+		}
+
+		return RequestLoadScene(assetId.Value);
+	}
+
 	/// <summary>
 	/// Starts the exact replacement path used by the UI and completes when its background load has
 	/// been applied to the workspace. Automation explicitly discards unsaved authoring changes,
@@ -221,6 +242,8 @@ public sealed class EditorCommandService : IEditorCommandService
 
 			_sceneWorkspace.SaveCurrentScene();
 			_interactionState.ClearSceneDirty();
+			PersistLastScene(_sceneWorkspace.CurrentScene.AssetId);
+
 			return true;
 		}
 		catch (Exception ex)
@@ -599,6 +622,7 @@ public sealed class EditorCommandService : IEditorCommandService
 			}
 
 			_interactionState.ClearSceneDirty();
+			PersistLastScene(_sceneWorkspace.CurrentScene.AssetId);
 		}
 		catch (Exception ex)
 		{
@@ -632,6 +656,7 @@ public sealed class EditorCommandService : IEditorCommandService
 						_undoRedoService.Clear();
 						EditorGui.ClearEntitySelection();
 						_interactionState.ClearSceneDirty();
+						PersistLastScene(assetId);
 						automationCompletion?.TrySetResult();
 					}
 					catch (Exception exception)
@@ -654,6 +679,22 @@ public sealed class EditorCommandService : IEditorCommandService
 			_loadingSceneAssetId = null;
 			_notificationService.ReportError("Another editor operation is already in progress.");
 			automationCompletion?.TrySetException(new InvalidOperationException("Another editor operation is already in progress."));
+		}
+	}
+
+	private void PersistLastScene(Guid assetId)
+	{
+		var projectPath = _projectService.ProjectRootPath;
+		if (string.IsNullOrWhiteSpace(projectPath)) return;
+
+		try
+		{
+			EditorPreferences.SetLastSceneAssetId(projectPath, assetId);
+			EditorPreferences.Save();
+		}
+		catch (Exception exception)
+		{
+			_notificationService.ReportError($"Failed to save the last open scene preference: {exception.Message}");
 		}
 	}
 

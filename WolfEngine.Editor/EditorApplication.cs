@@ -88,6 +88,7 @@ public sealed class EditorApplication : IDisposable
 					progress.Report("Loading gameplay assembly...");
 					gameplay.EnsureLoaded();
 				},
+				completed: () => _services.GetRequiredService<IEditorCommandService>().RestoreLastScene(),
 				failed: exception => notifications.ReportError($"Failed to open project: {exception.Message}"));
 		}
 		var editorThread = new Thread(editor.Run) { IsBackground = true, Name = "EditorThread" };

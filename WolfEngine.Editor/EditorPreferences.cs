@@ -23,6 +23,7 @@ public class EditorPreferences
 	public bool LimitFPS { get; set; } = false;
 	public int MaxFPS { get; set; } = 0;
 	public string? LastProjectPath { get; set; }
+	public Dictionary<string, Guid> LastSceneAssetIds { get; set; } = new();
 	public EditorWorkspacePreferences? WorkspaceSettings { get; set; }
 
 	public EditorPreferences()
@@ -120,6 +121,30 @@ public class EditorPreferences
 		_instance.LastProjectPath = string.IsNullOrWhiteSpace(projectPath)
 			? null
 			: Path.GetFullPath(projectPath);
+	}
+
+	public static Guid? GetLastSceneAssetId(string projectPath)
+	{
+		_instance ??= new EditorPreferences();
+		var key = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
+
+		return _instance.LastSceneAssetIds.TryGetValue(key, out var assetId) && assetId != Guid.Empty
+			? assetId
+			: null;
+	}
+
+	public static void SetLastSceneAssetId(string projectPath, Guid assetId)
+	{
+		_instance ??= new EditorPreferences();
+		var key = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
+		if (assetId == Guid.Empty)
+		{
+			_instance.LastSceneAssetIds.Remove(key);
+		}
+		else
+		{
+			_instance.LastSceneAssetIds[key] = assetId;
+		}
 	}
 
 	public static EditorWorkspacePreferences? GetWorkspaceSettings()
