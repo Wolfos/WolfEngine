@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 
 namespace WolfEngine.Animation;
 
@@ -109,6 +110,9 @@ public sealed class AnimationSet : IDataAsset
 
 	public int Version { get; set; } = CurrentVersion;
 	public AssetRef<Skeleton> Skeleton { get; set; }
+
+	[Space(12)]
+	[Header("Clip slots")]
 	public Dictionary<string, AnimationSetEntry> Clips { get; set; } = new(StringComparer.Ordinal);
 }
 

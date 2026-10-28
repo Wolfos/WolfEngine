@@ -10,6 +10,8 @@ namespace WolfEngine.Editor.UI;
 
 public sealed class DataAssetEditor
 {
+	private static readonly PropertyInfo AnimationSetClipsProperty = typeof(AnimationSet).GetProperty(nameof(AnimationSet.Clips))!;
+
 	private readonly IEditorProjectService _projectService;
 	private readonly IDataAssetStore _dataAssetStore;
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
@@ -124,13 +126,15 @@ public sealed class DataAssetEditor
 		if (target is BoneMask mask) return DrawBoneMask(mask);
 
 		var changed = false;
-		foreach (var property in GetEditableProperties(targetType))
+		foreach (var property in InspectorLayout.GetEditableProperties(targetType))
 		{
+			InspectorLayout.DrawDecorations(property);
+
 			ImGui.PushID(property.Name);
 			try
 			{
 				var value = property.GetValue(target);
-				var drawResult = DrawValue(property.Name, property.PropertyType, value);
+				var drawResult = DrawValue(property.Name, property.PropertyType, value, property);
 				if (drawResult.Changed)
 				{
 					property.SetValue(target, drawResult.Value);
@@ -151,47 +155,58 @@ public sealed class DataAssetEditor
 		var skeleton = set.Skeleton;
 		var changed = DrawAssetRef("Skeleton", ref skeleton);
 		set.Skeleton = skeleton;
+
+		InspectorLayout.DrawDecorations(AnimationSetClipsProperty);
 		foreach (var slot in set.Clips.Keys.ToArray())
 		{
 			ImGui.PushID(slot);
-			var name = slot;
-			if (ImGui.InputText("Slot name", ref name, 128) &&
-				string.IsNullOrWhiteSpace(name) == false &&
-				string.Equals(name, slot, StringComparison.Ordinal) == false &&
-				set.Clips.ContainsKey(name) == false)
+			try
 			{
-				var renamed = set.Clips[slot];
-				set.Clips.Remove(slot);
-				set.Clips.Add(name, renamed);
-				changed = true;
+				var name = slot;
+				if (EditorUIUtility.InputText("Slot name", ref name, 128) &&
+					string.IsNullOrWhiteSpace(name) == false &&
+					string.Equals(name, slot, StringComparison.Ordinal) == false &&
+					set.Clips.ContainsKey(name) == false)
+				{
+					var renamed = set.Clips[slot];
+					set.Clips.Remove(slot);
+					set.Clips.Add(name, renamed);
+					changed = true;
+				}
+				else
+				{
+					name = slot;
+				}
+
+				var entry = set.Clips[name];
+				var clip = entry.Clip;
+				if (DrawAssetRef("Clip", ref clip))
+				{
+					entry.Clip = clip;
+					changed = true;
+				}
+
+				var speed = entry.PlaybackSpeed;
+				if (EditorUIUtility.InputFloat("Playback speed", ref speed))
+				{
+					entry.PlaybackSpeed = speed;
+					changed = true;
+				}
+
+				if (ImGui.Button("Remove slot"))
+				{
+					set.Clips.Remove(name);
+					changed = true;
+				}
 			}
-			else
+			finally
 			{
-				name = slot;
+				ImGui.PopID();
 			}
 
-			var entry = set.Clips[name];
-			var clip = entry.Clip;
-			if (DrawAssetRef("Clip", ref clip))
-			{
-				entry.Clip = clip;
-				changed = true;
-			}
-
-			var speed = entry.PlaybackSpeed;
-			if (ImGui.InputFloat("Playback speed", ref speed))
-			{
-				entry.PlaybackSpeed = speed;
-				changed = true;
-			}
-
-			if (ImGui.Button("Remove slot"))
-			{
-				set.Clips.Remove(name);
-				changed = true;
-			}
-
-			ImGui.PopID();
+			InspectorLayout.DrawSpace(12.0f);
+			ImGui.Separator();
+			InspectorLayout.DrawSpace();
 		}
 
 		if (ImGui.Button("Add clip slot"))
@@ -373,12 +388,13 @@ public sealed class DataAssetEditor
 		return _propertyDrawerRegistry.DrawAssetRef(label, ref value, CreateAssetLinkSelectionButton());
 	}
 
-	private PropertyDrawerContext CreatePropertyDrawerContext(string label, Type valueType, object? value)
+	private PropertyDrawerContext CreatePropertyDrawerContext(string label, Type valueType, object? value, MemberInfo? member = null)
 	{
 		return new PropertyDrawerContext(
 			label,
 			valueType,
 			value,
+			Member: member,
 			AssetLinkSelectionButton: CreateAssetLinkSelectionButton());
 	}
 
@@ -389,14 +405,14 @@ public sealed class DataAssetEditor
 			assetId => _assetSelectionService.Select(assetId));
 	}
 
-	internal PropertyDrawerResult DrawValue(string label, Type valueType, object? value)
+	internal PropertyDrawerResult DrawValue(string label, Type valueType, object? value, MemberInfo? member = null)
 	{
 		if (valueType.IsArray)
 		{
 			return DrawArray(label, valueType, value as Array);
 		}
 
-		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, valueType, value));
+		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, valueType, value, member));
 		if (drawResult.Handled)
 		{
 			return drawResult;
@@ -513,15 +529,6 @@ public sealed class DataAssetEditor
 		});
 
 		return new PropertyDrawerResult(true, changed, next);
-	}
-
-	private static IReadOnlyList<PropertyInfo> GetEditableProperties(Type targetType)
-	{
-		return targetType
-			.GetProperties(BindingFlags.Instance | BindingFlags.Public)
-			.Where(property => property.CanRead && property.CanWrite && property.GetIndexParameters().Length == 0)
-			.OrderBy(property => property.Name, StringComparer.OrdinalIgnoreCase)
-			.ToList();
 	}
 
 	private static bool IsNestedObjectType(Type type)
