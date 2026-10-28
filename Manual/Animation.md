@@ -7,14 +7,19 @@ Every animator evaluates a graph, including ordinary single-clip playback. Gamep
 | Source | Purpose |
 | --- | --- |
 | `.animgraph.json` | Typed parameters, pose nodes, constrained state machines, output and separate canvas layout. |
-| `.anim.json` | An authored clip: skeleton reference, frame rate, length, loop flag and bone keys on whole frames. Imports to the same runtime clip as an FBX take. |
-| `.data.json` (AnimationSet) | Rig reference and named clip-slot assignments. |
-| `.data.json` (AnimationSequence) | Imported clip reference, playback-speed multiplier, scalar curves and timed presentation markers. |
+| `.anim.json` | An authored clip: skeleton reference, frame rate, length, loop flag, bone keys on whole frames, named scalar curves and timed presentation markers. Imports to the same runtime clip as an FBX take. |
+| `.data.json` (AnimationSet) | Rig reference and named clip slots, each containing a clip reference and playback-speed multiplier. |
 | `.data.json` (BoneMask) | Rig reference and weighted bones, optionally including descendants. |
 
-These files live under `Assets`. References use persistent metadata GUIDs. The asset pipeline records dependencies and produces Library artifacts. Edit curves and markers in the wrapper asset: FBX reimport replaces imported skeletal keys without replacing this metadata. Skeletal keys of imported clips are read-only; author or edit skeletal keys in an `.anim.json` clip with the clip editor.
+These files live under `Assets`. References use persistent metadata GUIDs. The asset pipeline records dependencies and produces Library artifacts. Edit curves and markers in the Clip Inspector. Authored clips store them in `.anim.json`; imported takes store them in their source `.meta` import settings under `AnimationClips`, keyed by the persistent sub-asset key (for example `animation:0`). Both compile into `AnimationClip`, so FBX reimport replaces motion keys while preserving annotations. Playback speed belongs to each set slot and multiplies the graph node speed. Skeletal keys of imported clips are read-only; author or edit skeletal keys in an `.anim.json` clip with the clip editor.
 
 For animation-only FBXs, set **Animation skeleton** in the model importer before reimporting. Binding validates joint names, ancestry, invariant joint offsets and units against the target. The target rig supplies the bind pose; the animation-only export's first animated frame is not treated as a new bind pose. Genuine entity-transform channels remain entity channels. Explicit ignored-channel settings handle known export defects and should be used narrowly. Imported skinned meshes preserve their full bind transform into rig coordinates. Rendering converts the shared rig palette into each mesh's bind coordinates for current and previous poses; sockets continue using rig coordinates.
+
+## Migration
+
+Opening a project upgrades version 1 and 2 animation sets to version 3. Each sequence reference becomes an inline `{ Clip, PlaybackSpeed }` entry. Set asset IDs and slot names are preserved, so scenes, prefabs and graphs keep their references. Curves and markers move into the referenced authored clip or imported take's source metadata. When wrappers attached different timelines to the same imported take, migration creates additional clip sub-assets in that source, preserving the original motion keys and each timeline without standalone wrapper files. These definitions live in `AnimationClipVariants` in the same import settings. The obsolete sequence files and their metadata are removed after the new sources are written. Legacy standalone `.animset.json` and `.animclip.json` sources are supported too.
+
+Migration checks all sources before writing and refuses missing sequence references, missing annotated clip sources, or different timelines attached to the same authored clip (duplicate that authored clip first). Fix those conflicts before reopening; it never silently chooses one timeline. Reopening an already upgraded project makes no further source changes.
 
 ## Components and gameplay API
 
@@ -80,7 +85,7 @@ The Animation window has draggable dividers between graph and preview and betwee
 
 Select a preview model or curated prefab and a clip set. The isolated preview uses the runtime evaluator with play/stop, step, speed and scrub controls, parameter editing and evaluation inspection. Scrubbing emits no markers. Invalid edits retain the last valid compiled preview and show a diagnostic. Hidden previews stop advancing and submitting render views. Closing the project/window releases the preview view and retires its private deformed geometry. Scene animators can be inspected read-only.
 
-Curve wrappers support constant (step), linear and cubic Hermite interpolation, tangent editing, key insertion/removal and timed named markers. Imported skeletal keys remain read-only.
+The Clip Inspector supports named curves with constant (step), linear and cubic Hermite interpolation, tangent editing, key insertion/removal and timed named markers. Imported annotations support save, undo and redo while the motion keys remain read-only. Imported skeletal keys remain read-only.
 
 ## Frame order and scheduling
 

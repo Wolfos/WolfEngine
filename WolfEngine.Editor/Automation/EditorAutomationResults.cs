@@ -234,7 +234,10 @@ public sealed record AnimationClipEditorStateResult(
 	int SelectedKeyCount,
 	bool CanUndo,
 	bool CanRedo,
-	ulong PreviewPoseHash);
+	ulong PreviewPoseHash,
+	bool CanEditMetadata,
+	Animation.AnimationCurve[] Curves,
+	Animation.AnimationMarker[] Markers);
 
 public sealed record AnimationClipBoneTransformResult(float[] Position, float[] RotationDegrees, float[] Scale);
 

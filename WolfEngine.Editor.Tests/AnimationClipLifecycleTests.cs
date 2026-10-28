@@ -56,6 +56,13 @@ public sealed class AnimationClipLifecycleTests
 			[],
 			"rig",
 			[]);
+		File.WriteAllText(Path.Combine(_root, _importedClipAsset.RelativeSourcePath), "model");
+		new AssetMetadataStore().Save(Path.Combine(_root, _importedClipAsset.RelativeSourcePath + ".meta"), new AssetSourceMetaFile
+		{
+			SourceId = rigSource,
+			ImporterId = AssetImporterIds.ThreeDScene,
+			SubAssets = [new() { Key = "animation:0", NodeId = _importedClipAsset.Id, Type = AssetType.AnimationClip }]
+		});
 		_assets = [_skeletonAsset, _modelAsset, _otherSkeletonAsset, _otherModelAsset, _importedClipAsset];
 
 		var registry = Substitute.For<IAssetInstanceRegistry>();
@@ -127,6 +134,50 @@ public sealed class AnimationClipLifecycleTests
 		{
 			Directory.Delete(_root, recursive: true);
 		}
+	}
+
+	[Test]
+	public void ImportedTimeline_CanEditUndoSaveAndReopen_WhileMotionStaysReadOnly()
+	{
+		Assert.That(_session.Open(_importedClipAsset), Is.True);
+		Assert.That(_session.CanEdit, Is.False);
+		Assert.That(_session.CanEditMetadata, Is.True);
+		var document = _session.MetadataDocument!;
+		document.SetMetadata(new AnimationClipMetadata { Markers = [new() { Name = "Step", Time = .5f }] });
+		Assert.That(_session.GetRuntimeClip()!.Markers.Single().Name, Is.EqualTo("Step"));
+		Assert.That(_session.Close(), Is.False);
+		_session.ResolvePending(UnsavedChangesPolicy.Discard);
+		Assert.That(_session.Open(_importedClipAsset), Is.True);
+		Assert.That(_session.MetadataDocument!.Clip.Markers, Is.Empty);
+
+		document = _session.MetadataDocument;
+		document.SetMetadata(new AnimationClipMetadata { Markers = [new() { Name = "Step", Time = .5f }] });
+		Assert.That(_session.Undo(), Is.True);
+		Assert.That(_session.GetRuntimeClip()!.Markers, Is.Empty);
+		Assert.That(_session.Redo(), Is.True);
+		Assert.That(_session.Save(), Is.True);
+		_project.Received().RefreshAssetSource(_importedClipAsset.RelativeSourcePath);
+		var metadata = new AssetMetadataStore().Load(Path.Combine(_root, _importedClipAsset.RelativeSourcePath + ".meta"));
+		Assert.That(metadata.GetImportSettingsOrDefault(() => new ModelImportSettings())
+			.AnimationClips["animation:0"].Markers.Single().Name, Is.EqualTo("Step"));
+		Assert.That(_session.GetRuntimeClip()!.TransformTracks, Is.SameAs(_importedClip.TransformTracks));
+		Assert.That(File.ReadAllText(Path.Combine(_root, _importedClipAsset.RelativeSourcePath)), Is.EqualTo("model"));
+	}
+
+	[Test]
+	public void DuplicateImportedClip_CarriesCurrentAnnotationsIntoTheAuthoredSource()
+	{
+		_session.Open(_importedClipAsset);
+		_session.MetadataDocument!.SetMetadata(new AnimationClipMetadata
+		{
+			Markers = [new() { Name = "Step", Time = .5f }]
+		});
+
+		Assert.That(_session.DuplicateAsEditable(_importedClipAsset, UnsavedChangesPolicy.Discard), Is.True);
+
+		Assert.That(_session.CanEdit, Is.True);
+		Assert.That(_session.Document!.Clip.Markers.Single().Name, Is.EqualTo("Step"));
+		Assert.That(AuthoredAnimationClipJson.Read(_session.Document.Path).Markers.Single().Time, Is.EqualTo(.5f));
 	}
 
 	[Test]

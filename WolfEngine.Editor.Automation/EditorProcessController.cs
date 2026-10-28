@@ -328,6 +328,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<AnimationClipEditorStateResult> EditClipKeysAsync(string operation, IReadOnlyList<string> keys, int frameDelta, CancellationToken token) =>
 		GetRunningEditor().EditClipKeysAsync(operation, keys, frameDelta, token);
 
+	public Task<AnimationClipEditorStateResult> SetClipMetadataAsync(string metadataJson, CancellationToken token) =>
+		GetRunningEditor().SetClipMetadataAsync(metadataJson, token);
+
 	public Task<AnimationClipEditorStateResult> ClipHistoryAsync(string operation, CancellationToken token) =>
 		GetRunningEditor().ClipHistoryAsync(operation, token);
 

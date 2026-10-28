@@ -33,7 +33,7 @@ public sealed class AnimationAssetRefMigrationTests
 		var maskId = Guid.NewGuid();
 		var setPath = WriteDataAsset("Hero.data.json", typeof(AnimationSet),
 			$$$"""{"Version":1,"SkeletonId":"{{{skeletonId}}}","Clips":{"Run":"{{{sequenceId}}}"}}""");
-		var sequencePath = WriteDataAsset("Run.data.json", typeof(AnimationSequence),
+		var sequencePath = WriteDataAsset("Run.data.json", "WolfEngine.Animation.AnimationSequence, WolfEngine",
 			$$$"""{"Version":1,"ClipId":"{{{clipId}}}","PlaybackSpeed":2,"Curves":[],"Markers":[]}""");
 		var maskPath = WriteDataAsset("UpperBody.data.json", typeof(BoneMask),
 			$$$"""{"Version":1,"SkeletonId":"{{{skeletonId}}}","Bones":[{"Bone":"spine","Weight":1,"IncludeChildren":true}]}""");
@@ -42,21 +42,26 @@ public sealed class AnimationAssetRefMigrationTests
 			graphPath,
 			$$$"""{"Version":1,"Parameters":[],"Nodes":[{"Kind":"MaskedBlend","MaskId":"{{{maskId}}}"}],"Layout":[]}""");
 
-		Assert.That(AnimationAssetRefMigration.UpgradeProject(_root), Is.EqualTo(4));
+		new AssetMetadataStore().Save(sequencePath + ".meta", new AssetSourceMetaFile
+		{
+			SourceId = Guid.NewGuid(),
+			SubAssets = [new() { Key = "main", NodeId = sequenceId, Type = AssetType.DataAsset }]
+		});
+
+		Assert.That(AnimationSequenceMigration.UpgradeProject(_root), Is.EqualTo(2));
+		Assert.That(AnimationAssetRefMigration.UpgradeProject(_root), Is.EqualTo(2));
 
 		var store = new DataAssetStore();
 		var set = (AnimationSet)store.LoadAsset(setPath).Asset;
-		var sequence = (AnimationSequence)store.LoadAsset(sequencePath).Asset;
 		var mask = (BoneMask)store.LoadAsset(maskPath).Asset;
 		var graph = AnimationAssetJson.Read<AnimationGraph>(graphPath);
 		Assert.Multiple(() =>
 		{
 			Assert.That(set.Version, Is.EqualTo(AnimationSet.CurrentVersion));
 			Assert.That(set.Skeleton.NodeId, Is.EqualTo(skeletonId));
-			Assert.That(set.Clips["Run"].NodeId, Is.EqualTo(sequenceId));
-			Assert.That(sequence.Version, Is.EqualTo(AnimationSequence.CurrentVersion));
-			Assert.That(sequence.Clip.NodeId, Is.EqualTo(clipId));
-			Assert.That(sequence.PlaybackSpeed, Is.EqualTo(2));
+			Assert.That(set.Clips["Run"].Clip.NodeId, Is.EqualTo(clipId));
+			Assert.That(set.Clips["Run"].PlaybackSpeed, Is.EqualTo(2));
+			Assert.That(File.Exists(sequencePath), Is.False);
 			Assert.That(mask.Version, Is.EqualTo(BoneMask.CurrentVersion));
 			Assert.That(mask.Skeleton.NodeId, Is.EqualTo(skeletonId));
 			Assert.That(mask.Bones.Single().Bone, Is.EqualTo("spine"));
@@ -86,10 +91,12 @@ public sealed class AnimationAssetRefMigrationTests
 		});
 	}
 
-	private string WriteDataAsset(string fileName, Type dataAssetType, string dataJson)
+	private string WriteDataAsset(string fileName, Type dataAssetType, string dataJson) =>
+		WriteDataAsset(fileName, dataAssetType.AssemblyQualifiedName!, dataJson);
+
+	private string WriteDataAsset(string fileName, string typeName, string dataJson)
 	{
 		var path = Path.Combine(_assets, fileName);
-		var typeName = dataAssetType.AssemblyQualifiedName;
 		File.WriteAllText(
 			path,
 			$$$"""{"Version":{{{DataAssetFile.CurrentVersion}}},"AssetType":"DataAsset","DataAssetType":"{{{typeName}}}","DataAssetTypeId":"","Data":{{{dataJson}}}}""");

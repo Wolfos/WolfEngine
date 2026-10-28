@@ -1,6 +1,8 @@
 using System.Numerics;
+using System.Text.Json;
 using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Editor.Projects;
 
 namespace WolfEngine.Editor.UI;
 
@@ -8,7 +10,7 @@ namespace WolfEngine.Editor.UI;
 public readonly record struct AnimationKeyRef(string Bone, int Frame);
 
 /// <summary>
-/// An authored clip open for editing, with its own undo history.
+/// An authored clip or an imported take's annotations open for editing, with its own undo history.
 /// <para>
 /// Undo records only the tracks an edit touched rather than snapshotting the whole clip, because a
 /// clip duplicated from mocap can hold a key on every frame for every bone, and a gizmo drag edits
@@ -24,6 +26,8 @@ public sealed class AnimationClipDocument
 	private long _nextStateId = 1;
 	private long _stateId;
 	private long _savedStateId;
+	private string? _importedSubAssetKey;
+	private float _importedDuration;
 
 	public AnimationClipDocument(string path, AuthoredAnimationClipFile clip, bool existsOnDisk)
 	{
@@ -59,6 +63,26 @@ public sealed class AnimationClipDocument
 	public static AnimationClipDocument Open(string path) =>
 		new(path, AuthoredAnimationClipJson.Read(path), existsOnDisk: true);
 
+	/// <summary>Opens just the annotations of an imported take without copying its motion keys.</summary>
+	public static AnimationClipDocument OpenImported(string sourcePath, string subAssetKey, AnimationClip clip)
+	{
+		var sourceMetadata = new AssetMetadataStore().Load(sourcePath + ".meta");
+		var settings = sourceMetadata.GetImportSettingsOrDefault(() => new ModelImportSettings());
+		var timeline = (settings.AnimationClips.GetValueOrDefault(subAssetKey) ?? new AnimationClipMetadata()).Clone();
+		var framesPerSecond = Math.Clamp((int)MathF.Round(clip.FramesPerSecond), 1, AuthoredAnimationClipFile.MaxFramesPerSecond);
+		var document = new AnimationClipDocument(sourcePath, new AuthoredAnimationClipFile
+		{
+			FramesPerSecond = framesPerSecond,
+			LengthFrames = (int)MathF.Ceiling(clip.Duration * framesPerSecond),
+			Curves = timeline.Curves,
+			Markers = timeline.Markers
+		}, existsOnDisk: true);
+		document._importedSubAssetKey = subAssetKey;
+		document._importedDuration = clip.Duration;
+
+		return document;
+	}
+
 	public static AnimationClipDocument CreateNew(string path, Guid skeletonId)
 	{
 		var clip = new AuthoredAnimationClipFile
@@ -76,7 +100,7 @@ public sealed class AnimationClipDocument
 	public void Relocate(string path)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(path);
-		if (AuthoredAnimationClipJson.IsAuthoredClipPath(path) == false)
+		if (_importedSubAssetKey is null && AuthoredAnimationClipJson.IsAuthoredClipPath(path) == false)
 		{
 			throw new ArgumentException($"'{path}' is not an authored animation clip.", nameof(path));
 		}
@@ -91,8 +115,23 @@ public sealed class AnimationClipDocument
 			throw new InvalidOperationException("Cannot save while an edit is in progress.");
 		}
 
-		Clip.Validate();
-		AuthoredAnimationClipJson.Write(Path, Clip);
+		if (_importedSubAssetKey is { } key)
+		{
+			var timeline = new AnimationClipMetadata { Curves = Clip.Curves, Markers = Clip.Markers };
+			timeline.Validate(_importedDuration);
+			var store = new AssetMetadataStore();
+			var sourceMetadata = store.Load(Path + ".meta");
+			var settings = sourceMetadata.GetImportSettingsOrDefault(() => new ModelImportSettings());
+			settings.AnimationClips[key] = timeline.Clone();
+			sourceMetadata.SetImportSettings(settings);
+			store.Save(Path + ".meta", sourceMetadata);
+		}
+		else
+		{
+			Clip.Validate();
+			AuthoredAnimationClipJson.Write(Path, Clip);
+		}
+
 		_savedStateId = _stateId;
 	}
 
@@ -268,6 +307,10 @@ public sealed class AnimationClipDocument
 			count += CountFramesBeyond(track.Scale.Frames, lengthFrames);
 		}
 
+		var duration = Clip.FrameToSeconds(lengthFrames);
+		count += Clip.Markers.Count(marker => marker.Time > duration);
+		count += Clip.Curves.Sum(curve => curve.Times.Count(time => time > duration));
+
 		return count;
 	}
 
@@ -301,7 +344,34 @@ public sealed class AnimationClipDocument
 			}
 		}
 
+		if (lengthFrames < Clip.LengthFrames)
+		{
+			_pendingChange!.RecordMetadataBefore(Clip);
+			var duration = Clip.FrameToSeconds(lengthFrames);
+			Clip.Markers.RemoveAll(marker => marker.Time > duration);
+			foreach (var curve in Clip.Curves)
+			{
+				var count = curve.Times.Count(time => time <= duration);
+				curve.Times = curve.Times.Take(count).ToArray();
+				curve.Values = curve.Values.Take(count).ToArray();
+				curve.InTangents = curve.InTangents?.Take(count).ToArray();
+				curve.OutTangents = curve.OutTangents?.Take(count).ToArray();
+			}
+		}
+
 		Clip.LengthFrames = lengthFrames;
+	}
+
+	/// <summary>Replaces timeline annotations as one undoable edit; motion tracks are untouched.</summary>
+	public void SetMetadata(AnimationClipMetadata metadata)
+	{
+		ArgumentNullException.ThrowIfNull(metadata);
+		using var transaction = BeginTransaction("Edit Curves and Markers");
+
+		_pendingChange!.RecordMetadataBefore(Clip);
+		var copy = metadata.Clone();
+		Clip.Curves = copy.Curves;
+		Clip.Markers = copy.Markers;
 	}
 
 	public void SetLoop(bool loop)
@@ -624,6 +694,8 @@ public sealed class AnimationClipDocument
 		private readonly Dictionary<AnimationBinding, TrackState> _after = new();
 		private readonly ClipSettings _settingsBefore;
 		private ClipSettings _settingsAfter;
+		private string? _metadataBefore;
+		private string? _metadataAfter;
 
 		public ClipChange(string description, ClipSettings settingsBefore)
 		{
@@ -646,6 +718,23 @@ public sealed class AnimationClipDocument
 			_before.Add(binding, CaptureTrack(clip, binding));
 		}
 
+		public void RecordMetadataBefore(AuthoredAnimationClipFile clip)
+		{
+			_metadataBefore ??= SerializeMetadata(clip);
+		}
+
+		private static string SerializeMetadata(AuthoredAnimationClipFile clip) =>
+			JsonSerializer.Serialize(new AnimationClipMetadata { Curves = clip.Curves, Markers = clip.Markers }, AnimationAssetJson.Options);
+
+		private static void RestoreMetadata(AuthoredAnimationClipFile clip, string? json)
+		{
+			if (json is null) return;
+
+			var timeline = JsonSerializer.Deserialize<AnimationClipMetadata>(json, AnimationAssetJson.Options)!;
+			clip.Curves = timeline.Curves;
+			clip.Markers = timeline.Markers;
+		}
+
 		/// <summary>Captures the result and drops tracks that ended unchanged. Returns false when nothing changed at all.</summary>
 		public bool CaptureAfter(AuthoredAnimationClipFile clip)
 		{
@@ -663,19 +752,23 @@ public sealed class AnimationClipDocument
 				_after.Add(binding, after);
 			}
 
-			return _before.Count > 0 || _settingsBefore != _settingsAfter;
+			_metadataAfter = _metadataBefore is null ? null : SerializeMetadata(clip);
+
+			return _before.Count > 0 || _settingsBefore != _settingsAfter || _metadataBefore != _metadataAfter;
 		}
 
 		public void Revert(AuthoredAnimationClipFile clip)
 		{
 			RestoreTracks(clip, _before);
 			_settingsBefore.Restore(clip);
+			RestoreMetadata(clip, _metadataBefore);
 		}
 
 		public void Apply(AuthoredAnimationClipFile clip)
 		{
 			RestoreTracks(clip, _after);
 			_settingsAfter.Restore(clip);
+			RestoreMetadata(clip, _metadataAfter);
 		}
 
 		private static TrackState CaptureTrack(AuthoredAnimationClipFile clip, AnimationBinding binding)

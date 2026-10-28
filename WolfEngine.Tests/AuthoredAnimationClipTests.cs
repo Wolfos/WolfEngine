@@ -26,6 +26,26 @@ public sealed class AuthoredAnimationClipTests
 	}
 
 	[Test]
+	public void TimelineMetadata_SurvivesSourceRoundTripCompilationAndDuplication()
+	{
+		var authored = new AuthoredAnimationClipFile
+		{
+			Curves = [new() { Name = "Weight", Times = [0, 1], Values = [0, 1] }],
+			Markers = [new() { Name = "Step", Time = .5f }]
+		};
+		var path = Path.Combine(_directory, "Run.anim.json");
+		AuthoredAnimationClipJson.Write(path, authored);
+		var runtime = AuthoredAnimationClipJson.Read(path).Compile("Run", "", []).ToClip();
+		var copy = AuthoredAnimationClipFile.FromClip(runtime, 30).Clone();
+		copy.Curves[0].Values[0] = 10;
+		copy.Markers[0].Time = .75f;
+
+		Assert.That(runtime.Curves[0].Values[0], Is.Zero);
+		Assert.That(runtime.Markers[0].Time, Is.EqualTo(.5f));
+		Assert.That(copy.Curves[0].Name, Is.EqualTo("Weight"));
+	}
+
+	[Test]
 	public void Json_RoundTripsKeysSettingsAndPropertyTracks()
 	{
 		var written = CreateClip();

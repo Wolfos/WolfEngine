@@ -115,7 +115,6 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
             nameof(AssetType.AnimationClip) when expectedType == typeof(AnimationClip) => AnimationClipSerializer.Read(stream).ToClip(),
             nameof(AssetType.AnimationGraph) when expectedType == typeof(AnimationGraph) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.AnimationGraph),
             nameof(AssetType.AnimationSet) when expectedType == typeof(AnimationSet) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.AnimationSet),
-            nameof(AssetType.AnimationSequence) when expectedType == typeof(AnimationSequence) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.AnimationSequence),
             nameof(AssetType.BoneMask) when expectedType == typeof(BoneMask) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.BoneMask),
             nameof(AssetType.DataAsset) => CreateDataAsset(bytes, expectedType),
 			nameof(AssetType.Prefab) when expectedType == typeof(Prefab) => CreatePrefab(id, bytes),

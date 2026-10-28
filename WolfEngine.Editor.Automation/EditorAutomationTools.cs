@@ -361,11 +361,15 @@ public sealed class EditorAutomationTools
 	public Task<AnimationClipEditorStateResult> EditClipKeys(string operation, string[] keys, int frameDelta = 0, CancellationToken cancellationToken = default) =>
 		_controller.EditClipKeysAsync(operation, keys, frameDelta, cancellationToken);
 
+	[McpServerTool(Name = "set_clip_metadata"), Description("Replace the open clip's named curves and timed markers with a JSON object containing Curves and Markers arrays. Works on authored clips and imported takes; changes are undoable and unsaved until save_clip.")]
+	public Task<AnimationClipEditorStateResult> SetClipMetadata(string metadataJson, CancellationToken cancellationToken = default) =>
+		_controller.SetClipMetadataAsync(metadataJson, cancellationToken);
+
 	[McpServerTool(Name = "clip_history"), Description("Undo or redo in the open clip's own history, separate from scene undo. operation is undo or redo.")]
 	public Task<AnimationClipEditorStateResult> ClipHistory(string operation, CancellationToken cancellationToken = default) =>
 		_controller.ClipHistoryAsync(operation, cancellationToken);
 
-	[McpServerTool(Name = "save_clip"), Description("Save the open clip to its .anim.json file and reimport it.")]
+	[McpServerTool(Name = "save_clip"), Description("Save the open clip or imported take annotations to their source and reimport.")]
 	public Task<AnimationClipEditorStateResult> SaveClip(CancellationToken cancellationToken = default) =>
 		_controller.SaveClipAsync(cancellationToken);
 

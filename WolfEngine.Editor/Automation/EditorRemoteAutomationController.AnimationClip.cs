@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json;
 using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.UI;
@@ -142,10 +143,21 @@ public sealed partial class EditorRemoteAutomationController
 			return InspectClipEditor();
 		}, token);
 
+	public Task<AnimationClipEditorStateResult> SetClipMetadataAsync(string metadataJson, CancellationToken token) =>
+		Enqueue(() =>
+		{
+			RequireEditableClipMetadata();
+			var metadata = JsonSerializer.Deserialize<AnimationClipMetadata>(metadataJson, AnimationAssetJson.Options)
+				?? throw new InvalidOperationException("Clip metadata cannot be empty.");
+			metadata.Validate(_clipEditor.GetRuntimeClip()!.Duration);
+			_clipEditor.MetadataDocument!.SetMetadata(metadata);
+			return InspectClipEditor();
+		}, token);
+
 	public Task<AnimationClipEditorStateResult> ClipHistoryAsync(string operation, CancellationToken token) =>
 		Enqueue(() =>
 		{
-			RequireEditableClip();
+			RequireEditableClipMetadata();
 			var applied = operation switch
 			{
 				"undo" => _clipEditor.Undo(),
@@ -163,7 +175,7 @@ public sealed partial class EditorRemoteAutomationController
 	public Task<AnimationClipEditorStateResult> SaveClipAsync(CancellationToken token) =>
 		Enqueue(() =>
 		{
-			RequireEditableClip();
+			RequireEditableClipMetadata();
 			if (_clipEditor.Save() == false)
 			{
 				throw new InvalidOperationException(_clipEditor.Diagnostic ?? "The clip could not be saved.");
@@ -218,7 +230,7 @@ public sealed partial class EditorRemoteAutomationController
 			}
 		}
 
-		var document = session.Document;
+		var document = session.MetadataDocument;
 		return new AnimationClipEditorStateResult(
 			session.HasClip ? session.AssetId.ToString("D") : null,
 			session.ClipName,
@@ -242,7 +254,10 @@ public sealed partial class EditorRemoteAutomationController
 			session.SelectedKeys.Count,
 			document?.CanUndo == true,
 			document?.CanRedo == true,
-			session.Preview is { } preview ? HashPose(preview.Pose) : 0);
+			session.Preview is { } preview ? HashPose(preview.Pose) : 0,
+			session.CanEditMetadata,
+			document?.Clip.Curves.Select(curve => curve.Clone()).ToArray() ?? [],
+			document?.Clip.Markers.Select(marker => marker.Clone()).ToArray() ?? []);
 	}
 
 	private AssetDatabaseEntry GetAsset(Guid assetId)
@@ -260,6 +275,15 @@ public sealed partial class EditorRemoteAutomationController
 		if (_clipEditor.HasClip == false)
 		{
 			throw new InvalidOperationException("No clip is open in the clip editor.");
+		}
+	}
+
+	private void RequireEditableClipMetadata()
+	{
+		RequireClip();
+		if (_clipEditor.CanEditMetadata == false)
+		{
+			throw new InvalidOperationException("The open clip's curves and markers are read-only.");
 		}
 	}
 

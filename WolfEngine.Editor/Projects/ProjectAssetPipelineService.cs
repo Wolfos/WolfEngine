@@ -1603,73 +1603,116 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		List<AssetNodeRecord> nodes,
 		List<AssetDependencyRecord> dependencies)
 	{
+		var settings = metadata.GetImportSettingsOrDefault(() => new ModelImportSettings());
+		var sourceKeys = Enumerable.Range(0, importedScene.Animations.Count)
+			.Select(index => $"animation:{index}").ToHashSet(StringComparer.Ordinal);
+		foreach (var variant in settings.AnimationClipVariants)
+		{
+			if (sourceKeys.Contains(variant.Value.SourceClipKey) == false ||
+				sourceKeys.Contains(variant.Key) ||
+				string.IsNullOrWhiteSpace(variant.Key) ||
+				string.IsNullOrWhiteSpace(variant.Value.Name))
+			{
+				throw new InvalidOperationException($"Invalid animation clip variant '{variant.Key}' in '{relativeSourcePath}'.");
+			}
+		}
+
 		var animationNodeIds = new List<Guid>(importedScene.Animations.Count);
 		for (var i = 0; i < importedScene.Animations.Count; i++)
 		{
 			var animation = importedScene.Animations[i];
-            var targetRigId = metadata.GetImportSettingsOrDefault(() => new ModelImportSettings()).AnimationSkeletonId;
-			var nodeKey = $"animation:{i}";
-			var name = string.IsNullOrWhiteSpace(animation.Name) ? $"Animation {i}" : animation.Name;
-			var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.AnimationClip, name);
-            if (targetRigId != Guid.Empty) dependencies.Add(new AssetDependencyRecord
-            { FromNodeId = nodeId, ToNodeId = targetRigId, Kind = "animation-rig", IsHard = true });
-			animationNodeIds.Add(nodeId);
-
-			var relativeClipPath = NormalizeRelativePath(Path.Combine(
-				AssetPipelinePaths.LibraryFolderName,
-				AssetPipelinePaths.ImportedFolderName,
-				metadata.SourceId.ToString("D"),
-				"animations",
-				$"{nodeKey.Replace(':', '_')}.anim.bin"));
-
-			var sourceSkeleton = animation.SkeletonIndex >= 0 && animation.SkeletonIndex < importedScene.Skeletons.Count
-				? importedScene.Skeletons[animation.SkeletonIndex]
-				: null;
-
-			AnimationClipSerializer.Write(GetAbsolutePath(projectRootPath, relativeClipPath), new ImportedAnimationClipAssetFile
+			var targetRigId = settings.AnimationSkeletonId;
+			var sourceKey = $"animation:{i}";
+			var sourceName = string.IsNullOrWhiteSpace(animation.Name) ? $"Animation {i}" : animation.Name;
+			var definitions = new List<(string Key, string Name)> { (sourceKey, sourceName) };
+			foreach (var variant in settings.AnimationClipVariants.OrderBy(pair => pair.Key, StringComparer.Ordinal))
 			{
-				Name = animation.Name,
-				Duration = animation.Duration,
-				FramesPerSecond = animation.FramesPerSecond,
-				Loop = true,
-				TransformTracks = animation.TransformTracks,
-				PropertyTracks = animation.PropertyTracks,
-				// Retargeting needs the rest pose the clip was authored against, so it travels with
-				// the clip rather than being looked up from whatever skeleton happens to play it.
-				SourceSkeletonName = sourceSkeleton?.Name ?? string.Empty,
-				SourceBindPoseLocal = sourceSkeleton?.BindPoseLocal ?? []
-			});
-
-			nodes.Add(new AssetNodeRecord
-			{
-				NodeId = nodeId,
-				SourceId = metadata.SourceId,
-				Type = AssetType.AnimationClip,
-				NodeKey = nodeKey,
-				Name = name,
-				IsGenerated = true,
-				RelativeSourcePath = relativeSourcePath,
-				RelativeAssetPath = relativeClipPath,
-				RelativeMetaPath = relativeMetaPath,
-				SummaryJson = AssetPipelineSerialization.Serialize(new AnimationClipAssetSummary
+				if (variant.Value.SourceClipKey == sourceKey)
 				{
-					RelativeImportedClipPath = relativeClipPath,
+					definitions.Add((variant.Key, variant.Value.Name));
+				}
+			}
+
+			foreach (var (nodeKey, name) in definitions)
+			{
+				var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.AnimationClip, name);
+				if (targetRigId != Guid.Empty)
+				{
+					dependencies.Add(new AssetDependencyRecord
+					{
+						FromNodeId = nodeId,
+						ToNodeId = targetRigId,
+						Kind = "animation-rig",
+						IsHard = true
+					});
+				}
+
+				animationNodeIds.Add(nodeId);
+
+				var artifactName = settings.AnimationClipVariants.ContainsKey(nodeKey)
+					? "variant_" + nodeId.ToString("N")
+					: nodeKey.Replace(':', '_');
+				var relativeClipPath = NormalizeRelativePath(Path.Combine(
+					AssetPipelinePaths.LibraryFolderName,
+					AssetPipelinePaths.ImportedFolderName,
+					metadata.SourceId.ToString("D"),
+					"animations",
+					$"{artifactName}.anim.bin"));
+
+				var sourceSkeleton = animation.SkeletonIndex >= 0 && animation.SkeletonIndex < importedScene.Skeletons.Count
+					? importedScene.Skeletons[animation.SkeletonIndex]
+					: null;
+
+				var timeline = settings.AnimationClips.GetValueOrDefault(nodeKey) ?? new AnimationClipMetadata();
+				timeline.Validate(animation.Duration);
+
+				AnimationClipSerializer.Write(GetAbsolutePath(projectRootPath, relativeClipPath), new ImportedAnimationClipAssetFile
+				{
+					Name = name,
 					Duration = animation.Duration,
 					FramesPerSecond = animation.FramesPerSecond,
-					TransformTrackCount = animation.TransformTracks.Length,
-					PropertyTrackCount = animation.PropertyTracks.Length
-				})
-			});
-
-			if (animation.SkeletonIndex >= 0 && animation.SkeletonIndex < skeletonNodeIds.Count)
-			{
-				dependencies.Add(new AssetDependencyRecord
-				{
-					FromNodeId = nodeId,
-					ToNodeId = skeletonNodeIds[animation.SkeletonIndex],
-					Kind = "animation-skeleton",
-					IsHard = false
+					Loop = true,
+					Curves = timeline.Curves.Select(curve => curve.Clone()).ToArray(),
+					Markers = timeline.Markers.Select(marker => marker.Clone()).ToArray(),
+					TransformTracks = animation.TransformTracks,
+					PropertyTracks = animation.PropertyTracks,
+					// Retargeting needs the rest pose the clip was authored against, so it travels with
+					// the clip rather than being looked up from whatever skeleton happens to play it.
+					SourceSkeletonName = sourceSkeleton?.Name ?? string.Empty,
+					SourceBindPoseLocal = sourceSkeleton?.BindPoseLocal ?? []
 				});
+
+				nodes.Add(new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.AnimationClip,
+					NodeKey = nodeKey,
+					Name = name,
+					IsGenerated = true,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeClipPath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(new AnimationClipAssetSummary
+					{
+						RelativeImportedClipPath = relativeClipPath,
+						Duration = animation.Duration,
+						FramesPerSecond = animation.FramesPerSecond,
+						TransformTrackCount = animation.TransformTracks.Length,
+						PropertyTrackCount = animation.PropertyTracks.Length
+					})
+				});
+
+				if (animation.SkeletonIndex >= 0 && animation.SkeletonIndex < skeletonNodeIds.Count)
+				{
+					dependencies.Add(new AssetDependencyRecord
+					{
+						FromNodeId = nodeId,
+						ToNodeId = skeletonNodeIds[animation.SkeletonIndex],
+						Kind = "animation-skeleton",
+						IsHard = false
+					});
+				}
 			}
 		}
 
@@ -2308,7 +2351,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
             new AssetImporterDescriptor("animation-asset", 1, path => AnimationAssetJson.GetAssetType(path) is not null, () => "{}", ImportAnimationAssetSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.AnimationClip,
-				1,
+				2,
 				AuthoredAnimationClipJson.IsAuthoredClipPath,
 				() => "{}",
 				ImportAuthoredAnimationClipSource),
@@ -2388,7 +2431,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportComputeShaderSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				13,
+				14,
 				path =>
 				{
 					var extension = Path.GetExtension(path);

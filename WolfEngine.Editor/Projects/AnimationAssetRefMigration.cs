@@ -42,7 +42,7 @@ public static class AnimationAssetRefMigration
 		return count;
 	}
 
-	/// <summary>Upgrades the serialized data of an animation set, sequence or bone mask in place.</summary>
+	/// <summary>Upgrades the serialized data of an animation set or bone mask in place.</summary>
 	/// <returns>True when the data was changed.</returns>
 	public static bool UpgradeDataAssetData(JsonObject data, Type dataAssetType)
 	{
@@ -65,14 +65,7 @@ public static class AnimationAssetRefMigration
 				}
 			}
 
-			data[nameof(AnimationSet.Version)] = AnimationSet.CurrentVersion;
-			return true;
-		}
-
-		if (dataAssetType == typeof(AnimationSequence))
-		{
-			MoveToAssetRef(data, "ClipId", nameof(AnimationSequence.Clip));
-			data[nameof(AnimationSequence.Version)] = AnimationSequence.CurrentVersion;
+			data[nameof(AnimationSet.Version)] = 2;
 			return true;
 		}
 
@@ -146,7 +139,7 @@ public static class AnimationAssetRefMigration
 	{
 		var typeName = file[nameof(DataAssetFile.DataAssetType)]?.GetValue<string>() ?? string.Empty;
 		var typeId = file[nameof(DataAssetFile.DataAssetTypeId)]?.GetValue<string>() ?? string.Empty;
-		foreach (var type in new[] { typeof(AnimationSet), typeof(AnimationSequence), typeof(BoneMask) })
+		foreach (var type in new[] { typeof(AnimationSet), typeof(BoneMask) })
 		{
 			var stableTypeId = ProjectTypeResolverUtility.GetStableTypeId(type);
 			if (typeName.StartsWith(type.FullName + ",", StringComparison.Ordinal) ||

@@ -43,6 +43,13 @@ public sealed class AnimationClipEditingTests
 		_importedClipAsset = Asset(AssetType.AnimationClip, rigSource, "Take", "Assets/Rig.fbx");
 		_importedClip = new AnimationClip("Take", 1.0f, 30.0f, true, [], [], "rig", []);
 
+		new AssetMetadataStore().Save(Path.Combine(_root, "Assets/Rig.fbx.meta"), new AssetSourceMetaFile
+		{
+			SourceId = rigSource,
+			ImporterId = AssetImporterIds.ThreeDScene,
+			SubAssets = [new() { Key = "animation:0", NodeId = _importedClipAsset.Id, Type = AssetType.AnimationClip }]
+		});
+
 		AuthoredAnimationClipJson.Write(Path.Combine(_root, _clipAsset.RelativeSourcePath), new AuthoredAnimationClipFile
 		{
 			Skeleton = new AssetRef<Skeleton>
@@ -105,12 +112,13 @@ public sealed class AnimationClipEditingTests
 	}
 
 	[Test]
-	public void Open_ImportedClipIsReadOnly()
+	public void Open_ImportedMotionIsReadOnlyAndAnnotationsAreEditable()
 	{
 		_session.Open(_importedClipAsset);
 
 		Assert.That(_session.IsReadOnly, Is.True);
 		Assert.That(_session.CanEdit, Is.False);
+		Assert.That(_session.CanEditMetadata, Is.True);
 		Assert.That(_session.SetBoneLocalTransform("arm", Bent), Is.False);
 		Assert.That(_session.LengthFrames, Is.EqualTo(30));
 	}
@@ -234,11 +242,21 @@ public sealed class AnimationClipEditingTests
 	}
 
 	[Test]
-	public void Undo_DoesNothingForImportedClips()
+	public void ImportedAnnotations_HaveNoUndoUntilEditedAndCanBeSaved()
 	{
 		_session.Open(_importedClipAsset);
 
 		Assert.That(_session.Undo(), Is.False);
+		Assert.That(_session.Save(), Is.True);
+	}
+
+	[Test]
+	public void ReadOnlyMount_PreventsImportedAnnotationEditsAndSaves()
+	{
+		_project.IsAssetReadOnly(_importedClipAsset.Id).Returns(true);
+		Assert.That(_session.Open(_importedClipAsset), Is.True);
+
+		Assert.That(_session.CanEditMetadata, Is.False);
 		Assert.That(_session.Save(), Is.False);
 	}
 

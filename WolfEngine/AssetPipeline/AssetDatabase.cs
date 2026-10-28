@@ -24,7 +24,7 @@ public enum AssetType
 	ColorLookupTable,
 	AnimationGraph,
 	AnimationSet,
-	AnimationSequence,
+	AnimationSequence, // Reserved for legacy source migration; sequences are no longer runtime assets.
 	BoneMask,
 	Font,
 	ComputeShader
@@ -246,11 +246,24 @@ public sealed class TextureImportSettings
 	public int MaxResolution { get; set; } = 8192;
 }
 
+/// <summary>An extra clip sub-asset compiled from a take in the same source file.</summary>
+public sealed class AnimationClipImportVariant
+{
+	public string SourceClipKey { get; set; } = string.Empty;
+	public string Name { get; set; } = string.Empty;
+}
+
 public sealed class ModelImportSettings
 {
 	/// <summary>Explicit rig for animation-only sources. No retargeting is performed.</summary>
 	public Guid AnimationSkeletonId { get; set; }
 	public List<string> IgnoredAnimationChannels { get; set; } = [];
+
+	/// <summary>Editor-authored timeline metadata, keyed by the persistent animation sub-asset key.</summary>
+	public Dictionary<string, AnimationClipMetadata> AnimationClips { get; set; } = new(StringComparer.Ordinal);
+
+	/// <summary>Additional clips sharing an imported take's motion while owning a different timeline.</summary>
+	public Dictionary<string, AnimationClipImportVariant> AnimationClipVariants { get; set; } = new(StringComparer.Ordinal);
 
 	/// <summary>
 	/// Uniform scale applied while the source file is parsed. Assimp's global-scale step bakes it
@@ -356,7 +369,7 @@ public sealed class ImportedSkeletonAssetFile
 
 public sealed class ImportedAnimationClipAssetFile
 {
-	public const int CurrentVersion = 1;
+	public const int CurrentVersion = 2;
 
 	public int Version { get; set; } = CurrentVersion;
 	public string Name { get; set; } = string.Empty;
@@ -368,8 +381,11 @@ public sealed class ImportedAnimationClipAssetFile
 	public string SourceSkeletonName { get; set; } = string.Empty;
 	public BoneTransform[] SourceBindPoseLocal { get; set; } = [];
 
+	public AnimationCurve[] Curves { get; set; } = [];
+	public AnimationMarker[] Markers { get; set; } = [];
+
 	public AnimationClip ToClip() =>
-		new(Name, Duration, FramesPerSecond, Loop, TransformTracks, PropertyTracks, SourceSkeletonName, SourceBindPoseLocal);
+		new(Name, Duration, FramesPerSecond, Loop, TransformTracks, PropertyTracks, SourceSkeletonName, SourceBindPoseLocal, Curves, Markers);
 }
 
 public sealed class ImportedModelAssetFile

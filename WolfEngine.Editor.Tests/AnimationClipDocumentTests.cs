@@ -26,6 +26,28 @@ public sealed class AnimationClipDocumentTests
 	}
 
 	[Test]
+	public void ShorteningClip_TrimsAnnotations_UndoRestoresThemAndTracksTogether()
+	{
+		var document = CreateDocument();
+		document.SetKey("arm", 30, Pose(1));
+		document.SetMetadata(new AnimationClipMetadata
+		{
+			Markers = [new() { Name = "End", Time = 1 }],
+			Curves = [new() { Name = "Weight", Times = [0, 1], Values = [0, 1] }]
+		});
+		Assert.That(document.CountKeysBeyond(15), Is.EqualTo(5));
+
+		document.SetLengthFrames(15);
+
+		Assert.That(document.Clip.Markers, Is.Empty);
+		Assert.That(document.Clip.Curves[0].Times, Is.EqualTo(new[] { 0f }));
+		document.Undo();
+		Assert.That(document.Clip.Markers.Single().Name, Is.EqualTo("End"));
+		Assert.That(document.Clip.Curves[0].Times, Is.EqualTo(new[] { 0f, 1f }));
+		Assert.That(document.HasKey("arm", 30), Is.True);
+	}
+
+	[Test]
 	public void SetKey_WritesEveryChannelOnTheFrame()
 	{
 		var document = CreateDocument();

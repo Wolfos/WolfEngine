@@ -9,7 +9,7 @@ namespace WolfEngine.Animation;
 /// Source format for clips authored in the editor (<c>*.anim.json</c>). Keys sit on integer frames
 /// so the dopesheet, selection and key moves are never ambiguous; seconds only appear once the
 /// file is compiled into the same runtime <see cref="AnimationClip"/> that imported clips use,
-/// which is what lets sequences, sets and graphs reference authored clips unchanged.
+/// which is what lets sets and graphs reference authored clips unchanged.
 /// </summary>
 public sealed class AuthoredAnimationClipFile
 {
@@ -39,6 +39,8 @@ public sealed class AuthoredAnimationClipFile
 
 	/// <summary>Kept and round-tripped unchanged; the clip editor does not edit these yet.</summary>
 	public List<AuthoredPropertyTrack> PropertyTracks { get; set; } = [];
+	public List<AnimationCurve> Curves { get; set; } = [];
+	public List<AnimationMarker> Markers { get; set; } = [];
 
 	/// <summary>
 	/// Converts a runtime clip, typically an imported one, into an editable clip at the given frame
@@ -51,12 +53,14 @@ public sealed class AuthoredAnimationClipFile
 		ArgumentNullException.ThrowIfNull(clip);
 
 		framesPerSecond = Math.Clamp(framesPerSecond, 1, MaxFramesPerSecond);
-		var lengthFrames = Math.Max(0, (int)MathF.Round(clip.Duration * framesPerSecond));
+		var lengthFrames = Math.Max(0, (int)MathF.Ceiling(clip.Duration * framesPerSecond));
 		var file = new AuthoredAnimationClipFile
 		{
 			FramesPerSecond = framesPerSecond,
 			LengthFrames = lengthFrames,
-			Loop = clip.Loop
+			Loop = clip.Loop,
+			Curves = clip.Curves.Select(curve => curve.Clone()).ToList(),
+			Markers = clip.Markers.Select(marker => marker.Clone()).ToList()
 		};
 
 		var seen = new HashSet<AnimationBinding>();
@@ -234,6 +238,8 @@ public sealed class AuthoredAnimationClipFile
 			throw new InvalidDataException($"Clip length cannot be negative, but was {LengthFrames} frames.");
 		}
 
+		new AnimationClipMetadata { Curves = Curves, Markers = Markers }.Validate(GetDurationSeconds());
+
 		var bindings = new HashSet<AnimationBinding>();
 		for (var i = 0; i < TransformTracks.Count; i++)
 		{
@@ -285,6 +291,8 @@ public sealed class AuthoredAnimationClipFile
 			Loop = Loop,
 			TransformTracks = transformTracks,
 			PropertyTracks = propertyTracks,
+			Curves = Curves.Select(curve => curve.Clone()).ToArray(),
+			Markers = Markers.Select(marker => marker.Clone()).ToArray(),
 			SourceSkeletonName = sourceSkeletonName ?? string.Empty,
 			SourceBindPoseLocal = sourceBindPoseLocal ?? []
 		};
@@ -300,6 +308,8 @@ public sealed class AuthoredAnimationClipFile
 			FramesPerSecond = FramesPerSecond,
 			LengthFrames = LengthFrames,
 			Loop = Loop,
+			Curves = Curves.Select(curve => curve.Clone()).ToList(),
+			Markers = Markers.Select(marker => marker.Clone()).ToList(),
 			TransformTracks = new List<AuthoredTransformTrack>(TransformTracks.Count),
 			PropertyTracks = new List<AuthoredPropertyTrack>(PropertyTracks.Count)
 		};

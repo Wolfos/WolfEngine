@@ -55,7 +55,7 @@ public sealed class AnimationClipEditorAssetHandler : IEditorAssetHandler
 			return;
 		}
 
-		ImGui.TextDisabled("Imported clips open read-only.");
+		ImGui.TextDisabled("Imported motion is read-only. Edit curves and markers in Animate.");
 		if (ImGui.Button("Duplicate as Editable Clip"))
 		{
 			_session.DuplicateAsEditable(asset);

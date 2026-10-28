@@ -51,6 +51,8 @@ public sealed class AnimationClipInspectorWindow : EditorWindow
 
 		DrawClip();
 		ImGui.Spacing();
+		DrawMetadata();
+		ImGui.Spacing();
 		DrawBone();
 		ImGui.Spacing();
 		DrawKeyframe();
@@ -71,13 +73,13 @@ public sealed class AnimationClipInspectorWindow : EditorWindow
 	private void DrawClip()
 	{
 		ImGui.SeparatorText("Clip");
-		ImGui.TextUnformatted(_session.ClipName + (_session.Document?.IsDirty == true ? " *" : string.Empty));
+		ImGui.TextUnformatted(_session.ClipName + (_session.MetadataDocument?.IsDirty == true ? " *" : string.Empty));
 		AnimationClipEditorPanels.DrawDiagnostic(_session);
 
 		if (_session.IsReadOnly)
 		{
 			ImGui.TextDisabled(_session.Document is null
-				? "Imported clip (read-only). Edit a duplicate instead."
+				? "Imported motion is read-only. Curves and markers can be edited."
 				: "Read-only clip.");
 		}
 
@@ -85,6 +87,7 @@ public sealed class AnimationClipInspectorWindow : EditorWindow
 		    _project.TryGetAsset(_session.AssetId, out var importedAsset) &&
 		    ImGui.Button("Duplicate as Editable Clip"))
 		{
+			EndFieldEdit();
 			_session.DuplicateAsEditable(importedAsset);
 		}
 
@@ -93,7 +96,7 @@ public sealed class AnimationClipInspectorWindow : EditorWindow
 			DrawBindingPickers();
 		}
 
-		if (_session.CanEdit)
+		if (_session.CanEditMetadata)
 		{
 			DrawDocumentButtons();
 		}
@@ -241,7 +244,7 @@ public sealed class AnimationClipInspectorWindow : EditorWindow
 
 	private void DrawDocumentButtons()
 	{
-		var document = _session.Document!;
+		var document = _session.MetadataDocument!;
 		ImGui.BeginDisabled(document.IsDirty == false || _session.IsEditing);
 		if (ImGui.Button("Save"))
 		{
@@ -322,6 +325,27 @@ public sealed class AnimationClipInspectorWindow : EditorWindow
 		}
 
 		ImGui.EndPopup();
+	}
+
+	private void DrawMetadata()
+	{
+		if (_session.MetadataDocument is not { } document) return;
+
+		var timeline = new AnimationClipMetadata
+		{
+			Curves = document.Clip.Curves,
+			Markers = document.Clip.Markers
+		}.Clone();
+		var duration = _session.GetRuntimeClip()?.Duration ?? 0;
+		var playhead = Math.Clamp(_session.PlayheadFrame / _session.FramesPerSecond, 0, duration);
+		ImGui.BeginDisabled(_session.CanEditMetadata == false);
+		if (AnimationClipMetadataEditor.Draw(timeline, duration, playhead))
+		{
+			_fieldEdit ??= _session.BeginEdit("Edit Curves and Markers");
+			document.SetMetadata(timeline);
+		}
+
+		ImGui.EndDisabled();
 	}
 
 	private void DrawBone()

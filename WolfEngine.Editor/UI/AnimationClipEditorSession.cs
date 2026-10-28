@@ -12,7 +12,8 @@ namespace WolfEngine.Editor.UI;
 /// edits and the preview. Panels read and drive this; none of them own clip state themselves.
 /// <para>
 /// Authored clips open as an <see cref="AnimationClipDocument"/>. Imported clips open read-only
-/// and are sampled from their runtime asset, since their source of truth is the model file.
+/// for motion and are sampled from their runtime asset. Their annotations open in a separate
+/// metadata document backed by the model source metadata.
 /// </para>
 /// <para>
 /// A bone edit with Auto Key off is an unkeyed override: it shows in the preview but is not part of
@@ -41,6 +42,7 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	private readonly HashSet<AnimationKeyRef> _selectedKeys = new();
 
 	private AnimationClip? _importedClip;
+	private AnimationClipDocument? _importedMetadataDocument;
 	private Dictionary<string, int[]>? _boneKeyFrames;
 	private long _boneKeyFramesRevision = -1;
 	private AnimationClip? _compiledClip;
@@ -90,6 +92,10 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	public bool IsReadOnly { get; private set; }
 
 	public bool CanEdit => Document is not null && IsReadOnly == false;
+
+	/// <summary>The clip's annotations are editable even when its imported motion is read-only.</summary>
+	public AnimationClipDocument? MetadataDocument => Document ?? _importedMetadataDocument;
+	public bool CanEditMetadata => MetadataDocument is not null && _project.IsAssetReadOnly(AssetId) == false;
 
 	public Skeleton? Skeleton { get; private set; }
 	public Guid PreviewModelId { get; private set; }
@@ -249,7 +255,9 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 		try
 		{
 			CheckProject();
-			var runtime = AssetDatabase.GetInstance<AnimationClip>(importedClip.Id)
+			var runtime = (importedClip.Id == AssetId
+				? GetRuntimeClip()
+				: AssetDatabase.GetInstance<AnimationClip>(importedClip.Id))
 				?? throw new InvalidOperationException("The imported clip could not be loaded.");
 
 			var clip = AuthoredAnimationClipFile.FromClip(runtime, Math.Max(1, (int)MathF.Round(runtime.FramesPerSecond)));
@@ -378,6 +386,7 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 		AssetId = Guid.Empty;
 		ClipName = string.Empty;
 		Document = null;
+		_importedMetadataDocument = null;
 		IsReadOnly = false;
 		Skeleton = null;
 		PreviewModelId = Guid.Empty;
@@ -546,9 +555,9 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	/// </summary>
 	public IDisposable BeginEdit(string description)
 	{
-		if (_editDepth == 0 && CanEdit)
+		if (_editDepth == 0 && CanEditMetadata)
 		{
-			_documentTransaction = Document!.BeginTransaction(description);
+			_documentTransaction = MetadataDocument!.BeginTransaction(description);
 		}
 
 		_editDepth++;
@@ -808,12 +817,12 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	/// <inheritdoc />
 	public bool Undo()
 	{
-		if (CanEdit == false || IsEditing || Document!.CanUndo == false)
+		if (CanEditMetadata == false || IsEditing || MetadataDocument!.CanUndo == false)
 		{
 			return false;
 		}
 
-		Document.Undo();
+		MetadataDocument!.Undo();
 		ClampPlayhead();
 		SyncBinding();
 		return true;
@@ -822,12 +831,12 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	/// <inheritdoc />
 	public bool Redo()
 	{
-		if (CanEdit == false || IsEditing || Document!.CanRedo == false)
+		if (CanEditMetadata == false || IsEditing || MetadataDocument!.CanRedo == false)
 		{
 			return false;
 		}
 
-		Document.Redo();
+		MetadataDocument!.Redo();
 		ClampPlayhead();
 		SyncBinding();
 		return true;
@@ -836,14 +845,14 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	/// <inheritdoc />
 	public bool Save()
 	{
-		if (CanEdit == false || IsEditing)
+		if (CanEditMetadata == false || IsEditing)
 		{
 			return false;
 		}
 
 		try
 		{
-			Document!.Save();
+			MetadataDocument!.Save();
 			_project.RefreshAssetSource(_asset!.RelativeSourcePath);
 			Diagnostic = null;
 			return true;
@@ -860,7 +869,20 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	{
 		if (Document is null)
 		{
-			return _importedClip;
+			if (_importedClip is null || _importedMetadataDocument is null) return _importedClip;
+
+			if (_compiledClip is null || _compiledRevision != _importedMetadataDocument.Revision)
+			{
+				var source = _importedClip;
+				var timeline = _importedMetadataDocument.Clip;
+				_compiledClip = new AnimationClip(source.Name, source.Duration, source.FramesPerSecond, source.Loop,
+					source.TransformTracks, source.PropertyTracks, source.SourceSkeletonName, source.SourceBindPoseLocal,
+					timeline.Curves.Select(curve => curve.Clone()).ToArray(),
+					timeline.Markers.Select(marker => marker.Clone()).ToArray());
+				_compiledRevision = _importedMetadataDocument.Revision;
+			}
+
+			return _compiledClip;
 		}
 
 		if (_compiledClip is null || _compiledRevision != Document.Revision)
@@ -1097,6 +1119,20 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 		{
 			_importedClip = AssetDatabase.GetInstance<AnimationClip>(asset.Id)
 				?? throw new InvalidOperationException("The imported clip could not be loaded.");
+			var path = _project.GetAbsoluteAssetPath(asset.Id, asset.RelativeSourcePath);
+			if (_documents.TryGetValue(asset.Id, out var document))
+			{
+				document.Relocate(path);
+			}
+			else
+			{
+				var metadata = new AssetMetadataStore().Load(path + ".meta");
+				var key = metadata.SubAssets.Single(entry => entry.NodeId == asset.Id).Key;
+				document = AnimationClipDocument.OpenImported(path, key, _importedClip);
+				_documents.Add(asset.Id, document);
+			}
+
+			_importedMetadataDocument = document;
 			IsReadOnly = true;
 		}
 
@@ -1173,7 +1209,7 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	/// </summary>
 	private bool ResolveUnsavedChanges(UnsavedChangesPolicy policy, PendingAction action)
 	{
-		if (Document is null || Document.IsDirty == false || IsReadOnly)
+		if (MetadataDocument is null || MetadataDocument.IsDirty == false || CanEditMetadata == false)
 		{
 			return true;
 		}

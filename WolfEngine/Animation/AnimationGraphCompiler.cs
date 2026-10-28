@@ -148,16 +148,16 @@ public sealed class CompiledAnimationGraph
 
 			if (node.Kind == AnimationNodeKind.Clip)
 			{
-				if (set is null || set.Clips.TryGetValue(node.ClipSlot, out var sequenceRef) == false)
+				if (set is null ||
+					set.Clips.TryGetValue(node.ClipSlot, out var entry) == false ||
+					entry is null)
 				{
 					throw new InvalidOperationException($"Missing clip slot '{node.ClipSlot}'.");
 				}
 
-				var sequence = resolve(sequenceRef.NodeId, typeof(AnimationSequence)) as AnimationSequence
-					?? throw new InvalidOperationException($"Unresolved sequence '{node.ClipSlot}'.");
-				var clip = resolve(sequence.Clip.NodeId, typeof(AnimationClip)) as AnimationClip
-					?? throw new InvalidOperationException($"Unresolved imported clip '{node.ClipSlot}'.");
-				Clips[i] = new BoundAnimationClip(clip, sequence, skeleton, transforms, properties, curveNames);
+				var clip = resolve(entry.Clip.NodeId, typeof(AnimationClip)) as AnimationClip
+					?? throw new InvalidOperationException($"Unresolved clip '{node.ClipSlot}'.");
+				Clips[i] = new BoundAnimationClip(clip, entry.PlaybackSpeed, skeleton, transforms, properties, curveNames);
 			}
 
 			if (node.Kind == AnimationNodeKind.MaskedBlend)
@@ -397,19 +397,19 @@ internal sealed class BoundAnimationClip
 
 	internal BoundAnimationClip(
 		AnimationClip clip,
-		AnimationSequence sequence,
+		float playbackSpeed,
 		Skeleton skeleton,
 		List<AnimationBinding> transforms,
 		List<AnimationBinding> properties,
 		List<string> curveNames)
 	{
 		Clip = clip;
-		if (float.IsFinite(sequence.PlaybackSpeed) == false || sequence.PlaybackSpeed < 0)
+		if (float.IsFinite(playbackSpeed) == false || playbackSpeed < 0)
 		{
 			throw new InvalidOperationException("Clip playback speed must be finite and nonnegative.");
 		}
 
-		PlaybackSpeed = sequence.PlaybackSpeed;
+		PlaybackSpeed = playbackSpeed;
 		if (clip.TransformTracks.Select(t => t.Binding).Distinct().Count() != clip.TransformTracks.Length ||
 			clip.PropertyTracks.Select(t => t.Binding).Distinct().Count() != clip.PropertyTracks.Length)
 		{
@@ -451,49 +451,15 @@ internal sealed class BoundAnimationClip
 		}
 
 		PropertySlots = clip.PropertyTracks.Select(track => Slot(properties, track.Binding)).ToArray();
-		Curves = sequence.Curves.Select(curve =>
+		new AnimationClipMetadata
 		{
-			if (string.IsNullOrWhiteSpace(curve.Name) || curve.Times.Length != curve.Values.Length || Enum.IsDefined(curve.Interpolation) == false)
-			{
-				throw new InvalidOperationException("Malformed named curve.");
-			}
+			Curves = clip.Curves.ToList(),
+			Markers = clip.Markers.ToList()
+		}.Validate(clip.Duration);
 
-			for (var i = 0; i < curve.Times.Length; i++)
-			{
-				if (float.IsFinite(curve.Times[i]) == false ||
-					float.IsFinite(curve.Values[i]) == false ||
-					curve.Times[i] < 0 ||
-					curve.Times[i] > clip.Duration ||
-					(i > 0 && curve.Times[i] <= curve.Times[i - 1]))
-				{
-					throw new InvalidOperationException($"Invalid keys for '{curve.Name}'.");
-				}
-			}
-
-			if (curve.Interpolation == CurveInterpolation.CubicHermite &&
-				(curve.InTangents?.Length != curve.Times.Length || curve.OutTangents?.Length != curve.Times.Length))
-			{
-				throw new InvalidOperationException("Cubic curves require tangents at every key.");
-			}
-
-			return curve.Compile();
-		}).ToArray();
-
-		if (sequence.Curves.Select(c => c.Name).Distinct(StringComparer.Ordinal).Count() != sequence.Curves.Count)
-		{
-			throw new InvalidOperationException("Duplicate named curve.");
-		}
-
-		CurveSlots = sequence.Curves.Select(curve => Slot(curveNames, curve.Name)).ToArray();
-		Markers = sequence.Markers.OrderBy(marker => marker.Time).Select(marker =>
-		{
-			if (string.IsNullOrWhiteSpace(marker.Name) || float.IsFinite(marker.Time) == false || marker.Time < 0 || marker.Time > clip.Duration)
-			{
-				throw new InvalidOperationException("Invalid animation marker.");
-			}
-
-			return new AnimationMarker { Name = marker.Name, Time = marker.Time };
-		}).ToArray();
+		Curves = clip.Curves.Select(curve => curve.Compile()).ToArray();
+		CurveSlots = clip.Curves.Select(curve => Slot(curveNames, curve.Name)).ToArray();
+		Markers = clip.Markers.OrderBy(marker => marker.Time).Select(marker => marker.Clone()).ToArray();
 	}
 
 	private static float[]? FindSharedTransformTimes(TransformTrack[] tracks)
