@@ -47,7 +47,11 @@ public sealed class EditorWindowRegistry
 		ProfilerWindow profiler,
 		MaterialImporterWindow materialImporter,
 		EditorPreferencesWindow preferences,
-		ProjectSettingsWindow projectSettings)
+		ProjectSettingsWindow projectSettings,
+		AnimationClipViewportWindow animationClipViewport,
+		AnimationClipBonesWindow animationClipBones,
+		AnimationClipInspectorWindow animationClipInspector,
+		AnimationClipTimelineWindow animationClipTimeline)
 	{
 		_workspaces = workspaces;
 		_notifications = notifications;
@@ -63,7 +67,11 @@ public sealed class EditorWindowRegistry
 			new(EditorWindowIds.Profiler, "Profiler", profiler),
 			new(EditorWindowIds.MaterialImporter, "Material Importer", materialImporter),
 			new(EditorWindowIds.Preferences, "Preferences", preferences),
-			new(EditorWindowIds.ProjectSettings, "Project Settings", projectSettings)
+			new(EditorWindowIds.ProjectSettings, "Project Settings", projectSettings),
+			new(EditorWindowIds.AnimationClipViewport, "Clip Viewport", animationClipViewport),
+			new(EditorWindowIds.AnimationClipBones, "Bones", animationClipBones),
+			new(EditorWindowIds.AnimationClipInspector, "Clip Inspector", animationClipInspector),
+			new(EditorWindowIds.AnimationClipTimeline, "Timeline", animationClipTimeline)
 		];
 	}
 

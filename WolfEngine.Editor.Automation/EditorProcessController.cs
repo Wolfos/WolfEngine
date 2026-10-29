@@ -296,6 +296,53 @@ public sealed class EditorProcessController : IAsyncDisposable
 		}
 	}
 
+	public Task<AnimationClipEditorStateResult> OpenClipEditorAsync(Guid assetId, bool discardUnsavedChanges, CancellationToken token) =>
+		GetRunningEditor().OpenClipEditorAsync(assetId, discardUnsavedChanges, token);
+
+	public Task<AnimationClipEditorStateResult> CreateClipAsync(string folder, string name, Guid skeletonId, CancellationToken token) =>
+		GetRunningEditor().CreateClipAsync(folder, name, skeletonId, token);
+
+	public Task<AnimationClipEditorStateResult> DuplicateClipAsync(Guid assetId, CancellationToken token) =>
+		GetRunningEditor().DuplicateClipAsync(assetId, token);
+
+	public Task<AnimationClipEditorStateResult> SelectClipBoneAsync(string? bone, CancellationToken token) =>
+		GetRunningEditor().SelectClipBoneAsync(bone, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipBoneLocalTransformAsync(
+		string bone,
+		System.Numerics.Vector3? position,
+		System.Numerics.Vector3? rotationDegrees,
+		System.Numerics.Vector3? scale,
+		CancellationToken token) =>
+		GetRunningEditor().SetClipBoneLocalTransformAsync(bone, position, rotationDegrees, scale, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipPlayheadAsync(int frame, CancellationToken token) =>
+		GetRunningEditor().SetClipPlayheadAsync(frame, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipAutoKeyAsync(bool enabled, CancellationToken token) =>
+		GetRunningEditor().SetClipAutoKeyAsync(enabled, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipKeyAsync(string? bone, CancellationToken token) =>
+		GetRunningEditor().SetClipKeyAsync(bone, token);
+
+	public Task<AnimationClipEditorStateResult> EditClipKeysAsync(string operation, IReadOnlyList<string> keys, int frameDelta, CancellationToken token) =>
+		GetRunningEditor().EditClipKeysAsync(operation, keys, frameDelta, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipMetadataAsync(string metadataJson, CancellationToken token) =>
+		GetRunningEditor().SetClipMetadataAsync(metadataJson, token);
+
+	public Task<AnimationClipEditorStateResult> ClipHistoryAsync(string operation, CancellationToken token) =>
+		GetRunningEditor().ClipHistoryAsync(operation, token);
+
+	public Task<AnimationClipEditorStateResult> SaveClipAsync(CancellationToken token) =>
+		GetRunningEditor().SaveClipAsync(token);
+
+	public Task<AnimationClipEditorStateResult> GetClipEditorStateAsync(CancellationToken token) =>
+		GetRunningEditor().GetClipEditorStateAsync(token);
+
+	public Task<FrameCaptureResult> CaptureClipPreviewAsync(string path, CancellationToken token) =>
+		GetRunningEditor().CaptureClipPreviewAsync(path, token);
+
 	public ValueTask DisposeAsync()
 	{
 		_startSignal.Dispose();

@@ -65,13 +65,14 @@ internal static class EditorShortcutCommandResolver
 				return EditorShortcutCommand.RefreshAssetDatabase;
 			}
 
-			if (snapshot.DuplicatePressed && focusedWindow == EditorFocusedWindow.Entities)
+			if (snapshot.DuplicatePressed &&
+			    (focusedWindow == EditorFocusedWindow.Entities || focusedWindow == EditorFocusedWindow.Document))
 			{
 				return EditorShortcutCommand.DuplicateFocusedSelection;
 			}
 		}
 
-		if (snapshot.ShiftDown && snapshot.DuplicatePressed)
+		if (snapshot.ShiftDown && snapshot.DuplicatePressed && focusedWindow != EditorFocusedWindow.Document)
 		{
 			return EditorShortcutCommand.ClearEntitySelection;
 		}
@@ -86,6 +87,7 @@ internal static class EditorShortcutCommandResolver
 		{
 			EditorFocusedWindow.Entities => EditorShortcutCommand.DeleteFocusedSelection,
 			EditorFocusedWindow.Assets => EditorShortcutCommand.DeleteFocusedSelection,
+			EditorFocusedWindow.Document => EditorShortcutCommand.DeleteFocusedSelection,
 			_ => EditorShortcutCommand.None
 		};
 	}

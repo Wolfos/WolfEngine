@@ -24,7 +24,6 @@ namespace WolfEngine.AssetPipeline;
 [JsonSerializable(typeof(MaterialAsset))]
 [JsonSerializable(typeof(AnimationGraph))]
 [JsonSerializable(typeof(AnimationSet))]
-[JsonSerializable(typeof(AnimationSequence))]
 [JsonSerializable(typeof(BoneMask))]
 public sealed partial class EngineJsonContext : JsonSerializerContext
 {

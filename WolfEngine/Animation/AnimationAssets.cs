@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 
 namespace WolfEngine.Animation;
 
@@ -105,17 +106,26 @@ public sealed class AnimationSet : IDataAsset
 {
 	public const string Extension = DataAssetFile.FileExtension;
 	public const string LegacyExtension = ".animset.json";
-	public const int CurrentVersion = 2;
+	public const int CurrentVersion = 3;
 
 	public int Version { get; set; } = CurrentVersion;
 	public AssetRef<Skeleton> Skeleton { get; set; }
-	public Dictionary<string, AssetRef<AnimationSequence>> Clips { get; set; } = new(StringComparer.Ordinal);
+
+	[Space(12)]
+	[Header("Clip slots")]
+	public Dictionary<string, AnimationSetEntry> Clips { get; set; } = new(StringComparer.Ordinal);
 }
 
 public sealed class AnimationMarker
 {
 	public string Name { get; set; } = "";
 	public float Time { get; set; }
+
+	public AnimationMarker Clone() => new()
+	{
+		Name = Name,
+		Time = Time
+	};
 }
 
 public sealed class AnimationCurve
@@ -127,6 +137,16 @@ public sealed class AnimationCurve
 	public float[]? InTangents { get; set; }
 	public float[]? OutTangents { get; set; }
 
+	public AnimationCurve Clone() => new()
+	{
+		Name = Name,
+		Interpolation = Interpolation,
+		Times = (float[])Times.Clone(),
+		Values = (float[])Values.Clone(),
+		InTangents = (float[]?)InTangents?.Clone(),
+		OutTangents = (float[]?)OutTangents?.Clone()
+	};
+
 	public FloatCurve Compile() => new(
 		(float[])Times.Clone(),
 		(float[])Values.Clone(),
@@ -135,18 +155,11 @@ public sealed class AnimationCurve
 		(float[]?)OutTangents?.Clone());
 }
 
-[RuntimeAsset(AssetType.DataAsset, typeof(AnimationSequence), typeof(IDataAssetRuntimeResolver))]
-public sealed class AnimationSequence : IDataAsset
+/// <summary>A clip assignment and its character-specific playback multiplier, owned by the set.</summary>
+public sealed class AnimationSetEntry
 {
-	public const string Extension = DataAssetFile.FileExtension;
-	public const string LegacyExtension = ".animclip.json";
-	public const int CurrentVersion = 2;
-
-	public int Version { get; set; } = CurrentVersion;
 	public AssetRef<AnimationClip> Clip { get; set; }
 	public float PlaybackSpeed { get; set; } = 1;
-	public List<AnimationCurve> Curves { get; set; } = [];
-	public List<AnimationMarker> Markers { get; set; } = [];
 }
 
 public sealed class BoneMaskEntry

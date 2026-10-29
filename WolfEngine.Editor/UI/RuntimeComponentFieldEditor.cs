@@ -57,6 +57,7 @@ public static class RuntimeComponentFieldEditor
 			.Where(field => field.IsInitOnly == false &&
 			                Attribute.IsDefined(field, typeof(NotSerializedAttribute)) == false &&
 			                Attribute.IsDefined(field, typeof(HideFromEditorAttribute)) == false)
+			.OrderBy(field => field.MetadataToken)
 			.ToArray();
 	}
 
@@ -74,6 +75,8 @@ public static class RuntimeComponentFieldEditor
 		var changed = false;
 		foreach (var field in EditableFields.GetOrAdd(valueType, GetEditableFields))
 		{
+			InspectorLayout.DrawDecorations(field);
+
 			var path = parentPath.Concat([field]).ToArray();
 			var fieldValue = field.GetValue(value);
 			if (ShouldDrawAsStructGroup(field.FieldType) && HasDrawableFields(field.FieldType))

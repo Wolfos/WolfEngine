@@ -19,7 +19,13 @@ public sealed class AnimationPreviewScene : IEditorRenderViewSource, IDisposable
     private readonly TransformSystem _transforms = new();
     private readonly Entity _camera;
     private readonly Entity _animator;
-    private readonly RenderConfig _config = new();
+    // Matches the material and clip previews: shadows and the sky are prepared from the primary view's
+    // sun, so with shadows on the preview would be lit at the authoring scene's sun angle.
+    private readonly RenderConfig _config = new()
+    {
+        AntiAliasing = new AntiAliasingConfig { Enabled = false },
+        ShadowMaps = new ShadowMapConfig { Enabled = false }
+    };
     private bool _disposed;
     public RenderViewId View { get; }
     public World World { get; } = new(WorldTag.Editor);
@@ -47,8 +53,8 @@ public sealed class AnimationPreviewScene : IEditorRenderViewSource, IDisposable
         foreach (var entry in World.View<SkinnedMeshRenderer>())
             if (entry.First.MeshAsset.Asset is { } mesh) radius = Math.Max(radius, mesh.BoundingSphere.Radius);
         radius = Math.Clamp(radius, 0.5f, 200);
-        var light = World.CreateEntity("Animation Preview Light", Matrix4x4.CreateFromYawPitchRoll(0.4f, 0.7f, 0));
-        World.AddComponent(light, new Light { Type = LightType.Directional, Color = ColorRGBA.White, Intensity = 2, Range = 25 });
+        var light = World.CreateEntity("Animation Preview Light", Matrix4x4.CreateFromYawPitchRoll(0.4f, 0.65f, 0));
+        World.AddComponent(light, new Light { Type = LightType.Directional, Color = ColorRGBA.White, Intensity = 2.25f, Range = 25, HorizonFade = true });
         var camera = new Camera { ScreenResolution = new global::WolfEngine.Mathematics.Int2(512, 512) }; camera.SetPerspective(45);
         var position = new Vector3(radius * 1.4f, radius, -radius * 3);
         Matrix4x4.Invert(Matrix4x4.CreateLookAtLeftHanded(position, new Vector3(0, radius * 0.5f, 0), Vector3.UnitY), out var cameraWorld);

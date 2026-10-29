@@ -196,7 +196,8 @@ public sealed class EditorProjectService : IEditorProjectService
 			var shouldRebuildAssetDatabase = Directory.Exists(libraryPath) == false;
 
 			// Upgrade sources before importing them; the importer cannot read the old reference shape.
-			var migratedAnimationAssets = AnimationAssetRefMigration.UpgradeProject(fullProjectRoot);
+			var migratedAnimationAssets = AnimationSequenceMigration.UpgradeProject(fullProjectRoot) +
+				AnimationAssetRefMigration.UpgradeProject(fullProjectRoot);
 			_projectRootPath = fullProjectRoot;
 			_shaderProvider?.SetProjectRoot(_projectRootPath);
 			_projectManifest = manifest;
@@ -211,7 +212,7 @@ public sealed class EditorProjectService : IEditorProjectService
 
 			if (migratedAnimationAssets > 0)
 			{
-				_notificationService?.ReportInfo($"Upgraded {migratedAnimationAssets} animation assets to asset references.");
+				_notificationService?.ReportInfo($"Upgraded {migratedAnimationAssets} animation assets to the current format.");
 			}
 			ClearUndoHistory();
 			return true;

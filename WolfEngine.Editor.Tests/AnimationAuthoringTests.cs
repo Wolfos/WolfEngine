@@ -57,7 +57,7 @@ public sealed class AnimationAuthoringTests
     }
     [Test] public void AnimationWorkspace_MigratesOldDefaultButPreservesCustomPanels()
     {
-        var old=new EditorWorkspacePreferences { Version=1, AnimationWorkspaceSeeded=true,
+        var old=new EditorWorkspacePreferences { Version=1, AnimationWorkspaceSeeded=true, AnimateWorkspaceSeeded=true,
             ActiveWorkspaceId=EditorWorkspaceService.AnimationWorkspaceId,
             Workspaces=[new(){Id=EditorWorkspaceService.AnimationWorkspaceId,Name="Animation",
                 OpenWindowIds=[EditorWindowIds.Assets,EditorWindowIds.Animation,EditorWindowIds.AssetEditor,EditorWindowIds.Log]}]};

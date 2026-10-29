@@ -1,4 +1,5 @@
 using ImGuiNET;
+using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Input;
 using WolfEngine.Rendering.Shaders;
@@ -22,6 +23,7 @@ public interface IEditorCommandService
 	void BindDeletionHandlers(IEditorEntityDeletionHandler? entityDeletionHandler, IEditorAssetDeletionHandler? assetDeletionHandler);
 	bool RequestNewScene();
 	bool RequestLoadScene(Guid assetId);
+	bool RestoreLastScene();
 	Task LoadSceneForAutomationAsync(Guid assetId, CancellationToken cancellationToken = default);
 	Guid? LoadingSceneAssetId { get; }
 	bool SaveScene();
@@ -65,6 +67,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private readonly IRenderer _renderer;
 	private readonly IEditorOperationService _operationService;
 	private readonly IFileDialogService _fileDialogService;
+	private readonly IEditorDocumentEditor[] _documentEditors;
 	private bool _leftCtrlDown;
 	private bool _rightCtrlDown;
 	private bool _leftShiftDown;
@@ -99,7 +102,8 @@ public sealed class EditorCommandService : IEditorCommandService
 		IRenderer renderer,
 		IEditorOperationService operationService,
 		IFileDialogService fileDialogService,
-		IInputSystem inputSystem)
+		IInputSystem inputSystem,
+		IEnumerable<IEditorDocumentEditor>? documentEditors = null)
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
@@ -113,6 +117,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
 		_fileDialogService = fileDialogService ?? throw new ArgumentNullException(nameof(fileDialogService));
 		ArgumentNullException.ThrowIfNull(inputSystem);
+		_documentEditors = documentEditors?.ToArray() ?? [];
 
 		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRedo", InputActionBinding.KeyY, callback => _redoPressedThisFrame |= callback.Value);
@@ -164,6 +169,25 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 
 		return QueueSceneReplacement(new PendingSceneReplacement(PendingSceneReplacementKind.LoadScene, assetId));
+	}
+
+	public bool RestoreLastScene()
+	{
+		if (_projectService.HasOpenProject == false ||
+			string.IsNullOrWhiteSpace(_projectService.ProjectRootPath))
+		{
+			return false;
+		}
+
+		var assetId = EditorPreferences.GetLastSceneAssetId(_projectService.ProjectRootPath);
+		if (assetId.HasValue == false ||
+			_projectService.TryGetAsset(assetId.Value, out var asset) == false ||
+			asset.Type != AssetType.Scene)
+		{
+			return false;
+		}
+
+		return RequestLoadScene(assetId.Value);
 	}
 
 	/// <summary>
@@ -218,6 +242,8 @@ public sealed class EditorCommandService : IEditorCommandService
 
 			_sceneWorkspace.SaveCurrentScene();
 			_interactionState.ClearSceneDirty();
+			PersistLastScene(_sceneWorkspace.CurrentScene.AssetId);
+
 			return true;
 		}
 		catch (Exception ex)
@@ -326,6 +352,22 @@ public sealed class EditorCommandService : IEditorCommandService
 		return _undoRedoService.Undo();
 	}
 
+	/// <summary>A document editor with keyboard focus takes undo, redo and save away from the scene.</summary>
+	private bool TryGetFocusedDocument(out IEditorDocumentEditor target)
+	{
+		foreach (var candidate in _documentEditors)
+		{
+			if (candidate.HasShortcutFocus)
+			{
+				target = candidate;
+				return true;
+			}
+		}
+
+		target = null!;
+		return false;
+	}
+
 	public bool Redo()
 	{
 		return _undoRedoService.Redo();
@@ -368,7 +410,17 @@ public sealed class EditorCommandService : IEditorCommandService
 			_backspacePressedThisFrame,
 			io.WantTextInput,
 			OperatingSystem.IsMacOS());
-		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, _interactionState.FocusedWindow);
+		// A focused document editor owns every selection and history shortcut, so none of them can
+		// reach the scene through the sticky focused window while that editor has the keyboard.
+		var hasDocument = TryGetFocusedDocument(out var document);
+		var focusedWindow = hasDocument ? EditorFocusedWindow.Document : _interactionState.FocusedWindow;
+		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, focusedWindow);
+		if (hasDocument)
+		{
+			RunDocumentShortcut(document, shortcut);
+			ResetShortcutPresses();
+			return;
+		}
 
 		switch (shortcut)
 		{
@@ -398,6 +450,40 @@ public sealed class EditorCommandService : IEditorCommandService
 				break;
 		}
 
+		ResetShortcutPresses();
+	}
+
+	/// <summary>
+	/// Shortcuts while a document editor has focus. Refresh still works everywhere; scene-only commands
+	/// such as New Scene do nothing rather than act on a window the user is not looking at.
+	/// </summary>
+	private void RunDocumentShortcut(IEditorDocumentEditor document, EditorShortcutCommand shortcut)
+	{
+		switch (shortcut)
+		{
+			case EditorShortcutCommand.Undo:
+				document.Undo();
+				break;
+			case EditorShortcutCommand.Redo:
+				document.Redo();
+				break;
+			case EditorShortcutCommand.SaveScene:
+				document.Save();
+				break;
+			case EditorShortcutCommand.RefreshAssetDatabase:
+				RefreshAssetDatabase();
+				break;
+			case EditorShortcutCommand.DuplicateFocusedSelection:
+				document.DuplicateSelection();
+				break;
+			case EditorShortcutCommand.DeleteFocusedSelection:
+				document.DeleteSelection();
+				break;
+		}
+	}
+
+	private void ResetShortcutPresses()
+	{
 		_undoPressedThisFrame = false;
 		_redoPressedThisFrame = false;
 		_newPressedThisFrame = false;
@@ -410,6 +496,11 @@ public sealed class EditorCommandService : IEditorCommandService
 
 	public void DrawPendingDialogs()
 	{
+		foreach (var editor in _documentEditors)
+		{
+			editor.DrawDialogs();
+		}
+
 		if (_openUnsavedScenePopup)
 		{
 			ImGui.OpenPopup(UnsavedScenePopupId);
@@ -531,6 +622,7 @@ public sealed class EditorCommandService : IEditorCommandService
 			}
 
 			_interactionState.ClearSceneDirty();
+			PersistLastScene(_sceneWorkspace.CurrentScene.AssetId);
 		}
 		catch (Exception ex)
 		{
@@ -564,6 +656,7 @@ public sealed class EditorCommandService : IEditorCommandService
 						_undoRedoService.Clear();
 						EditorGui.ClearEntitySelection();
 						_interactionState.ClearSceneDirty();
+						PersistLastScene(assetId);
 						automationCompletion?.TrySetResult();
 					}
 					catch (Exception exception)
@@ -586,6 +679,22 @@ public sealed class EditorCommandService : IEditorCommandService
 			_loadingSceneAssetId = null;
 			_notificationService.ReportError("Another editor operation is already in progress.");
 			automationCompletion?.TrySetException(new InvalidOperationException("Another editor operation is already in progress."));
+		}
+	}
+
+	private void PersistLastScene(Guid assetId)
+	{
+		var projectPath = _projectService.ProjectRootPath;
+		if (string.IsNullOrWhiteSpace(projectPath)) return;
+
+		try
+		{
+			EditorPreferences.SetLastSceneAssetId(projectPath, assetId);
+			EditorPreferences.Save();
+		}
+		catch (Exception exception)
+		{
+			_notificationService.ReportError($"Failed to save the last open scene preference: {exception.Message}");
 		}
 	}
 

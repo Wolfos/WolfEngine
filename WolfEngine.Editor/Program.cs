@@ -115,6 +115,9 @@ public static class Program
 		services.AddSingleton<PrefabAssetEditor>();
 		services.AddSingleton<ModelAssetEditor>();
         services.AddSingleton<AnimationWindow>();
+		services.AddSingleton<AnimationClipEditorSession>();
+		services.AddSingleton<IEditorDocumentEditor>(provider => provider.GetRequiredService<AnimationClipEditorSession>());
+		services.AddSingleton<IEditorAssetHandler, AnimationClipEditorAssetHandler>();
         foreach (var type in new[] { AssetType.AnimationGraph })
             services.AddSingleton<IEditorAssetHandler>(provider => new AnimationEditorAssetHandler(type,
                 provider.GetRequiredService<AnimationWindow>(), provider.GetRequiredService<IEditorProjectService>(), provider.GetRequiredService<IProjectAssetPipelineService>()));
@@ -168,5 +171,9 @@ public static class Program
 			provider.GetRequiredService<IEditorLogStore>(),
 			provider.GetRequiredService<IIconManager>()));
 		services.AddSingleton<SceneWindow>();
+		services.AddSingleton<AnimationClipViewportWindow>();
+		services.AddSingleton<AnimationClipBonesWindow>();
+		services.AddSingleton<AnimationClipInspectorWindow>();
+		services.AddSingleton<AnimationClipTimelineWindow>();
 	}
 }

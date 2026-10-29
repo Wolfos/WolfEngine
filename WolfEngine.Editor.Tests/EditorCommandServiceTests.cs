@@ -1,4 +1,5 @@
 using NSubstitute;
+using System.Text.Json;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
@@ -10,8 +11,135 @@ using WolfEngine.Utility;
 namespace WolfEngine.Editor.Tests;
 
 [TestFixture]
+[NonParallelizable]
 public sealed class EditorCommandServiceTests
 {
+	private string? _previousPreferencesPath;
+	private string _preferencesDirectory = null!;
+	private string _preferencesPath = null!;
+
+	[SetUp]
+	public void SetUpPreferences()
+	{
+		_previousPreferencesPath = Environment.GetEnvironmentVariable("WOLF_EDITOR_PREFERENCES_PATH");
+		_preferencesDirectory = Path.Combine(Path.GetTempPath(), "WolfEngine.SceneHistory.Tests", Guid.NewGuid().ToString("N"));
+		_preferencesPath = Path.Combine(_preferencesDirectory, "EditorPreferences.json");
+		Environment.SetEnvironmentVariable("WOLF_EDITOR_PREFERENCES_PATH", _preferencesPath);
+		_ = new EditorPreferences();
+	}
+
+	[TearDown]
+	public void TearDownPreferences()
+	{
+		Environment.SetEnvironmentVariable("WOLF_EDITOR_PREFERENCES_PATH", _previousPreferencesPath);
+		if (Directory.Exists(_preferencesDirectory))
+		{
+			Directory.Delete(_preferencesDirectory, true);
+		}
+	}
+
+	[Test]
+	public void LoadScene_PersistsIdentityAndRestoresThroughSceneReplacement()
+	{
+		var fixture = CreateCommandFixture();
+		var sceneId = Guid.NewGuid();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		fixture.ProjectService.TryGetAsset(sceneId, out Arg.Any<AssetDatabaseEntry>()).Returns(call =>
+		{
+			call[1] = new AssetDatabaseEntry { Id = sceneId, Type = AssetType.Scene, Name = "Renamed Scene" };
+
+			return true;
+		});
+		fixture.Service.RequestLoadScene(sceneId);
+
+		// Rehydrate the saved preferences to simulate a fresh editor session.
+		_ = JsonSerializer.Deserialize<EditorPreferences>(File.ReadAllText(_preferencesPath));
+		fixture.SceneWorkspace.ClearReceivedCalls();
+
+		Assert.That(fixture.Service.RestoreLastScene(), Is.True);
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+		fixture.SceneWorkspace.Received(1).ReplaceCurrentScene(Arg.Any<EditorScene>());
+	}
+
+	[Test]
+	public void RestoreLastScene_DoesNotUseAnotherProjectsScene()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		fixture.Service.RequestLoadScene(Guid.NewGuid());
+		fixture.ProjectService.ProjectRootPath.Returns("/other-project");
+		fixture.SceneWorkspace.ClearReceivedCalls();
+
+		Assert.That(fixture.Service.RestoreLastScene(), Is.False);
+		fixture.SceneWorkspace.DidNotReceive().LoadSceneAsset(Arg.Any<Guid>());
+	}
+
+	[TestCase(false, AssetType.Scene)]
+	[TestCase(true, AssetType.Material)]
+	public void RestoreLastScene_SkipsMissingOrNonSceneAssets(bool found, AssetType type)
+	{
+		var fixture = CreateCommandFixture();
+		var sceneId = Guid.NewGuid();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		EditorPreferences.SetLastSceneAssetId("/project", sceneId);
+		fixture.ProjectService.TryGetAsset(sceneId, out Arg.Any<AssetDatabaseEntry>()).Returns(call =>
+		{
+			call[1] = new AssetDatabaseEntry { Id = sceneId, Type = type };
+
+			return found;
+		});
+
+		Assert.That(fixture.Service.RestoreLastScene(), Is.False);
+		fixture.SceneWorkspace.DidNotReceive().LoadSceneAsset(Arg.Any<Guid>());
+	}
+
+	[Test]
+	public void NewScene_ClearsOnlyTheCurrentProjectsRememberedScene()
+	{
+		var fixture = CreateCommandFixture();
+		var otherSceneId = Guid.NewGuid();
+		EditorPreferences.SetLastSceneAssetId("/other-project", otherSceneId);
+		fixture.Service.RequestLoadScene(Guid.NewGuid());
+
+		fixture.Service.RequestNewScene();
+
+		_ = JsonSerializer.Deserialize<EditorPreferences>(File.ReadAllText(_preferencesPath));
+		Assert.That(EditorPreferences.GetLastSceneAssetId("/project"), Is.Null);
+		Assert.That(EditorPreferences.GetLastSceneAssetId("/other-project"), Is.EqualTo(otherSceneId));
+	}
+
+	[Test]
+	public void FailedSceneLoad_KeepsPreviousRememberedScene()
+	{
+		var fixture = CreateCommandFixture();
+		var previousSceneId = Guid.NewGuid();
+		EditorPreferences.SetLastSceneAssetId("/project", previousSceneId);
+		fixture.SceneWorkspace.When(workspace => workspace.LoadSceneAsset(Arg.Any<Guid>()))
+			.Do(_ => throw new InvalidOperationException("Invalid scene"));
+
+		fixture.Service.RequestLoadScene(Guid.NewGuid());
+
+		Assert.That(EditorPreferences.GetLastSceneAssetId("/project"), Is.EqualTo(previousSceneId));
+		fixture.SceneWorkspace.DidNotReceive().ReplaceCurrentScene(Arg.Any<EditorScene>());
+	}
+
+	[Test]
+	public void SaveNewScene_RemembersItsAssignedAssetId()
+	{
+		var fixture = CreateCommandFixture();
+		var sceneId = Guid.NewGuid();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		fixture.SceneWorkspace.When(workspace => workspace.SaveCurrentScene()).Do(_ =>
+		{
+			fixture.SceneWorkspace.CurrentScene.AssetId = sceneId;
+		});
+
+		Assert.That(fixture.Service.SaveScene(), Is.True);
+
+		_ = JsonSerializer.Deserialize<EditorPreferences>(File.ReadAllText(_preferencesPath));
+		Assert.That(EditorPreferences.GetLastSceneAssetId("/project"), Is.EqualTo(sceneId));
+	}
+
 	[Test]
 	public void EntitySelection_PreservesInsertionOrderAndAddsVisibleRange()
 	{
@@ -202,6 +330,8 @@ public sealed class EditorCommandServiceTests
 	public void ResolvePendingSceneReplacement_Cancel_KeepsCurrentScene()
 	{
 		var fixture = CreateCommandFixture();
+		var sceneId = Guid.NewGuid();
+		EditorPreferences.SetLastSceneAssetId("/project", sceneId);
 		fixture.InteractionState.MarkSceneDirty();
 		fixture.Service.RequestNewScene();
 
@@ -212,6 +342,7 @@ public sealed class EditorCommandServiceTests
 		fixture.SceneWorkspace.DidNotReceive().ResetToNewScene();
 		Assert.That(fixture.Service.HasPendingSceneReplacement, Is.False);
 		Assert.That(fixture.InteractionState.IsSceneDirty, Is.True);
+		Assert.That(EditorPreferences.GetLastSceneAssetId("/project"), Is.EqualTo(sceneId));
 	}
 
 	[Test]

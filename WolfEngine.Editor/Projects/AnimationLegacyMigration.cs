@@ -14,7 +14,7 @@ public static class AnimationLegacyMigration
     {
         var assets = Path.Combine(projectRoot, "Assets");
         if (!Directory.Exists(assets)) throw new DirectoryNotFoundException(assets);
-        var count = MigrateStandaloneAssets(assets);
+		var count = AnimationSequenceMigration.UpgradeProject(projectRoot) + MigrateStandaloneAssets(assets);
         foreach (var path in Directory.EnumerateFiles(assets, "*.json", SearchOption.AllDirectories).ToArray())
         {
             if (!(path.EndsWith(".cell.json", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".prefab.json", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".scene.json", StringComparison.OrdinalIgnoreCase))) continue;
@@ -33,7 +33,8 @@ public static class AnimationLegacyMigration
                     if (clipId != Guid.Empty)
                     {
                         var signature = data.ToJsonString(); var key = StableId(signature).ToString("N");
-                        var sequenceId = StableId("sequence:" + key); var setId = StableId("set:" + key); var graphId = StableId("graph:" + key);
+						var setId = StableId("set:" + key);
+						var graphId = StableId("graph:" + key);
                         var skeletonId = data["SkeletonAsset"]?["NodeId"]?.GetValue<Guid>() ?? Guid.Empty;
                         var playing = data["Playing"]?.GetValue<bool>() ?? true;
                         var clip = new AnimationNode { Kind = AnimationNodeKind.Clip, Name = "Clip", ClipSlot = "Clip",
@@ -43,8 +44,11 @@ public static class AnimationLegacyMigration
                         var graph = new AnimationGraph { Nodes = [clip, output], Output = output.Id,
                             Parameters = [new() { Name = "Playing", Type = AnimationParameterType.Bool, Default = playing ? 1 : 0 }],
                             Layout = [new() { NodeId = clip.Id, X = 20, Y = 20 }, new() { NodeId = output.Id, X = 250, Y = 20 }] };
-                        Write(sequenceId, key + ".clip" + AnimationSequence.Extension, new AnimationSequence { Clip = new() { NodeId = clipId } }, AssetType.DataAsset);
-                        Write(setId, key + ".set" + AnimationSet.Extension, new AnimationSet { Skeleton = new() { NodeId = skeletonId }, Clips = new() { ["Clip"] = new() { NodeId = sequenceId } } }, AssetType.DataAsset);
+						Write(setId, key + ".set" + AnimationSet.Extension, new AnimationSet
+						{
+							Skeleton = new() { NodeId = skeletonId },
+							Clips = new() { ["Clip"] = new() { Clip = new() { NodeId = clipId } } }
+						}, AssetType.DataAsset);
                         Write(graphId, key + AnimationGraph.Extension, graph, AssetType.AnimationGraph);
                         data["GraphAsset"] = new JsonObject { ["NodeId"] = graphId }; data["ClipSetAsset"] = new JsonObject { ["NodeId"] = setId };
                     }
@@ -77,7 +81,6 @@ public static class AnimationLegacyMigration
         foreach (var (extension, type) in new[]
         {
             (AnimationSet.LegacyExtension, typeof(AnimationSet)),
-            (AnimationSequence.LegacyExtension, typeof(AnimationSequence)),
             (BoneMask.LegacyExtension, typeof(BoneMask))
         })
         {

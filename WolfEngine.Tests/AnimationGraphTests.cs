@@ -11,19 +11,42 @@ public sealed class AnimationGraphTests
     private static AnimationNode Clip(string slot) => new() { Kind = AnimationNodeKind.Clip, ClipSlot = slot, Loop = true };
     private static AnimationClip Motion(string bone, float end, float duration = 1) => new("motion", duration, 30, true,
         [new(AnimationBinding.ForBone(bone), new Vector3Curve([0, duration], [Vector3.Zero, Vector3.UnitX * end]), QuaternionCurve.Empty, Vector3Curve.Empty)], [], "", []);
-    private CompiledAnimationGraph Program(AnimationGraph graph, Dictionary<string, AnimationClip>? clips = null,
-        Dictionary<string, AnimationSequence>? sequences = null, BoneMask? mask = null)
-    {
-        var assets = new Dictionary<Guid, object>(); var set = new AnimationSet();
-        foreach (var item in clips ?? [])
-        {
-            var clipId = Guid.NewGuid(); var sequenceId = Guid.NewGuid(); assets[clipId] = item.Value;
-            var sequence = sequences?.GetValueOrDefault(item.Key) ?? new AnimationSequence(); sequence.Clip = new() { NodeId = clipId };
-            assets[sequenceId] = sequence; set.Clips[item.Key] = new() { NodeId = sequenceId };
-        }
-        if (mask is not null) foreach (var node in graph.Nodes.Where(n => n.Kind == AnimationNodeKind.MaskedBlend)) { node.Mask = new() { NodeId = Guid.NewGuid() }; assets[node.Mask.NodeId] = mask; }
-        return AnimationGraphCompiler.Compile(graph, _skeleton, set, (id, _) => assets.GetValueOrDefault(id));
-    }
+	private CompiledAnimationGraph Program(
+		AnimationGraph graph,
+		Dictionary<string, AnimationClip>? clips = null,
+		Dictionary<string, AnimationClipMetadata>? timelines = null,
+		BoneMask? mask = null,
+		Dictionary<string, float>? playbackSpeeds = null)
+	{
+		var assets = new Dictionary<Guid, object>();
+		var set = new AnimationSet();
+		foreach (var item in clips ?? [])
+		{
+			var clipId = Guid.NewGuid();
+			var source = item.Value;
+			var timeline = timelines?.GetValueOrDefault(item.Key);
+			assets[clipId] = timeline is null ? source : new AnimationClip(
+				source.Name, source.Duration, source.FramesPerSecond, source.Loop,
+				source.TransformTracks, source.PropertyTracks, source.SourceSkeletonName, source.SourceBindPoseLocal,
+				timeline.Curves.ToArray(), timeline.Markers.ToArray());
+			set.Clips[item.Key] = new AnimationSetEntry
+			{
+				Clip = new() { NodeId = clipId },
+				PlaybackSpeed = playbackSpeeds?.GetValueOrDefault(item.Key, 1) ?? 1
+			};
+		}
+
+		if (mask is not null)
+		{
+			foreach (var node in graph.Nodes.Where(node => node.Kind == AnimationNodeKind.MaskedBlend))
+			{
+				node.Mask = new() { NodeId = Guid.NewGuid() };
+				assets[node.Mask.NodeId] = mask;
+			}
+		}
+
+		return AnimationGraphCompiler.Compile(graph, _skeleton, set, (id, _) => assets.GetValueOrDefault(id));
+	}
     private static AnimationGraph Graph(AnimationNode result, params AnimationNode[] nodes)
     {
         var output = new AnimationNode { Kind = AnimationNodeKind.Output, Inputs = [result.Id] };
@@ -415,9 +438,52 @@ public sealed class AnimationGraphTests
         instance.Seek(.75f);
         Assert.That(instance.Output.Bones[0].Position.X,Is.EqualTo(.75f)); Assert.That(instance.Markers,Is.Empty);
     }
-    [Test] public void SequencePlaybackSpeed_IsAuthoredSeparatelyFromImportedKeys()
+	[Test]
+	public void SharedClip_HasIndependentSetSpeeds_AndScalesCurvesAndMarkersWithMotion()
+	{
+		var motion = Motion("root", 1);
+		var clip = new AnimationClip(motion.Name, motion.Duration, motion.FramesPerSecond, motion.Loop,
+			motion.TransformTracks, motion.PropertyTracks, "", [],
+			[new() { Name = "Weight", Times = [0, 1], Values = [0, 1] }],
+			[new() { Name = "Step", Time = .5f }]);
+		var clipId = Guid.NewGuid();
+		var node = Clip("Run");
+		node.Speed = 3;
+		var graph = Graph(node);
+		var fastSet = new AnimationSet { Clips = new() { ["Run"] = new() { Clip = new() { NodeId = clipId }, PlaybackSpeed = 2 } } };
+		var slowSet = new AnimationSet { Clips = new() { ["Run"] = new() { Clip = new() { NodeId = clipId }, PlaybackSpeed = .5f } } };
+		object? Resolve(Guid id, Type type)
+		{
+			Assert.That(type, Is.EqualTo(typeof(AnimationClip)));
+
+			return id == clipId ? clip : null;
+		}
+
+		var fast = AnimationGraphCompiler.Compile(graph, _skeleton, fastSet, Resolve).CreateInstance();
+		var slow = AnimationGraphCompiler.Compile(graph, _skeleton, slowSet, Resolve).CreateInstance();
+		fast.Evaluate(.1f);
+		slow.Evaluate(.1f);
+
+		Assert.That(fast.Output.Bones[0].Position.X, Is.EqualTo(.6f).Within(1e-6));
+		Assert.That(slow.Output.Bones[0].Position.X, Is.EqualTo(.15f).Within(1e-6));
+		Assert.That(fast.GetCurve(fast.Program.GetCurve("Weight")), Is.EqualTo(.6f).Within(1e-6));
+		Assert.That(fast.Markers.Single().Name, Is.EqualTo("Step"));
+		Assert.That(slow.Markers, Is.Empty);
+		Assert.That(clip.Duration, Is.EqualTo(1));
+	}
+
+	[TestCase(-1f)]
+	[TestCase(float.NaN)]
+	[TestCase(float.PositiveInfinity)]
+	public void InvalidSetPlaybackSpeed_IsRejected(float speed)
+	{
+		Assert.That(() => Program(Graph(Clip("Run")), new() { ["Run"] = Motion("root", 1) },
+			playbackSpeeds: new() { ["Run"] = speed }), Throws.TypeOf<InvalidOperationException>());
+	}
+
+    [Test] public void SetPlaybackSpeed_IsAuthoredSeparatelyFromClipData()
     {
-        var node=Clip("A"); var instance=Program(Graph(node),new(){["A"]=Motion("root",1)},new(){["A"]=new(){PlaybackSpeed=2}}).CreateInstance();
+        var node=Clip("A"); var instance=Program(Graph(node),new(){["A"]=Motion("root",1)},playbackSpeeds: new() { ["A"] = 2 }).CreateInstance();
         instance.Evaluate(.2f); Assert.That(instance.Output.Bones[0].Position.X,Is.EqualTo(.4f).Within(1e-6));
     }
 

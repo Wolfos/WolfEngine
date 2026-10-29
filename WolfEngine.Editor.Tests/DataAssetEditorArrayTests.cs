@@ -3,6 +3,7 @@ using System.Text.Json;
 using ImGuiNET;
 using NSubstitute;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 
@@ -31,6 +32,72 @@ public sealed class DataAssetEditorArrayTests
 	public void TearDown()
 	{
 		ImGui.DestroyContext(_context);
+	}
+
+	[Test]
+	public void ObjectArrayPropertiesUseBaseThenDerivedDeclarationOrderAndDrawDecorations()
+	{
+		var seen = new List<(PropertyDrawerContext Context, float Y)>();
+		_drawers.Draw(Arg.Any<PropertyDrawerContext>()).Returns(call =>
+		{
+			var context = call.Arg<PropertyDrawerContext>();
+			if (context.ValueType == typeof(DecoratedEntry))
+			{
+				ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+				return new PropertyDrawerResult(false, false, context.Value);
+			}
+
+			seen.Add((context, ImGui.GetCursorPosY()));
+			ImGui.TextUnformatted(context.Label);
+
+			return new PropertyDrawerResult(true, false, context.Value);
+		});
+
+		var result = DrawOpenArray("Entries", typeof(DecoratedEntry[]), new[] { new DecoratedEntry() });
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(result.Changed, Is.False);
+			Assert.That(seen.Select(entry => entry.Context.Label), Is.EqualTo(new[] { "Zebra", "Alpha", "Middle" }));
+			Assert.That(seen.All(entry => entry.Context.Member is not null), Is.True);
+			Assert.That(seen[2].Y - seen[1].Y, Is.GreaterThan(seen[1].Y - seen[0].Y + 20.0f));
+		});
+	}
+
+	[Test]
+	public void ComponentDecorationsPreserveFieldOrderAndEditsAndSkipHiddenFields()
+	{
+		var seen = new List<(string Name, float Y)>();
+		_drawers.Draw(Arg.Any<PropertyDrawerContext>()).Returns(call =>
+		{
+			var context = call.Arg<PropertyDrawerContext>();
+			seen.Add((context.Label, ImGui.GetCursorPosY()));
+			ImGui.TextUnformatted(context.Label);
+
+			return context.Label == nameof(DecoratedComponent.Alpha)
+				? new PropertyDrawerResult(true, true, 42)
+				: new PropertyDrawerResult(true, false, context.Value);
+		});
+		object component = new DecoratedComponent();
+		var edits = new List<RuntimeComponentFieldEditor.FieldEdit>();
+
+		BeginFrame();
+		var changed = RuntimeComponentFieldEditor.ApplyPublicFields(
+			typeof(DecoratedComponent),
+			_drawers,
+			ref component,
+			edits: edits);
+		EndFrame();
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(changed, Is.True);
+			Assert.That(((DecoratedComponent)component).Alpha, Is.EqualTo(42));
+			Assert.That(edits, Has.Count.EqualTo(1));
+			Assert.That(edits[0].Path.Single().Name, Is.EqualTo(nameof(DecoratedComponent.Alpha)));
+			Assert.That(seen.Select(entry => entry.Name), Is.EqualTo(new[] { "Zebra", "Alpha", "Middle" }));
+			Assert.That(seen[2].Y - seen[1].Y, Is.GreaterThan(seen[1].Y - seen[0].Y + 20.0f));
+		});
 	}
 
 	[Test]
@@ -318,6 +385,34 @@ public sealed class DataAssetEditorArrayTests
 	public sealed class ArrayAsset : IDataAsset
 	{
 		public PlayerEntry[] Players { get; set; } = [];
+	}
+
+	public class DecoratedEntryBase
+	{
+		public int Zebra { get; set; }
+	}
+
+	public sealed class DecoratedEntry : DecoratedEntryBase
+	{
+		public int Alpha { get; set; }
+
+		[Header("Details")]
+		[Space(24)]
+		public int Middle { get; set; }
+	}
+
+	public struct DecoratedComponent : IEntityComponent
+	{
+		public int Zebra;
+		public int Alpha;
+
+		[HideFromEditor]
+		[Space(1000)]
+		public int Hidden;
+
+		[Header("Details")]
+		[Space(24)]
+		public int Middle;
 	}
 
 	public sealed class PlayerEntry
