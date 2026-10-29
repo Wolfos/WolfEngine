@@ -462,7 +462,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			{
 				ImGui.EndChild();
 			}
-		});
+		}, referenceKind: EditorReferenceKind.Entity);
 
 		result = changed
 			? new PropertyDrawerResult(true, true, nextEntity)

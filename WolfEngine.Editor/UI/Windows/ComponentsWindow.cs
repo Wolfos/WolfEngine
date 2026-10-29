@@ -45,7 +45,6 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private Type? _pendingRemovedComponentType;
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
-    private static readonly Vector2 ComponentActionIconSize = Vector2.One * 15.5f;
 
     public ComponentsWindow(
         IIconManager icons,
@@ -104,7 +103,6 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 		{
             _pendingRemovedComponentType = null;
             DrawEntityControls(scene, EditorGui.SelectedEntity);
-            Draw(scene, EditorGui.SelectedEntity, typeof(NameComponent));
             Draw(scene, EditorGui.SelectedEntity, typeof(LocalTransform));
             foreach (var componentType in EditorGui.SelectedComponentTypes)
             {
@@ -139,18 +137,37 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
     }
 
-    public void DrawEntityControls(EditorScene scene, Entity entity)
-    {
-        var isEnabled = scene.World.IsEnabled(entity);
-        if (EditorUIUtility.Checkbox("Enabled", ref isEnabled))
-        {
-            scene.World.SetEnabled(entity, isEnabled);
-            _interactionState.MarkSceneDirty(scene.World);
-        }
+	public void DrawEntityControls(EditorScene scene, Entity entity)
+	{
+		if (scene.World.HasComponent<NameComponent>(entity))
+		{
+			Draw(scene, entity, typeof(NameComponent));
+		}
+		else
+		{
+			ImGui.TextUnformatted("Entity");
+			ImGui.SameLine();
+			DrawEntityEnabledToggle(scene, entity);
+		}
 
-        DrawPrefabControls(scene, entity);
-        ImGui.Separator();
-    }
+		DrawPrefabControls(scene, entity);
+		InspectorLayout.DrawSpace();
+	}
+
+	private void DrawEntityEnabledToggle(EditorScene scene, Entity entity)
+	{
+		var isEnabled = scene.World.IsEnabled(entity);
+		if (EditorUIUtility.Checkbox("##EntityEnabled", ref isEnabled))
+		{
+			scene.World.SetEnabled(entity, isEnabled);
+			_interactionState.MarkSceneDirty(scene.World);
+		}
+
+		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+		{
+			ImGui.SetTooltip(isEnabled ? "Entity enabled" : "Entity disabled");
+		}
+	}
 
     public void Draw(EditorScene scene, Entity entity, Type componentType)
     {
@@ -165,14 +182,21 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         entity = sourceEntity;
 
+		if (componentType == typeof(NameComponent))
+		{
+			DrawComponentEditorGeneric<NameComponent>(scene, entity, _icons, _propertyDrawerRegistry, _renderGraph, _interactionState);
+			return;
+		}
+
+		using var section = new EditorComponentSection(componentType);
+
         if (componentType == typeof(TerrainComponent))
         {
             DrawTerrainComponentEditor(scene, scene.World, entity, _propertyDrawerRegistry, _interactionState);
             return;
         }
 
-        if (componentType == typeof(NameComponent) ||
-            componentType == typeof(LocalTransform) ||
+        if (componentType == typeof(LocalTransform) ||
             componentType == typeof(MeshRenderer) ||
             componentType == typeof(Light))
         {
@@ -295,6 +319,10 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
             var iconTexture = ResolveIconTexture(iconName, icons);
             var iconPickerPopupId = $"Icon Picker##{entity.Index}:{entity.Generation}";
+			var rowY = ImGui.GetCursorPosY();
+			var rowHeight = ImGui.GetFrameHeight();
+			var toggleWidth = ImGui.GetFontSize() + EditorField.ControlPaddingY * 2.0f;
+			ImGui.BeginGroup();
             if(ImGui.ImageButton("IconButton", iconTexture, EntityIconSize))
             {
                 ImGui.OpenPopup(iconPickerPopupId);
@@ -302,7 +330,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
             DrawIconPickerModal(scene, entity, iconPickerPopupId, icons, interactionState);
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+			ImGui.SetNextItemWidth(MathF.Max(1.0f, ImGui.GetContentRegionAvail().X - toggleWidth - ImGui.GetStyle().ItemSpacing.X));
             var hasMixedName = IsMixed(scene, typeof(NameComponent), [nameof(NameComponent.Name)]);
             if (ImGui.InputText("##value", ref value, 256))
             {
@@ -318,17 +346,28 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 ImGui.SetTooltip("Multiple values");
             }
 
-            ImGui.Separator();
+			ImGui.SameLine();
+			ImGui.SetCursorPosY(rowY + (rowHeight - toggleWidth) * 0.5f);
+			DrawEntityEnabledToggle(scene, entity);
+			ImGui.EndGroup();
             ImGui.PopID();
             return;
         }
 
         if (typeof(T) == typeof(LocalTransform))
         {
+			if (EditorComponentSection.DrawHeader("Transform") == false)
+			{
+				ImGui.PopID();
+				return;
+			}
+
             ref var local = ref Unsafe.As<T, LocalTransform>(ref component);
 
             var position = local.LocalPosition;
-            if (DrawWithMixedValue(IsTransformMixed(scene, transform => transform.LocalPosition), () => EditorUIUtility.InputVector3("LocalPosition", ref position)))
+			if (DrawWithMixedValue(
+				IsTransformMixed(scene, transform => transform.LocalPosition),
+				() => EditorUIUtility.InputVector3("Local position", ref position)))
             {
                 ApplyTransformEdit(scene, target => world.SetLocalPosition(target, position));
             }
@@ -342,12 +381,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             }
 
             var scale = local.LocalScale;
-            if (DrawWithMixedValue(IsTransformMixed(scene, transform => transform.LocalScale), () => EditorUIUtility.InputVector3("LocalScale", ref scale)))
+			if (DrawWithMixedValue(
+				IsTransformMixed(scene, transform => transform.LocalScale),
+				() => EditorUIUtility.InputVector3("Local scale", ref scale)))
             {
                 ApplyTransformEdit(scene, target => world.SetLocalScale(target, scale));
             }
 
-            ImGui.Separator();
             ImGui.PopID();
             return;
         }
@@ -403,7 +443,6 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 });
             }
 
-            ImGui.Separator();
             ImGui.PopID();
             return;
         }
@@ -469,7 +508,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
             if (lightValue.Type == LightType.Directional)
             {
-                if (DrawWithMixedValue(IsMixed(scene, typeof(Light), [nameof(Light.HorizonFade)]), () => EditorUIUtility.Checkbox(nameof(Light.HorizonFade), ref lightValue.HorizonFade)))
+				if (DrawWithMixedValue(
+					IsMixed(scene, typeof(Light), [nameof(Light.HorizonFade)]),
+					() => EditorUIUtility.Checkbox("Horizon fade", ref lightValue.HorizonFade)))
                 {
                     ApplyLightEdit(scene, target =>
                     {
@@ -479,7 +520,6 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 }
             }
 
-            ImGui.Separator();
             ImGui.PopID();
             return;
         }
@@ -528,7 +568,6 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             ApplyGenericComponentEdits(scene, componentType, edits);
         }
 
-        ImGui.Separator();
         ImGui.PopID();
     }
 
@@ -627,7 +666,6 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             ImGui.EndDisabled();
         }
 
-        ImGui.Separator();
         ImGui.PopID();
     }
 
@@ -853,51 +891,12 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         return JsonSerializer.Serialize(data, AssetJson.SerializerOptions);
     }
 
-    private bool BeginComponentSection(string label, out bool removeRequested)
-    {
-        removeRequested = false;
+	private bool BeginComponentSection(string label, out bool removeRequested)
+	{
+		_icons.TryGet("delete", out var deleteIcon);
 
-        var pushedBoldHeader = ImGuiUiSystem.PushBoldFont();
-        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0.0f);
-        var isOpen = ImGui.CollapsingHeader(label, ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.AllowOverlap);
-        ImGui.PopStyleVar();
-        ImGuiUiSystem.PopFontIfPushed(pushedBoldHeader);
-
-        if (_icons.TryGet("delete", out var deleteIcon) == false)
-        {
-            return isOpen;
-        }
-
-        var cursorAfterHeader = ImGui.GetCursorPos();
-        var headerMin = ImGui.GetItemRectMin();
-        var headerMax = ImGui.GetItemRectMax();
-        var frameHeight = headerMax.Y - headerMin.Y;
-        var framePadding = new Vector2(
-            MathF.Max((frameHeight - ComponentActionIconSize.X) * 0.5f, 0.0f),
-            MathF.Max((frameHeight - ComponentActionIconSize.Y) * 0.5f, 0.0f));
-        var buttonWidth = ComponentActionIconSize.X + (framePadding.X * 2.0f);
-        var buttonHeight = ComponentActionIconSize.Y + (framePadding.Y * 2.0f);
-        var buttonPos = new Vector2(
-            headerMax.X - buttonWidth - ImGui.GetStyle().FramePadding.X,
-            headerMin.Y + MathF.Max((frameHeight - buttonHeight) * 0.5f, 0.0f));
-
-        ImGui.SetCursorScreenPos(buttonPos);
-        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.0f, 0.0f, 0.0f, 0.0f));
-        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1.0f, 1.0f, 1.0f, 0.12f));
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 1.0f, 1.0f, 0.18f));
-        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0.0f);
-        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, framePadding);
-        removeRequested = ImGui.ImageButton($"Remove{label}", deleteIcon, ComponentActionIconSize);
-        ImGui.PopStyleVar(2);
-        ImGui.PopStyleColor(3);
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip("Remove component");
-        }
-
-        ImGui.SetCursorPos(cursorAfterHeader);
-        return isOpen;
-    }
+		return EditorComponentSection.DrawHeader(label, deleteIcon, out removeRequested);
+	}
 
     private void RemoveComponent(EditorScene scene, Entity entity, Type componentType)
     {

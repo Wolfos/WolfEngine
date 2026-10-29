@@ -457,6 +457,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		var primary = new ColorRGBA(0.675f,0.78f,0.984f, 1.0f);
 		var secondary = new ColorRGBA(0.745f,0.776f,0.855f, 1.0f);
 		var secondaryContainer = new ColorRGBA(0.247f,0.275f,0.337f, 1.0f);
+		var fieldSurface = new ColorRGBA(0.188f, 0.196f, 0.216f, 1.0f);
 		var border = new ColorRGBA(0.00f, 0.00f, 0.00f, 0.35f);
 		var separator    = new ColorRGBA(1.00f, 1.00f, 1.00f, 0.06f);
 		
@@ -481,6 +482,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.WindowMenuButtonPosition = ImGuiDir.None;
 		
 		style.Colors[(int)ImGuiCol.Text] = textColor;
+		style.Colors[(int)ImGuiCol.TextDisabled] = secondary;
 		style.Colors[(int)ImGuiCol.WindowBg] = bgColor;
 		style.Colors[(int)ImGuiCol.ChildBg] = bgDark;
 		style.Colors[(int)ImGuiCol.MenuBarBg] = bgDark;
@@ -509,9 +511,9 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.Colors[(int)ImGuiCol.TabHovered] = bgColor;
 		style.Colors[(int)ImGuiCol.TabSelectedOverline] = default(ColorRGBA);
 		
-		style.Colors[(int)ImGuiCol.FrameBg] = secondaryContainer;
-		style.Colors[(int)ImGuiCol.FrameBgHovered] = secondaryContainer;
-		style.Colors[(int)ImGuiCol.FrameBgActive] = secondaryContainer;
+		style.Colors[(int)ImGuiCol.FrameBg] = fieldSurface;
+		style.Colors[(int)ImGuiCol.FrameBgHovered] = bgBright;
+		style.Colors[(int)ImGuiCol.FrameBgActive] = fieldSurface;
 		style.Colors[(int)ImGuiCol.CheckMark] = primary;
 		style.Colors[(int)ImGuiCol.SliderGrab] = primary;
 		style.Colors[(int)ImGuiCol.SliderGrabActive] = primary;
