@@ -65,10 +65,20 @@ public sealed class AnimationClipEditingTests
 
 		_project = Substitute.For<IEditorProjectService>();
 		_project.ProjectRootPath.Returns(_root);
-		_project.CurrentAssetDatabase.Returns(new AssetDatabase
+		var database = new AssetDatabase
 		{
 			Assets = [_skeletonAsset, _modelAsset, _clipAsset, _importedClipAsset]
-		});
+		};
+		_project.CurrentAssetDatabase.Returns(database);
+
+		// Saving looks the clip up by id to find its current file, as the real project service allows.
+		_project.TryGetAsset(Arg.Any<Guid>(), out Arg.Any<AssetDatabaseEntry>())
+			.Returns(call =>
+			{
+				var found = database.Assets.FirstOrDefault(asset => asset.Id == call.ArgAt<Guid>(0));
+				call[1] = found!;
+				return found is not null;
+			});
 		_project.GetAbsoluteAssetPath(Arg.Any<Guid>(), Arg.Any<string>())
 			.Returns(call => Path.Combine(_root, call.ArgAt<string>(1)));
 		_project.IsAssetReadOnly(Arg.Any<Guid>()).Returns(false);

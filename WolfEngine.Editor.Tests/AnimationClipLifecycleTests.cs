@@ -181,6 +181,99 @@ public sealed class AnimationClipLifecycleTests
 	}
 
 	[Test]
+	public void Save_FollowsARenameToTheNewFile()
+	{
+		_session.CreateClip("Assets", "Old", _skeletonAsset.Id);
+		var id = _session.AssetId;
+		RenameSource(id, "Assets/Characters/Renamed.anim.json", replaceEntry: true);
+		_session.Document!.SetKey("arm", 3, Pose);
+
+		Assert.That(_session.Save(), Is.True);
+
+		Assert.That(File.Exists(Path.Combine(_root, "Assets/Old.anim.json")), Is.False);
+		Assert.That(AuthoredAnimationClipJson.Read(Path.Combine(_root, "Assets/Characters/Renamed.anim.json")).FindBoneTrack("arm"), Is.Not.Null);
+		_project.Received().RefreshAssetSource("Assets/Characters/Renamed.anim.json");
+		Assert.That(_session.ClipName, Is.EqualTo("Renamed"));
+	}
+
+	[Test]
+	public void Save_FollowsARenameThatUpdatedTheAssetEntryInPlace()
+	{
+		_session.CreateClip("Assets", "Old", _skeletonAsset.Id);
+		RenameSource(_session.AssetId, "Assets/Renamed.anim.json", replaceEntry: false);
+		_session.Document!.SetKey("arm", 3, Pose);
+
+		Assert.That(_session.Save(), Is.True);
+
+		Assert.That(File.Exists(Path.Combine(_root, "Assets/Old.anim.json")), Is.False);
+		Assert.That(File.Exists(Path.Combine(_root, "Assets/Renamed.anim.json")), Is.True);
+	}
+
+	[Test]
+	public void Save_RefusesWhenTheAssetWasDeleted()
+	{
+		_session.CreateClip("Assets", "Doomed", _skeletonAsset.Id);
+		var path = Path.Combine(_root, "Assets/Doomed.anim.json");
+		_assets.RemoveAll(asset => asset.Id == _session.AssetId);
+		File.Delete(path);
+		_session.Document!.SetKey("arm", 3, Pose);
+
+		Assert.That(_session.Save(), Is.False);
+
+		Assert.That(File.Exists(path), Is.False);
+		Assert.That(_session.Diagnostic, Does.Contain("no longer exists"));
+		Assert.That(_session.Document.IsDirty, Is.True);
+	}
+
+	[Test]
+	public void SaveImportedAnnotations_FollowsAMovedModelFile()
+	{
+		_session.Open(_importedClipAsset);
+		var oldModel = Path.Combine(_root, _importedClipAsset.RelativeSourcePath);
+		RenameSource(_importedClipAsset.Id, "Assets/Moved.fbx", replaceEntry: true);
+		_session.MetadataDocument!.SetMetadata(new AnimationClipMetadata
+		{
+			Markers = [new() { Name = "Step", Time = .5f }]
+		});
+
+		Assert.That(_session.Save(), Is.True);
+
+		Assert.That(File.Exists(oldModel + ".meta"), Is.False);
+		var metadata = new AssetMetadataStore().Load(Path.Combine(_root, "Assets/Moved.fbx.meta"));
+		Assert.That(metadata.GetImportSettingsOrDefault(() => new ModelImportSettings())
+			.AnimationClips["animation:0"].Markers.Single().Name, Is.EqualTo("Step"));
+	}
+
+	/// <summary>Moves a source file and its .meta, then updates the asset entry the way a rename in Assets does.</summary>
+	private void RenameSource(Guid assetId, string newRelativePath, bool replaceEntry)
+	{
+		var entry = _assets.Single(asset => asset.Id == assetId);
+		var oldPath = Path.Combine(_root, entry.RelativeSourcePath);
+		var newPath = Path.Combine(_root, newRelativePath);
+		Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+		File.Move(oldPath, newPath);
+		if (File.Exists(oldPath + ".meta"))
+		{
+			File.Move(oldPath + ".meta", newPath + ".meta");
+		}
+
+		if (replaceEntry == false)
+		{
+			entry.RelativeSourcePath = newRelativePath;
+			return;
+		}
+
+		_assets[_assets.IndexOf(entry)] = new AssetDatabaseEntry
+		{
+			Id = entry.Id,
+			SourceId = entry.SourceId,
+			Type = entry.Type,
+			Name = Path.GetFileName(newRelativePath),
+			RelativeSourcePath = newRelativePath
+		};
+	}
+
+	[Test]
 	public void CreateClip_WritesAnEmptyClipAndOpensIt()
 	{
 		Assert.That(_session.CreateClip("Assets/Characters", "Sword Attack", _skeletonAsset.Id), Is.True);

@@ -486,6 +486,7 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 
 		_lastTickFrame = frame;
 		CheckProject();
+		TryFollowAssetLocation();
 		SyncBinding();
 		FollowAssetSelection();
 		Advance(ImGui.GetIO().DeltaTime);
@@ -850,6 +851,13 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 			return false;
 		}
 
+		// The file may have been renamed or moved since the clip was opened; never save to where it used to be.
+		if (TryFollowAssetLocation() == false)
+		{
+			Diagnostic = $"Could not save '{ClipName}': its asset no longer exists in the project.";
+			return false;
+		}
+
 		try
 		{
 			MetadataDocument!.Save();
@@ -1093,6 +1101,34 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 
 		preview.ApplyPose();
 		_appliedPose = key;
+	}
+
+	/// <summary>
+	/// Looks the open clip up by its asset id and points its document at the source file's current
+	/// location, so renames and moves in the asset browser are followed. Returns false when the asset
+	/// is no longer in the project.
+	/// </summary>
+	private bool TryFollowAssetLocation()
+	{
+		if (HasClip == false || _project.TryGetAsset(AssetId, out var current) == false)
+		{
+			return false;
+		}
+
+		_asset = current;
+
+		// Compared against the document rather than the cached entry, which the project may update in place.
+		var path = _project.GetAbsoluteAssetPath(current.Id, current.RelativeSourcePath);
+		if (MetadataDocument is not { } document || string.Equals(document.Path, path, StringComparison.Ordinal))
+		{
+			return true;
+		}
+
+		document.Relocate(path);
+		ClipName = Document is not null
+			? AuthoredAnimationClipFile.GetClipName(current.RelativeSourcePath)
+			: current.Name;
+		return true;
 	}
 
 	private void LoadClip(AssetDatabaseEntry asset)
