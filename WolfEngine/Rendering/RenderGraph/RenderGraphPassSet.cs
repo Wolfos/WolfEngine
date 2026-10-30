@@ -71,6 +71,7 @@ internal sealed class RenderGraphPassSet
 			stalenessInputs,
 			gpuDrawDiagnosticsSampler);
 		SkyboxPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
+		VfxPass = new(shaderCompiler, bindlessResourceRegistry);
 		BindlessResourceRegistry = bindlessResourceRegistry;
 	}
 
@@ -113,6 +114,7 @@ internal sealed class RenderGraphPassSet
 	public ShadowMapPass ShadowMapPass { get; }
 	public GpuDrawPass GpuDrawPass { get; }
 	public SkyboxPass SkyboxPass { get; }
+	public VfxPass VfxPass { get; }
 
 	public void InvalidateShaderPipelines()
 	{

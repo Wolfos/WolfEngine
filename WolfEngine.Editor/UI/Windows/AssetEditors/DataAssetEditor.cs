@@ -5,6 +5,7 @@ using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Editor.UI;
 
@@ -19,6 +20,7 @@ public sealed class DataAssetEditor
 	private readonly IEditorUndoRedoService _undoRedoService;
 	private readonly IIconManager _icons;
 	private readonly IAssetSelectionService _assetSelectionService;
+	private readonly VfxAssetEditor _vfxEditor;
 	private DataAssetLoadResult? _loadedAsset;
 	private Guid? _loadedAssetId;
 	private long _loadedAssetDatabaseRevision = -1;
@@ -33,7 +35,8 @@ public sealed class DataAssetEditor
 		IEditorAssetSnapshotService assetSnapshotService,
 		IEditorUndoRedoService undoRedoService,
 		IIconManager icons,
-		IAssetSelectionService assetSelectionService)
+		IAssetSelectionService assetSelectionService,
+		VfxAssetEditor vfxEditor)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
@@ -42,6 +45,7 @@ public sealed class DataAssetEditor
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
 		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
+		_vfxEditor = vfxEditor ?? throw new ArgumentNullException(nameof(vfxEditor));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -65,7 +69,10 @@ public sealed class DataAssetEditor
 			return;
 		}
 
-		if (DrawObjectProperties(loadedAsset.Asset, loadedAsset.DataAssetType, includeHeader: false))
+		var changed = loadedAsset.Asset is VfxAsset vfxAsset
+			? _vfxEditor.Draw(vfxAsset, CreateAssetLinkSelectionButton())
+			: DrawObjectProperties(loadedAsset.Asset, loadedAsset.DataAssetType, includeHeader: false);
+		if (changed)
 		{
 			BeginPendingChange(asset);
 			_hasPendingChanges = true;

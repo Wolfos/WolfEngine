@@ -37,6 +37,9 @@ internal sealed class RenderViewState
 	/// <summary>This frame's render features, from the view's snapshot. Valid from BeginViewFrame until recording ends.</summary>
 	public IReadOnlyList<Features.RenderFeatureFrame> RenderFeatureFrames { get; set; } = [];
 
+	/// <summary>This frame's effects, from the view's snapshot. Valid from BeginViewFrame until recording ends.</summary>
+	public Vfx.VfxWorldFrame? VfxFrame { get; set; }
+
 	/// <summary>Changes whenever this slot is bound to a new view, even if the same world is rebound.</summary>
 	public long BindingGeneration;
 

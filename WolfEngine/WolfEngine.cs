@@ -56,6 +56,8 @@ public static class WolfEngine
 		services.AddSingleton<Rendering.Features.IRenderFeatureRegistry>(sp =>
 			sp.GetRequiredService<Rendering.Features.RenderFeatureRegistry>());
 		services.AddSingleton<RenderGraph>();
+		services.AddSingleton<Vfx.VfxService>();
+		services.AddSingleton<Vfx.IVfxService>(sp => sp.GetRequiredService<Vfx.VfxService>());
 		
 #pragma warning disable CA1416
 		services.AddSingleton<WindowChromeController>();

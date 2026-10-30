@@ -14,6 +14,7 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Build;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Editor.Automation;
 
@@ -51,6 +52,8 @@ public sealed partial class EditorRemoteAutomationController
 
 	private readonly IGameBuildService _gameBuildService;
 	private readonly AnimationClipEditorSession _clipEditor;
+	private readonly VfxService _vfx;
+	private readonly VfxAssetEditor _vfxEditor;
 
 	public EditorRemoteAutomationController(
 		string projectPath,
@@ -77,9 +80,13 @@ public sealed partial class EditorRemoteAutomationController
 		IImGuiInputSink imguiInput,
 		SceneLoadRequests sceneLoadRequests,
 		IGameBuildService gameBuildService,
-		AnimationClipEditorSession clipEditor)
+		AnimationClipEditorSession clipEditor,
+		VfxService vfx,
+		VfxAssetEditor vfxEditor)
 	{
 		_clipEditor = clipEditor;
+		_vfx = vfx;
+		_vfxEditor = vfxEditor;
 		_sceneLoadRequests = sceneLoadRequests;
 		_gameBuildService = gameBuildService;
 		_cameraSystem = cameraSystem;
@@ -689,6 +696,16 @@ public sealed partial class EditorRemoteAutomationController
 	public Task<PlayModeStateResult> EnterPlayModeAsync(CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
+			if (_playSession.State == EditorPlayState.Paused)
+			{
+				if (_playSession.Resume() == false)
+				{
+					throw new InvalidOperationException("Could not resume Play mode.");
+				}
+
+				return GetPlayModeState();
+			}
+
 			if (_playSession.EnterPlay() == false)
 			{
 				throw new InvalidOperationException($"Cannot enter Play mode while the editor is {_playSession.State}.");

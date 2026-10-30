@@ -95,6 +95,9 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId ScreenSpaceDecal = Id("screen-space-decal");
 	public static readonly ShaderProgramId SelectionOutline = Id("selection-outline");
 	public static readonly ShaderProgramId GBufferDecalSeed = Id("gbuffer-decal-seed");
+	public static readonly ShaderProgramId VfxSimulate = Id("vfx-simulate");
+	public static readonly ShaderProgramId VfxSprite = Id("vfx-sprite");
+	public static readonly ShaderProgramId VfxRibbon = Id("vfx-ribbon");
 	public static readonly ShaderProgramId VolumetricFog = Id("volumetric-fog");
 
 	private static ShaderProgramId Id(string name) => new($"engine://shaders/{name}");
@@ -173,7 +176,10 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.ScreenSpaceDecal, "Geometry/screen_space_decal.slang"),
 			D(EngineShaderPrograms.SelectionOutline, "Geometry/selection_outline.slang"),
 			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang"),
-			D(EngineShaderPrograms.VolumetricFog, "VolumetricFog/volumetric_fog.compute.slang")
+			D(EngineShaderPrograms.VolumetricFog, "VolumetricFog/volumetric_fog.compute.slang"),
+			D(EngineShaderPrograms.VfxSimulate, "Vfx/vfx_simulate.compute.slang"),
+			D(EngineShaderPrograms.VfxSprite, "Vfx/vfx_sprite.slang"),
+			D(EngineShaderPrograms.VfxRibbon, "Vfx/vfx_ribbon.slang")
 		};
 
 		_byId = new();
@@ -313,7 +319,8 @@ public sealed class EngineShaderCatalog
 		id == EngineShaderPrograms.TransparentForward || id == EngineShaderPrograms.ShadowMap ||
 		id == EngineShaderPrograms.TerrainSharedGBuffer || id == EngineShaderPrograms.DebugPrimitiveForward ||
 		id == EngineShaderPrograms.DebugPrimitiveGBuffer || id == EngineShaderPrograms.ScreenSpaceDecal ||
-		id == EngineShaderPrograms.SelectionOutline;
+		id == EngineShaderPrograms.SelectionOutline || id == EngineShaderPrograms.VfxSprite ||
+		id == EngineShaderPrograms.VfxRibbon;
 
 	private static bool IsDeclaredGraphicsEntryPointCombination(ShaderRequest request) =>
 		request.VertexEntryPoint == "vertexShader" &&
@@ -381,6 +388,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.TerrainAuthoringBrushes) return ["ApplyHeightmapRaiseLowerBrush", "ApplyHeightmapFlattenBrush", "ApplyHeightmapSmoothBrush", "ApplyLayerMapLayerBrush"];
 		if (id == EngineShaderPrograms.GBufferDecalSeed) return ["GBufferDecalSeedCS"];
 		if (id == EngineShaderPrograms.VolumetricFog) return ["VolumetricFogInjectCS", "VolumetricFogTemporalCS", "VolumetricFogIntegrateCS"];
+		if (id == EngineShaderPrograms.VfxSimulate) return ["VfxSimulateCS", "VfxEmitCS"];
 		return [];
 	}
 }

@@ -1016,6 +1016,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				viewSnapshot.Config,
 				viewCameraPosition);
 			_frameBuilder.SetViewRenderFeatures(viewSnapshot.RenderFeatureFrames);
+			_frameBuilder.SetViewVfx(viewSnapshot.VfxFrame);
 		}
 
 		// Every view is set up before anything is recorded: the shared draw update records first and

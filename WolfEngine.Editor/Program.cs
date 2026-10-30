@@ -110,6 +110,7 @@ public static class Program
 		services.AddSingleton<AudioAssetEditor>();
 		services.AddSingleton<TerrainAssetEditor>();
 		services.AddSingleton<MaterialAssetEditor>();
+		services.AddSingleton<VfxAssetEditor>();
 		services.AddSingleton<DataAssetEditor>();
 		services.AddSingleton<SceneAssetEditor>();
 		services.AddSingleton<PrefabAssetEditor>();

@@ -56,6 +56,52 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken = default) =>
 		_controller.InstantiateModelAsync(assetName, x, y, z, uniformScale, cancellationToken);
 
+	[McpServerTool(Name = "play_vfx"), Description("Play a VFX asset in the running Play-mode scene, at a world position or attached to an entity with that position as its offset. Effects advance with the gameplay world, so enter Play mode first.")]
+	public Task<VfxPlayResult> PlayVfx(
+		[Description("Project-relative path of the VFX data asset, such as 'Assets/VFX/SwordImpact.data.json'.")] string assetPath,
+		[Description("World X, or offset X when attached.")] float x = 0.0f,
+		[Description("World Y, or offset Y when attached.")] float y = 0.0f,
+		[Description("World Z, or offset Z when attached.")] float z = 0.0f,
+		[Description("Optional persistent entity GUID to attach the effect to.")] string? attachToEntityId = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.PlayVfxAsync(assetPath, new System.Numerics.Vector3(x, y, z), attachToEntityId, cancellationToken);
+
+	[McpServerTool(Name = "get_vfx_state"), Description("Report the Play-mode world's playing effects and how much of its particle pool they reserve.")]
+	public Task<VfxStateResult> GetVfxState(CancellationToken cancellationToken) =>
+		_controller.GetVfxStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "stop_all_vfx"), Description("Stop every effect in the Play-mode world. Without immediate, particles that are alive finish their lives.")]
+	public Task<VfxStateResult> StopAllVfx(bool immediate = false, CancellationToken cancellationToken = default) =>
+		_controller.StopAllVfxAsync(immediate, cancellationToken);
+
+	[McpServerTool(Name = "configure_vfx_preview"), Description("Configure the VFX editor's preview of the selected VFX asset. Select the asset with select_asset and wait for render frames first. Pause and advance to step the effect deterministically before capture_vfx_preview.")]
+	public Task<VfxPreviewStateResult> ConfigureVfxPreview(
+		[Description("Optional motion: Still, Circle or Swing.")] string? motion = null,
+		[Description("Optional: play or pause the preview clock.")] bool? playing = null,
+		[Description("Optional seconds to advance the preview, in 1/60 s steps. Works while paused.")] float? advanceSeconds = null,
+		[Description("Optional camera yaw in radians; give pitch and distance too.")] float? yaw = null,
+		[Description("Optional camera pitch in radians.")] float? pitch = null,
+		[Description("Optional camera distance in metres.")] float? distance = null,
+		[Description("Optional model or prefab asset GUID to preview with; empty GUID removes it.")] string? modelId = null,
+		[Description("Optional name of the model entity to attach the effect to, such as 'Sword'.")] string? attachTo = null,
+		[Description("Restart the effect from time zero.")] bool restart = false,
+		CancellationToken cancellationToken = default) =>
+		_controller.ConfigureVfxPreviewAsync(
+			motion,
+			playing,
+			advanceSeconds,
+			yaw.HasValue && pitch.HasValue && distance.HasValue ? new System.Numerics.Vector3(yaw.Value, pitch.Value, distance.Value) : null,
+			modelId is null ? null : Guid.Parse(modelId),
+			attachTo,
+			restart,
+			cancellationToken);
+
+	[McpServerTool(Name = "capture_vfx_preview"), Description("Write a PNG of the VFX editor's preview view, rendered by the real renderer.")]
+	public Task<FrameCaptureResult> CaptureVfxPreview(
+		[Description("Absolute or project-relative PNG output path.")] string outputPath,
+		CancellationToken cancellationToken) =>
+		_controller.CaptureVfxPreviewAsync(outputPath, cancellationToken);
+
 	[McpServerTool(Name = "get_animation_state"), Description("Report every animator in the authoring scene: bound clip and skeleton, bone and track counts, how many clip tracks resolved against the skeleton, playback time, and how far the current pose has moved from the bind pose.")]
 	public Task<AnimationStateResult> GetAnimationState(CancellationToken cancellationToken) =>
 		_controller.GetAnimationStateAsync(cancellationToken);
@@ -89,7 +135,7 @@ public sealed class EditorAutomationTools
 	public Task<SceneLoadResult> LoadPlayScene(string scenePath, CancellationToken cancellationToken) =>
 		_controller.LoadPlaySceneAsync(scenePath, cancellationToken);
 
-	[McpServerTool(Name = "enter_play_mode"), Description("Enter Play mode from the current authoring scene. Play mode creates an isolated runtime scene without saving or mutating the authoring scene.")]
+	[McpServerTool(Name = "enter_play_mode"), Description("Enter Play mode from the current authoring scene, or resume it when paused. Play mode creates an isolated runtime scene without saving or mutating the authoring scene.")]
 	public Task<PlayModeStateResult> EnterPlayMode(CancellationToken cancellationToken) =>
 		_controller.EnterPlayModeAsync(cancellationToken);
 

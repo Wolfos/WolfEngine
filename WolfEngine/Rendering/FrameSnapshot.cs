@@ -1,6 +1,7 @@
 using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Rendering;
 
@@ -50,6 +51,12 @@ public sealed class RenderViewSnapshot
 
 	/// <summary>Skinned instances the render thread must deform this frame.</summary>
 	public List<SkinningPacket> SkinningPackets { get; }
+
+	/// <summary>
+	/// The effects of this view's world. Views showing the same world share one frame, so its particles are
+	/// simulated once.
+	/// </summary>
+	internal VfxWorldFrame? VfxFrame { get; set; }
 
 	/// <summary>The render features of this view's world and what their <c>Extract</c> captured.</summary>
 	internal IReadOnlyList<Features.RenderFeatureFrame> RenderFeatureFrames => _renderFeatureFrames;
@@ -139,6 +146,7 @@ public sealed class RenderViewSnapshot
 		FogVolumePackets.Clear();
 		SkinningPackets.Clear();
 		OutlinePackets.Clear();
+		VfxFrame = null;
 		ClearRenderFeatureFrames();
 		_boneMatrixArenaUsed = 0;
 		SunDirection = DefaultSunDirection;
@@ -323,6 +331,8 @@ public sealed class FrameSnapshot
 	private readonly GpuDrawHandleRegistry _drawHandles;
 	private readonly List<RenderViewSnapshot> _viewEntries = [];
 	private readonly List<RenderViewSnapshot> _views = [];
+	private readonly List<VfxWorldFrame> _vfxFrames = [];
+	private int _vfxFrameCount;
 	private FrameSnapshot? _previousPublished;
 
 	public FrameSnapshot()
@@ -460,9 +470,40 @@ public sealed class FrameSnapshot
 	public void SetColorGradingLookupTable(ColorLookupTable? lookupTable) =>
 		Primary.SetColorGradingLookupTable(lookupTable);
 
+	/// <summary>
+	/// Game thread: the effects frame for <paramref name="world"/>, extracted the first time a view of that world asks
+	/// for it in this snapshot.
+	/// </summary>
+	internal VfxWorldFrame ExtractVfx(World world, VfxService vfx, IRenderResourceScheduler? resources)
+	{
+		for (var i = 0; i < _vfxFrameCount; i++)
+		{
+			if (ReferenceEquals(_vfxFrames[i].World, world))
+			{
+				return _vfxFrames[i];
+			}
+		}
+
+		if (_vfxFrameCount == _vfxFrames.Count)
+		{
+			_vfxFrames.Add(new VfxWorldFrame());
+		}
+
+		var frame = _vfxFrames[_vfxFrameCount++];
+		vfx.Extract(world, frame, resources);
+
+		return frame;
+	}
+
 	public void Clear()
 	{
 		_previousPublished = null;
+		for (var i = 0; i < _vfxFrameCount; i++)
+		{
+			_vfxFrames[i].Reset(null);
+		}
+
+		_vfxFrameCount = 0;
 		_views.Clear();
 		for (var i = 0; i < _viewEntries.Count; i++)
 		{

@@ -122,6 +122,33 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<AnimationStateResult> GetAnimationStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetAnimationStateAsync(cancellationToken);
 
+	public Task<VfxPlayResult> PlayVfxAsync(
+		string assetPath,
+		System.Numerics.Vector3 position,
+		string? attachToEntityId,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().PlayVfxAsync(assetPath, position, attachToEntityId, cancellationToken);
+
+	public Task<VfxStateResult> GetVfxStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetVfxStateAsync(cancellationToken);
+
+	public Task<VfxStateResult> StopAllVfxAsync(bool immediate, CancellationToken cancellationToken) =>
+		GetRunningEditor().StopAllVfxAsync(immediate, cancellationToken);
+
+	public Task<VfxPreviewStateResult> ConfigureVfxPreviewAsync(
+		string? motion,
+		bool? playing,
+		float? advanceSeconds,
+		System.Numerics.Vector3? orbit,
+		Guid? modelId,
+		string? attachTo,
+		bool restart,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().ConfigureVfxPreviewAsync(motion, playing, advanceSeconds, orbit, modelId, attachTo, restart, cancellationToken);
+
+	public Task<FrameCaptureResult> CaptureVfxPreviewAsync(string outputPath, CancellationToken cancellationToken) =>
+		GetRunningEditor().CaptureVfxPreviewAsync(outputPath, cancellationToken);
+
 	public Task<int> SelectEntitiesAsync(IReadOnlyList<string> entityIds, CancellationToken cancellationToken)
 	{
 		var parsed = new List<Guid>(entityIds.Count);

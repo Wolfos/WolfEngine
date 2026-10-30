@@ -6,6 +6,9 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
+using WolfEngine.Rendering;
+using WolfEngine.Rendering.UI;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -269,7 +272,7 @@ public sealed class DataAssetEditorArrayTests
 				Substitute.For<ITerrainAssetPersistenceService>(),
 				Substitute.For<IEditorPlaySession>());
 			_editor = new DataAssetEditor(project, store, _drawers, snapshots, undoRedo,
-				Substitute.For<IIconManager>(), new AssetSelectionService());
+				Substitute.For<IIconManager>(), new AssetSelectionService(), CreateVfxEditor(_drawers));
 			_drawers.Draw(Arg.Any<PropertyDrawerContext>()).Returns(call =>
 			{
 				var context = call.Arg<PropertyDrawerContext>();
@@ -379,7 +382,20 @@ public sealed class DataAssetEditorArrayTests
 			Substitute.For<IEditorAssetSnapshotService>(),
 			Substitute.For<IEditorUndoRedoService>(),
 			Substitute.For<IIconManager>(),
-			new AssetSelectionService());
+			new AssetSelectionService(),
+			CreateVfxEditor(drawers));
+	}
+
+	private static VfxAssetEditor CreateVfxEditor(IPropertyDrawerRegistry drawers)
+	{
+		return new VfxAssetEditor(
+			Substitute.For<IRenderViewHost>(),
+			new EditorRenderViews(),
+			new EditorViewportStateBus(),
+			Substitute.For<IVfxService>(),
+			Substitute.For<IProjectAssetPipelineService>(),
+			Substitute.For<IEditorProjectService>(),
+			drawers);
 	}
 
 	public sealed class ArrayAsset : IDataAsset

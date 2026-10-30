@@ -6,6 +6,7 @@ using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Features;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Vfx;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Rendering.Shaders;
 
@@ -206,6 +207,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
+	private readonly VfxPass _vfxPass;
 	private readonly BloomPass _bloomPass;
 	private readonly ColorPyramidPass _colorPyramidPass;
 	private readonly TonemappingPass _tonemappingPass;
@@ -285,6 +287,8 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
+	private readonly Action<RenderGraphContext> _vfxSimulateExecute;
+	private readonly Action<RenderGraphContext> _vfxExecute;
 	private readonly Action<RenderGraphContext> _bloomCompositeExecute;
 	private readonly Action<RenderGraphContext> _tonemappingExecute;
 	private readonly Action<RenderGraphContext> _casSharpenExecute;
@@ -342,6 +346,7 @@ internal sealed class RenderGraphFrameBuilder
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
 		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
 		_transparentForwardPass = passSet.TransparentForwardPass;
+		_vfxPass = passSet.VfxPass;
 		_bloomPass = passSet.BloomPass;
 		_colorPyramidPass = passSet.ColorPyramidPass;
 		_tonemappingPass = passSet.TonemappingPass;
@@ -391,6 +396,8 @@ internal sealed class RenderGraphFrameBuilder
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
 		_transparentForwardExecute = ExecuteTransparentForward;
+		_vfxSimulateExecute = ExecuteVfxSimulate;
+		_vfxExecute = ExecuteVfx;
 		_bloomCompositeExecute = ExecuteBloomComposite;
 		_tonemappingExecute = ExecuteTonemapping;
 		_casSharpenExecute = ExecuteCasSharpen;
@@ -1327,6 +1334,8 @@ internal sealed class RenderGraphFrameBuilder
 	/// <summary>Hands the bound view its snapshot's render features; call after <see cref="BeginViewFrame"/>.</summary>
 	internal void SetViewRenderFeatures(IReadOnlyList<RenderFeatureFrame> frames) => _view.RenderFeatureFrames = frames;
 
+	internal void SetViewVfx(VfxWorldFrame? frame) => _view.VfxFrame = frame;
+
 	/// <summary>Once per frame, after execution and before the resource registry ends the frame.</summary>
 	internal void CompleteRenderFeatures() => _renderFeatureHost.CompleteFrame();
 
@@ -1803,6 +1812,18 @@ internal sealed class RenderGraphFrameBuilder
 			
 			ReadSkyboxTextures(transparentForwardBuilder);
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
+
+			if (VfxPass.HasWork(_view.VfxFrame))
+			{
+				// Buffers are outside the graph's tracking; the pass orders its own particle writes and reads.
+				graph.AddPass("VFX Simulate", PassKind.Compute)
+					.SetExecute(_vfxSimulateExecute);
+
+				graph.AddPass("VFX", PassKind.Graphics)
+					.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
+					.WriteTexture(_view.FrameResources.LightingBuffer, ResourceState.RenderTarget)
+					.SetExecute(_vfxExecute);
+			}
 
 			_renderFeatureHost.Record(
 				graph,
@@ -3270,6 +3291,32 @@ internal sealed class RenderGraphFrameBuilder
 			GetShadowFrameData(),
 			context.SceneData);
 		_transparentForwardPass.Record(context, in config, context.SceneData);
+	}
+
+	private void ExecuteVfxSimulate(RenderGraphContext context)
+	{
+		if (context.ViewSnapshot.VfxFrame is not { } frame)
+		{
+			return;
+		}
+
+		_vfxPass.Simulate(context, _renderer.GetGfxDevice(), frame);
+	}
+
+	private void ExecuteVfx(RenderGraphContext context)
+	{
+		if (context.ViewSnapshot.VfxFrame is not { } frame)
+		{
+			return;
+		}
+
+		_vfxPass.Draw(
+			context,
+			_renderer.GetGfxDevice(),
+			frame,
+			context.GetTexture(_view.FrameResources.LightingBuffer),
+			context.GetTexture(_view.FrameResources.GBufferDepth),
+			_view.FrameResources.SceneFramebufferSize);
 	}
 
 	private void ExecuteTonemapping(RenderGraphContext context)

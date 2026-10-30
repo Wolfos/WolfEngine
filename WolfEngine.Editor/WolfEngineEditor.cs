@@ -17,6 +17,7 @@ using WolfEngine.Editor.Projects;
 using WolfEngine.Physics;
 using WolfEngine.Editor.Automation;
 using WolfEngine.Audio;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Editor;
 
@@ -189,6 +190,10 @@ public class WolfEngineEditor
         _worldManager.AddSystem(new BindPoseAnimationSystem(), SystemExecutionGroup.Shared);
         _worldManager.AddSystem(new AnimationSystem(WorldTag.Game), SystemExecutionGroup.Gameplay);
 		_worldManager.AddSystem<TransformSystem>();
+		// After transforms, so attached effects follow this frame's poses; gameplay group, so they pause with Play.
+		_worldManager.AddSystem(
+			new VfxSystem(_serviceProvider.GetRequiredService<VfxService>()),
+			SystemExecutionGroup.Gameplay);
 		_editorCameraSystem = _serviceProvider.GetRequiredService<EditorCameraSystem>();
 		_worldManager.AddSystem(_editorCameraSystem);
 		_worldManager.AddSystem(_boxColliderGizmoDrawer);

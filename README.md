@@ -52,3 +52,4 @@ As part of this vision, WolfEngine is distributed as source code only. An engine
 - [Animation graphs](Manual/Animation.md)
 - [Audio](Manual/Audio.md)
 - [Spawning prefabs at runtime](Manual/Prefabs.md)
+- [Visual effects](Manual/Vfx.md)

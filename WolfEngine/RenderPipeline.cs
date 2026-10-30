@@ -4,6 +4,7 @@ using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using System.Numerics;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Vfx;
 
 namespace WolfEngine;
 
@@ -50,11 +51,18 @@ public class RenderPipeline : IRenderPipeline
 	private readonly Dictionary<GpuDrawDatabase, int> _forcedReconcileSnapshotsByDatabase = new();
 	private readonly Dictionary<GpuDrawDatabase, bool> _gpuHardeningStressByDatabase = new();
 	private readonly List<Entity> _dirtyWorldTransformRemovalScratch = new();
+	private readonly VfxService? _vfx;
 	private int _stressFrame;
 
 	public RenderPipeline(RenderGraph renderGraph)
+		: this(renderGraph, null)
+	{
+	}
+
+	public RenderPipeline(RenderGraph renderGraph, VfxService? vfx)
 	{
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
+		_vfx = vfx;
 	}
 
 	public void Run(Action? startup = null)
@@ -113,6 +121,11 @@ public class RenderPipeline : IRenderPipeline
 
 			PopulateSnapshot(snapshot, cameraWorldTransform, config, worlds);
 			ExtractRenderFeatures(snapshot, worlds);
+			if (worlds.Count > 0 && worlds[0] is { } firstWorld)
+			{
+				ExtractVfx(frameSnapshot, snapshot, firstWorld);
+			}
+
 			if (_renderGraph.TryPublishSnapshot() == false)
 			{
 				return;
@@ -178,6 +191,7 @@ public class RenderPipeline : IRenderPipeline
 					submission.Config,
 					[worlds[i]]);
 				ExtractRenderFeatures(snapshot, [worlds[i]]);
+				ExtractVfx(frameSnapshot, snapshot, worlds[i]);
 			}
 
 			// Every database copies the process-wide generation tables after all gathers. A later view can
@@ -207,6 +221,19 @@ public class RenderPipeline : IRenderPipeline
 			{
 				snapshot.ExtractRenderFeatures(worlds[i], _renderGraph.RenderFeatures);
 			}
+		}
+	}
+
+	private void ExtractVfx(FrameSnapshot frameSnapshot, RenderViewSnapshot snapshot, World world)
+	{
+		if (_vfx is null)
+		{
+			return;
+		}
+
+		using (FrameProfiler.Instance.Measure("Extract VFX"))
+		{
+			snapshot.VfxFrame = frameSnapshot.ExtractVfx(world, _vfx, _renderGraph);
 		}
 	}
 

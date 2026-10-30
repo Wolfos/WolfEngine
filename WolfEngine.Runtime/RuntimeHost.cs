@@ -15,6 +15,7 @@ using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Serialization;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Runtime;
 
@@ -121,6 +122,8 @@ public sealed class RuntimeHost : IDisposable
 		}
 
 		_worldManager.AddSystem<TransformSystem>();
+		// After transforms, so attached effects follow this frame's poses.
+		_worldManager.AddSystem(new VfxSystem(services.GetRequiredService<VfxService>()), SystemExecutionGroup.Gameplay);
 
 		var renderGraph = services.GetRequiredService<RenderGraph>();
 		_primaryView = renderGraph.CreateView(new RenderViewDescriptor(_initialWorld, "game", RenderViewOutput.Backbuffer));
