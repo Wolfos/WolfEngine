@@ -152,6 +152,36 @@ public sealed class EditorAutomationTools
 	public Task<UI.AnimationGraphEditorState> GetAnimationEditorState(CancellationToken cancellationToken) =>
 		_controller.GetAnimationEditorStateAsync(cancellationToken);
 
+	[McpServerTool(Name = "get_asset_browser_state"), Description("Read the asset browser location, searches, selection, sub-asset filter, visible card and row bounds, and control bounds after a drawn frame.")]
+	public Task<UI.AssetBrowserState> GetAssetBrowserState(CancellationToken cancellationToken) =>
+		_controller.GetAssetBrowserStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "configure_asset_browser"), Description("Navigate the asset browser and optionally search or open a source's sub-assets. Changes UI state only; does not edit or import assets.")]
+	public async Task<string> ConfigureAssetBrowser(
+		string folderPath,
+		CancellationToken cancellationToken,
+		string search = "",
+		string? expandedSourceId = null,
+		string subAssetSearch = "")
+	{
+		await _controller.ConfigureAssetBrowserAsync(
+			folderPath,
+			search,
+			expandedSourceId is null ? null : Guid.Parse(expandedSourceId),
+			subAssetSearch,
+			cancellationToken).ConfigureAwait(false);
+
+		return $"Asset browser: {folderPath}.";
+	}
+
+	[McpServerTool(Name = "set_editor_key"), Description("Press or release an ImGui editor key such as LeftShift, Space, Escape or Delete. Does not inject gameplay input.")]
+	public async Task<string> SetEditorKey(string key, bool pressed, CancellationToken cancellationToken)
+	{
+		await _controller.SetEditorKeyAsync(key, pressed, cancellationToken).ConfigureAwait(false);
+
+		return $"Editor key {key}: {(pressed ? "pressed" : "released")}.";
+	}
+
 	[McpServerTool(Name = "set_input_axis_2d"), Description("Set one named two-dimensional input binding in a running Play-mode scene, through the same input system used by gameplay.")]
 	public async Task<string> SetInputAxis2D(
 		[Description("InputActionBinding name, such as MouseDelta or GamepadLeftStick.")] string binding,

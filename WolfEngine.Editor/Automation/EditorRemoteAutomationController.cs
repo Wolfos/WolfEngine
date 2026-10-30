@@ -774,6 +774,40 @@ public sealed partial class EditorRemoteAutomationController
 	public Task<AnimationGraphEditorState> GetAnimationEditorStateAsync(CancellationToken cancellationToken) =>
 		Enqueue(() => AnimationEditor.GetEditorState(), cancellationToken);
 
+	public Task<AssetBrowserState> GetAssetBrowserStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => ((AssetsWindow)_windows.Get(EditorWindowIds.Assets).Window).GetBrowserState(), cancellationToken);
+
+	public Task ConfigureAssetBrowserAsync(
+		string folderPath,
+		string search,
+		Guid? expandedSourceId,
+		string subAssetSearch,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			_workspaces.Activate(EditorWorkspaceService.AssetsWorkspaceId);
+			_workspaces.OpenWindow(EditorWindowIds.Assets);
+			((AssetsWindow)_windows.Get(EditorWindowIds.Assets).Window).ConfigureBrowser(
+				folderPath,
+				search,
+				expandedSourceId,
+				subAssetSearch);
+		}, cancellationToken);
+
+	public Task SetEditorKeyAsync(string key, bool pressed, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (Enum.TryParse<ImGuiNET.ImGuiKey>(key, out var parsed) == false ||
+				Enum.IsDefined(parsed) == false ||
+				parsed < ImGuiNET.ImGuiKey.Tab ||
+				parsed >= ImGuiNET.ImGuiKey.GamepadStart)
+			{
+				throw new ArgumentException("Use an ImGui key name such as LeftShift, Space, Escape or Delete.", nameof(key));
+			}
+
+			_imguiInput.SetKey(parsed, pressed);
+		}, cancellationToken);
+
 	/// <summary>Injects a button binding through the same input system used by gameplay.</summary>
 	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>
 		Enqueue(() =>

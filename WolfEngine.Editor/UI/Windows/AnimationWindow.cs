@@ -28,7 +28,8 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 	private AnimationPreviewScene? _preview;
 	private GraphViewState _view = new();
 	private Guid _assetId;
-	private Guid _selectedNode;
+	private readonly AnimationGraphSelection _nodeSelection = new();
+	private Guid _selectedNode => _nodeSelection.Primary;
 	private Guid _connectFrom;
 	private Guid _modelId;
 	private AssetRef<AnimationSet> _previewSet;
@@ -122,10 +123,10 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 
 		_view = view;
 		_assetId = asset.Id;
-		_selectedNode = (_document.Asset as AnimationGraph)?.Output ?? Guid.Empty;
+		_nodeSelection.SelectOnly((_document.Asset as AnimationGraph)?.Output ?? Guid.Empty);
 		_connectFrom = Guid.Empty;
 		_dragNode = Guid.Empty;
-		_panCanvas = false;
+		_boxSelecting = false;
 		_compiledRevision = -1;
 		_diagnostic = null;
 		_requestedTab = SidebarTab.Node;
@@ -309,6 +310,7 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 		ImGui.BeginDisabled(_document.CanRedo == false);
 		if (ToolbarButton("Redo", "redo"))
 		{
+			CommitGesture();
 			_document.Redo();
 			if (_view.AutoFrame)
 			{
@@ -478,7 +480,7 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 
 	private void SelectNode(Guid id, bool focus = false)
 	{
-		_selectedNode = id;
+		_nodeSelection.SelectOnly(id);
 		_requestedTab = SidebarTab.Node;
 		if (focus)
 		{
@@ -558,20 +560,26 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 
 	internal static void DeleteNode(AnimationGraph graph, Guid nodeId)
 	{
-		graph.Nodes.RemoveAll(node => node.Id == nodeId);
-		graph.Layout.RemoveAll(layout => layout.NodeId == nodeId);
+		HashSet<Guid> nodeIds = [nodeId];
+		DeleteNodes(graph, nodeIds);
+	}
+
+	internal static void DeleteNodes(AnimationGraph graph, IReadOnlySet<Guid> nodeIds)
+	{
+		graph.Nodes.RemoveAll(node => nodeIds.Contains(node.Id));
+		graph.Layout.RemoveAll(layout => nodeIds.Contains(layout.NodeId));
 		foreach (var node in graph.Nodes)
 		{
 			for (var index = 0; index < node.Inputs.Count; index++)
 			{
-				if (node.Inputs[index] == nodeId)
+				if (nodeIds.Contains(node.Inputs[index]))
 				{
 					node.Inputs[index] = Guid.Empty;
 				}
 			}
 		}
 
-		if (graph.Output == nodeId)
+		if (nodeIds.Contains(graph.Output))
 		{
 			graph.Output = graph.Nodes.FirstOrDefault(node => node.Kind == AnimationNodeKind.Output)?.Id ?? Guid.Empty;
 		}

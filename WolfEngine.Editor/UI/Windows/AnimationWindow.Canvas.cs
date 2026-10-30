@@ -9,8 +9,6 @@ public sealed partial class AnimationWindow
 	private GraphRect _canvasRect;
 	private Dictionary<Guid, Vector2> _canvasPositions = new();
 	private Guid _dragNode;
-	private bool _panCanvas;
-	private bool _panCanvasMoved;
 	private string? _canvasMessage;
 	private Guid _hoverNode;
 	private double _hoverStarted;
@@ -40,6 +38,7 @@ public sealed partial class AnimationWindow
 
 			_arrangeRequested = false;
 			_canvasPositions = AnimationGraphLayout.Positions(graph);
+			_nodeSelection.Prune(graph);
 			if (_createKind is { } kind && readOnly == false)
 			{
 				var position = _view.Camera.ToGraph(_canvasRect.Size * 0.5f);
@@ -81,7 +80,7 @@ public sealed partial class AnimationWindow
 
 					var from = ToScreen(AnimationGraphLayout.OutputPosition(_canvasPositions[source.Id]));
 					var to = ToScreen(AnimationGraphLayout.InputPosition(node, _canvasPositions[node.Id], index));
-					var selected = node.Id == _selectedNode || source.Id == _selectedNode;
+					var selected = _nodeSelection.Contains(node.Id) || _nodeSelection.Contains(source.Id);
 					var color = NodeColor(source.Kind);
 					color.W = selected ? 1.0f : 0.65f;
 					DrawConnection(draw, from, to, ImGui.GetColorU32(color), selected ? 2.5f : 1.5f);
@@ -98,7 +97,12 @@ public sealed partial class AnimationWindow
 					2.0f);
 			}
 
-			foreach (var node in nodes.Values.Where(node => node.Id != _selectedNode))
+			foreach (var node in nodes.Values.Where(node => _nodeSelection.Contains(node.Id) == false))
+			{
+				DrawCanvasNode(draw, node, nodes);
+			}
+
+			foreach (var node in nodes.Values.Where(node => _nodeSelection.Contains(node.Id) && node.Id != _selectedNode))
 			{
 				DrawCanvasNode(draw, node, nodes);
 			}
@@ -108,21 +112,26 @@ public sealed partial class AnimationWindow
 				DrawCanvasNode(draw, selectedNode, nodes);
 			}
 
+			DrawBoxSelection(draw);
 			draw.PopClipRect();
 			var hint = _canvasMessage ?? (_connectFrom != Guid.Empty
 				? "Choose an input to connect  /  Esc to cancel"
-				: "Trackpad scroll or drag background to pan  /  Pinch or mouse wheel to zoom  /  F to focus  /  Home to fit all");
+				: "Drag background to select  /  Shift-click to add  /  Trackpad, middle-drag or Space-drag to pan  /  Pinch or wheel to zoom");
 			draw.AddText(
 				new Vector2(_canvasRect.Min.X + 6.0f, _canvasRect.Max.Y + 7.0f),
 				ImGui.GetColorU32(ImGuiCol.TextDisabled),
 				hint);
 			var zoomText = $"{_view.Camera.Zoom:P0}  /  {graph.Nodes.Count} nodes";
+			if (_nodeSelection.Count > 1)
+			{
+				zoomText += $"  /  {_nodeSelection.Count} selected";
+			}
 			draw.AddText(
 				new Vector2(_canvasRect.Max.X - ImGui.CalcTextSize(zoomText).X - 8.0f, _canvasRect.Min.Y + 8.0f),
 				ImGui.GetColorU32(ImGuiCol.TextDisabled),
 				zoomText);
 			DrawCanvasContextMenu(graph, readOnly);
-			if (hovered && _dragNode == Guid.Empty && _connectFrom == Guid.Empty && _panCanvas == false)
+			if (hovered && _dragNode == Guid.Empty && _connectFrom == Guid.Empty && _boxSelecting == false)
 			{
 				var hit = HitGraph(graph, ImGui.GetMousePos());
 				if (hit.NodeId != _hoverNode || ImGui.GetIO().MouseDelta.LengthSquared() > 1.0f)
@@ -154,24 +163,20 @@ public sealed partial class AnimationWindow
 		var mouse = ImGui.GetMousePos();
 		if (ImGui.IsMouseDown(ImGuiMouseButton.Left) == false && ImGui.IsMouseReleased(ImGuiMouseButton.Left) == false)
 		{
-			_panCanvas = false;
+			CancelBoxSelection();
 			_dragNode = Guid.Empty;
 		}
 
 		var panGesture = ImGui.IsMouseDown(ImGuiMouseButton.Middle) ||
-			(ImGui.IsKeyDown(ImGuiKey.Space) && ImGui.IsMouseDown(ImGuiMouseButton.Left) && io.WantTextInput == false) ||
-			(_panCanvas && ImGui.IsMouseDown(ImGuiMouseButton.Left));
+			(ImGui.IsKeyDown(ImGuiKey.Space) && ImGui.IsMouseDown(ImGuiMouseButton.Left) && io.WantTextInput == false);
 		if ((hovered || ImGui.IsItemActive()) && panGesture)
 		{
-			if (_panCanvas == false || ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+			CancelBoxSelection();
+			_view.Camera = _view.Camera with
 			{
-				_view.Camera = _view.Camera with
-				{
-					Pan = _view.Camera.Pan + io.MouseDelta
-				};
-				_view.AutoFrame = false;
-				_panCanvasMoved = true;
-			}
+				Pan = _view.Camera.Pan + io.MouseDelta
+			};
+			_view.AutoFrame = false;
 
 			_dragNode = Guid.Empty;
 			ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeAll);
@@ -211,6 +216,7 @@ public sealed partial class AnimationWindow
 
 		if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
 		{
+			CancelBoxSelection();
 			var hit = HitGraph(graph, mouse);
 			_contextNode = hit.NodeId;
 			_contextInput = hit.Input;
@@ -228,20 +234,19 @@ public sealed partial class AnimationWindow
 			var hit = HitGraph(graph, mouse);
 			if (hit.NodeId == Guid.Empty)
 			{
-				_panCanvas = true;
-				_panCanvasMoved = false;
+				BeginBoxSelection(mouse, io.KeyShift || io.KeyCtrl || io.KeySuper);
 				_connectFrom = Guid.Empty;
 			}
 			else
 			{
-				SelectNode(hit.NodeId);
-				if (readOnly == false)
+				if (hit.Output || hit.Input >= 0)
 				{
-					if (hit.Output)
+					SelectNode(hit.NodeId);
+					if (readOnly == false && hit.Output)
 					{
 						_connectFrom = hit.NodeId;
 					}
-					else if (hit.Input >= 0)
+					else if (readOnly == false && hit.Input >= 0)
 					{
 						if (_connectFrom != Guid.Empty)
 						{
@@ -252,41 +257,37 @@ public sealed partial class AnimationWindow
 							_connectFrom = graph.Nodes.First(node => node.Id == hit.NodeId).Inputs[hit.Input];
 						}
 					}
-					else
+				}
+				else
+				{
+					_connectFrom = Guid.Empty;
+					if (io.KeyShift || io.KeyCtrl || io.KeySuper)
 					{
-						_dragNode = hit.NodeId;
+						_nodeSelection.Toggle(hit.NodeId);
+					}
+					else if (_nodeSelection.Contains(hit.NodeId) == false)
+					{
+						SelectNode(hit.NodeId);
+					}
+
+					_requestedTab = SidebarTab.Node;
+					if (readOnly == false && _nodeSelection.Contains(hit.NodeId))
+					{
+						BeginNodeDrag(hit.NodeId, mouse);
 					}
 				}
 			}
 		}
 
+		UpdateBoxSelection(graph, mouse);
 		if (_dragNode != Guid.Empty && ImGui.IsMouseDragging(ImGuiMouseButton.Left) && panGesture == false && readOnly == false)
 		{
-			var position = _canvasPositions[_dragNode] + io.MouseDelta / _view.Camera.Zoom;
-			var layout = graph.Layout.FirstOrDefault(entry => entry.NodeId == _dragNode);
-			if (layout is null)
-			{
-				layout = new AnimationNodeLayout
-				{
-					NodeId = _dragNode
-				};
-				graph.Layout.Add(layout);
-			}
-
-			layout.X = position.X;
-			layout.Y = position.Y;
-			_canvasPositions[_dragNode] = position;
-			_view.AutoFrame = false;
+			DragSelectedNodes(graph, mouse);
 		}
 
 		if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
 		{
-			if (_panCanvas && _panCanvasMoved == false)
-			{
-				_selectedNode = Guid.Empty;
-			}
-
-			_panCanvas = false;
+			_boxSelecting = false;
 			if (_connectFrom != Guid.Empty && hovered && readOnly == false)
 			{
 				var hit = HitGraph(graph, mouse);
@@ -303,6 +304,7 @@ public sealed partial class AnimationWindow
 		{
 			if (ImGui.IsKeyPressed(ImGuiKey.Escape))
 			{
+				CancelBoxSelection();
 				_connectFrom = Guid.Empty;
 				_canvasMessage = null;
 			}
@@ -326,8 +328,9 @@ public sealed partial class AnimationWindow
 
 			if (hovered && readOnly == false && ImGui.IsKeyPressed(ImGuiKey.Delete) && _selectedNode != Guid.Empty)
 			{
-				DeleteNode(graph, _selectedNode);
-				_selectedNode = Guid.Empty;
+				DeleteNodes(graph, _nodeSelection.Ids.ToHashSet());
+				_nodeSelection.Clear();
+				_boxSelecting = false;
 				_connectFrom = Guid.Empty;
 				_dragNode = Guid.Empty;
 			}
@@ -350,7 +353,10 @@ public sealed partial class AnimationWindow
 
 	private GraphHit HitGraph(AnimationGraph graph, Vector2 mouse)
 	{
-		var ordered = graph.Nodes.Where(node => node.Id != _selectedNode).Concat(graph.Nodes.Where(node => node.Id == _selectedNode)).Reverse();
+		var ordered = graph.Nodes.Where(node => _nodeSelection.Contains(node.Id) == false)
+			.Concat(graph.Nodes.Where(node => _nodeSelection.Contains(node.Id) && node.Id != _selectedNode))
+			.Concat(graph.Nodes.Where(node => node.Id == _selectedNode))
+			.Reverse();
 		var radius = MathF.Max(7.0f, 7.0f * _view.Camera.Zoom);
 		foreach (var node in ordered)
 		{
@@ -426,7 +432,7 @@ public sealed partial class AnimationWindow
 		}
 
 		var accent = NodeColor(node.Kind);
-		var selected = node.Id == _selectedNode;
+		var selected = _nodeSelection.Contains(node.Id);
 		var rounding = MathF.Max(3.0f, 7.0f * zoom);
 		var surface = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
 		draw.AddRectFilled(min + new Vector2(2.0f, 4.0f), max + new Vector2(2.0f, 4.0f), 0x40000000, rounding);
@@ -592,10 +598,7 @@ public sealed partial class AnimationWindow
 			if (ImGui.MenuItem("Delete node"))
 			{
 				DeleteNode(graph, _contextNode);
-				if (_selectedNode == _contextNode)
-				{
-					_selectedNode = Guid.Empty;
-				}
+				_nodeSelection.Prune(graph);
 
 				_connectFrom = Guid.Empty;
 			}

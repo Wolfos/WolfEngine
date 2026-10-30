@@ -16,6 +16,7 @@ public sealed record AnimationGraphEditorNode(
 public sealed record AnimationGraphEditorState(
 	Guid AssetId,
 	Guid SelectedNodeId,
+	Guid[] SelectedNodeIds,
 	Guid ConnectingNodeId,
 	float Zoom,
 	bool Dirty,
@@ -56,6 +57,7 @@ public sealed partial class AnimationWindow
 		return new AnimationGraphEditorState(
 			_assetId,
 			_selectedNode,
+			_nodeSelection.Ids.ToArray(),
 			_connectFrom,
 			_view.Camera.Zoom,
 			_document?.Dirty ?? false,

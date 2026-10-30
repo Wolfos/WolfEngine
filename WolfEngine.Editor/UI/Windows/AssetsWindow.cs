@@ -6,25 +6,14 @@ using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.UI;
 
-public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
+public sealed partial class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 {
-	private static readonly Vector2 ThumbnailSize = new(42.0f, 42.0f);
-	private const float FolderTreeWidth = 220.0f;
 	private const float FolderTreeIconSize = 15.5f;
-	private const float FolderCardHeight = 88.0f;
-	private const float SourceCardHeaderHeight = 104.0f;
-	private const float SourceCardToggleHeight = 26.0f;
-	private const float SubAssetRowHeight = 24.0f;
-	private const float GridMinItemWidth = 132.0f;
 	private const float PaneSeparatorThickness = 2.0f;
-	private const float SearchInputWidth = 220.0f;
-	private const float SearchInputMinWidth = 96.0f;
 	private const float DragPreviewRounding = 4.0f;
 	private const string ErrorPopupId = "AssetsWindowError";
 	private const string DeletePopupId = "AssetsWindowDelete";
 	private const string RenamePopupId = "AssetsWindowRename";
-	private const string CurrentFolderContextMenuId = "AssetsWindowCurrentFolderContextMenu";
-	private const string LocalItemContextMenuId = "ItemContextMenu";
 
 	private readonly IEditorProjectService _projectService;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
@@ -151,16 +140,21 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			assetCatalog,
 			_projectService.AssetsPath,
 			_projectService.AssetDatabaseRevision);
+		_lastBrowserModel = browserModel;
+		_browserItems.Clear();
+		_browserControls.Clear();
+		_folderTreeWidth = Math.Clamp(_folderTreeWidth, 160.0f, MathF.Max(160.0f, ImGui.GetContentRegionAvail().X * 0.45f));
 		_selection.Prune(browserModel, _projectService, _assetSelectionService);
 		var selectedFolder = browserModel.FoldersByPath[_selection.SelectedFolderPath];
 
 		_dragDrop.BeginFrame();
 		DrawFolderTree(browserModel);
 		ImGui.SameLine(0.0f, 0.0f);
-		AssetsWindowDrawing.DrawVerticalPaneSeparator(PaneSeparatorThickness);
+		DrawFolderTreeSplitter();
 		ImGui.SameLine(0.0f, 0.0f);
-		DrawContentArea(selectedFolder, scene);
+		DrawContentArea(browserModel, selectedFolder, scene);
 		_dragDrop.Complete(_projectService, CompleteSuccessfulMove, ShowError);
+		DrawBrowserContextMenu(scene);
 		ProcessScheduledRename();
 		DrawDeletePopup();
 		DrawRenamePopup();
@@ -171,46 +165,18 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private void DrawFolderTree(AssetsWindowBrowserModel browserModel)
 	{
 		AssetsWindowDrawing.PushPaneStyle();
-		ImGui.BeginChild("AssetsFolderTree", new Vector2(FolderTreeWidth, 0.0f), ImGuiChildFlags.None);
+		ImGui.PushStyleVar(ImGuiStyleVar.IndentSpacing, 14.0f);
+		ImGui.BeginChild("AssetsFolderTree", new Vector2(_folderTreeWidth, 0.0f), ImGuiChildFlags.None);
 		for (var i = 0; i < browserModel.RootFolders.Count; i++)
 		{
 			DrawFolderTreeNode(browserModel.RootFolders[i]);
 		}
 
-		_selection.ClearFolderRevealPath();
-		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId + "Tree",
-			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
-		{
-			DrawFolderScopedContextMenu(_selection.SelectedFolderPath);
-			ImGui.EndPopup();
-		}
+		HandleFolderBackgroundContextMenu();
 
 		ImGui.EndChild();
+		ImGui.PopStyleVar();
 		ImGui.PopStyleColor(2);
-	}
-
-	private void DrawContentArea(AssetsWindowFolderNode selectedFolder, EditorScene scene)
-	{
-		ImGui.BeginGroup();
-		DrawBreadcrumbRow(selectedFolder.RelativePath);
-		AssetsWindowDrawing.DrawHorizontalPaneSeparator(PaneSeparatorThickness);
-
-		AssetsWindowDrawing.PushPaneStyle();
-		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f), ImGuiChildFlags.None);
-		var folderContents = AssetsWindowBrowserModelBuilder.GetFolderContents(selectedFolder, _assetSearchText);
-		DrawCurrentFolderContents(folderContents, scene);
-		if (!IsReadOnlyBrowserFolder(_selection.SelectedFolderPath))
-			_dragDrop.RegisterContentPaneDropTarget(_selection.SelectedFolderPath);
-		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId,
-			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
-		{
-			DrawFolderScopedContextMenu(_selection.SelectedFolderPath);
-			ImGui.EndPopup();
-		}
-
-		ImGui.EndChild();
-		ImGui.PopStyleColor(2);
-		ImGui.EndGroup();
 	}
 
 	private void DrawFolderTreeNode(AssetsWindowFolderNode folder)
@@ -247,9 +213,22 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var open = ImGui.TreeNodeEx("##FolderNode", flags);
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
 		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
+		RecordBrowserControl("tree:" + folder.RelativePath);
+		if (isSelected && _selection.FolderTreeRevealPath is not null)
+		{
+			ImGui.SetScrollHereY(0.5f);
+			if (ImGui.IsItemVisible())
+			{
+				_selection.ClearFolderRevealPath();
+			}
+		}
 		if (!IsReadOnlyBrowserFolder(folder.RelativePath))
 			_dragDrop.RegisterFolderDropTarget(folder.RelativePath);
-		DrawFolderTreeLabel(folder, nodeCursorX);
+		DrawFolderTreeLabel(folder, nodeCursorX, open && hasChildren);
+		if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal))
+		{
+			ImGui.SetTooltip(folder.RelativePath);
+		}
 
 		if (leftClicked)
 		{
@@ -260,15 +239,9 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (rightClicked)
 		{
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			ImGui.OpenPopup(LocalItemContextMenuId);
+			RequestBrowserContextMenu(BrowserContextTarget.ForFolder(folder.RelativePath));
 		}
 
-		var popupOpen = ImGui.BeginPopup(LocalItemContextMenuId);
-		if (popupOpen)
-		{
-			DrawFolderScopedContextMenu(folder.RelativePath);
-			ImGui.EndPopup();
-		}
 
 		if (hasChildren && open)
 		{
@@ -288,7 +261,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.PopID();
 	}
 
-	private void DrawFolderTreeLabel(AssetsWindowFolderNode folder, float nodeCursorX)
+	private void DrawFolderTreeLabel(AssetsWindowFolderNode folder, float nodeCursorX, bool open)
 	{
 		var itemMin = ImGui.GetItemRectMin();
 		var itemMax = ImGui.GetItemRectMax();
@@ -300,9 +273,15 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var textPosition = new Vector2(iconPosition.X + iconSize + 4.0f, itemMin.Y + (rowHeight - textSize.Y) * 0.5f);
 		var drawList = ImGui.GetWindowDrawList();
 
-		if (TryGetFolderIconTexture(out var textureId))
+		if (_icons.TryGet(open ? "asset_folder_open" : "folder", out var textureId))
 		{
-			drawList.AddImage(textureId, iconPosition, iconPosition + Vector2.One * iconSize);
+			drawList.AddImage(
+				textureId,
+				iconPosition,
+				iconPosition + Vector2.One * iconSize,
+				Vector2.Zero,
+				Vector2.One,
+				ImGui.GetColorU32(AssetBrowserAppearance.FolderColor));
 		}
 		else
 		{
@@ -314,306 +293,6 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.HeaderActive), 2.0f, ImDrawFlags.None, 2.0f);
 		}
-	}
-
-	private void DrawBreadcrumbRow(string relativeFolderPath)
-	{
-		DrawBreadcrumbs(relativeFolderPath);
-		DrawSearchInput();
-	}
-
-	private void DrawBreadcrumbs(string relativeFolderPath)
-	{
-		var parts = relativeFolderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-		var currentPath = string.Empty;
-		for (var i = 0; i < parts.Length; i++)
-		{
-			currentPath = i == 0 ? parts[i] : $"{currentPath}/{parts[i]}";
-			if (i > 0)
-			{
-				ImGui.SameLine(0.0f, 6.0f);
-				ImGui.TextDisabled(">");
-				ImGui.SameLine(0.0f, 6.0f);
-			}
-
-			if (ImGui.SmallButton(parts[i]))
-			{
-				SelectFolder(currentPath);
-			}
-		}
-	}
-
-	private void DrawSearchInput()
-	{
-		var style = ImGui.GetStyle();
-		var label = "Search";
-		var labelWidth = ImGui.CalcTextSize(label).X;
-		var currentX = ImGui.GetCursorPosX();
-		var contentMaxX = currentX + ImGui.GetContentRegionAvail().X;
-		var idealTotalWidth = labelWidth + style.ItemInnerSpacing.X + SearchInputWidth;
-		var searchStartX = MathF.Max(currentX + style.ItemSpacing.X, contentMaxX - idealTotalWidth);
-		var inputWidth = MathF.Min(
-			SearchInputWidth,
-			MathF.Max(SearchInputMinWidth, contentMaxX - searchStartX - labelWidth - style.ItemInnerSpacing.X));
-
-		ImGui.SameLine(0.0f, style.ItemSpacing.X);
-		ImGui.SetCursorPosX(searchStartX);
-		ImGui.TextDisabled(label);
-		ImGui.SameLine(0.0f, style.ItemInnerSpacing.X);
-		ImGui.SetNextItemWidth(inputWidth);
-		ImGui.InputText("##AssetsSearch", ref _assetSearchText, 256);
-	}
-
-	private void DrawCurrentFolderContents(AssetsWindowFolderContents contents, EditorScene scene)
-	{
-		if (contents.Folders.Count == 0 && contents.Sources.Count == 0)
-		{
-			ImGui.TextDisabled(contents.IsSearchActive ? "No assets match the search." : "This folder is empty.");
-			return;
-		}
-
-		var availableWidth = MathF.Max(ImGui.GetContentRegionAvail().X, GridMinItemWidth);
-		var columnCount = Math.Max(1, (int)MathF.Floor(availableWidth / GridMinItemWidth));
-		if (ImGui.BeginTable("AssetsGrid", columnCount,
-			    ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.PadOuterX) == false)
-		{
-			return;
-		}
-
-		var columnIndex = 0;
-		for (var i = 0; i < contents.Folders.Count; i++)
-		{
-			AssetsWindowDrawing.AdvanceTable(ref columnIndex, columnCount);
-			DrawFolderCard(contents.Folders[i]);
-		}
-
-		for (var i = 0; i < contents.Sources.Count; i++)
-		{
-			AssetsWindowDrawing.AdvanceTable(ref columnIndex, columnCount);
-			DrawSourceCard(contents.Sources[i], scene);
-		}
-
-		ImGui.EndTable();
-	}
-
-	private void DrawFolderCard(AssetsWindowFolderNode folder)
-	{
-		ImGui.PushID(folder.RelativePath);
-		ImGui.BeginChild("FolderCard", new Vector2(0.0f, FolderCardHeight), ImGuiChildFlags.None,
-			ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
-		var buttonSize = new Vector2(ImGui.GetContentRegionAvail().X, FolderCardHeight - 6.0f);
-		ImGui.InvisibleButton("FolderCardButton", buttonSize);
-		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
-		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
-		var doubleClicked = leftClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
-		var isReadOnly = IsReadOnlyBrowserFolder(folder.RelativePath);
-		if (leftClicked && !isReadOnly)
-		{
-			_dragDrop.Press(AssetBrowserDragTarget.ForFolder(folder.RelativePath));
-		}
-
-		if (!isReadOnly)
-			_dragDrop.RegisterFolderDropTarget(folder.RelativePath);
-		DrawFolderCardContents(folder);
-
-		if (doubleClicked)
-		{
-			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectFolder(folder.RelativePath);
-		}
-
-		if (rightClicked)
-		{
-			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			ImGui.OpenPopup(LocalItemContextMenuId);
-		}
-
-		var popupOpen = ImGui.BeginPopup(LocalItemContextMenuId);
-		if (popupOpen)
-		{
-			DrawFolderScopedContextMenu(folder.RelativePath);
-			ImGui.EndPopup();
-		}
-
-		ImGui.EndChild();
-		ImGui.PopID();
-	}
-
-	private void DrawFolderCardContents(AssetsWindowFolderNode folder)
-	{
-		var itemMin = ImGui.GetItemRectMin();
-		var itemMax = ImGui.GetItemRectMax();
-		var drawList = ImGui.GetWindowDrawList();
-		if (ImGui.IsItemHovered())
-		{
-			drawList.AddRectFilled(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.HeaderHovered), 4.0f);
-		}
-
-		var thumbnailMin =
-			new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
-		var thumbnailMax = thumbnailMin + ThumbnailSize;
-		if (TryGetFolderIconTexture(out var textureId))
-		{
-			drawList.AddImage(textureId, thumbnailMin, thumbnailMax);
-		}
-		else
-		{
-			drawList.AddRect(thumbnailMin, thumbnailMax, AssetsWindowDrawing.SeparatorColor());
-		}
-
-		if (_dragDrop.IsActiveDropTarget(folder.RelativePath))
-		{
-			drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.HeaderActive), 4.0f, ImDrawFlags.None, 2.0f);
-		}
-
-		AssetsWindowDrawing.DrawCardTextBlock(
-			drawList,
-			itemMin,
-			itemMax,
-			thumbnailMax.Y + 10.0f,
-			folder.Name,
-			null);
-	}
-
-	private void DrawSourceCard(AssetsWindowSourceItem source, EditorScene scene)
-	{
-		var isExpanded = _selection.ExpandedSourceId == source.SourceId;
-		var toggleHeight = source.SubAssets.Count > 0 ? SourceCardToggleHeight : 0.0f;
-		var totalHeight = SourceCardHeaderHeight + toggleHeight +
-		                  (isExpanded ? source.SubAssets.Count * SubAssetRowHeight : 0.0f);
-		ImGui.PushID(source.SourceId.ToString());
-		ImGui.BeginChild("SourceCard", new Vector2(0.0f, totalHeight), ImGuiChildFlags.None,
-			ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
-
-		ImGui.InvisibleButton("SourceHeaderButton",
-			new Vector2(ImGui.GetContentRegionAvail().X, SourceCardHeaderHeight - 6.0f));
-		var headerLeftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
-		var headerRightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
-		var headerDoubleClicked = headerLeftClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
-		DrawSourceHeaderContents(source, ImGui.GetItemRectMin(), ImGui.GetItemRectMax());
-
-		if (headerLeftClicked)
-		{
-			if (!source.IsReadOnly)
-				_dragDrop.Press(AssetBrowserDragTarget.ForSource(source.RelativeSourcePath));
-			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			var wasPrimarySelected = _assetSelectionService.SelectedAssetId == source.PrimaryAsset.Id;
-			SelectAsset(source.PrimaryAsset, folderPath: source.FolderPath);
-			if (headerDoubleClicked)
-			{
-				OpenAsset(source.PrimaryAsset, scene);
-			}
-			else if (wasPrimarySelected && source.SubAssets.Count > 0)
-			{
-				_selection.ExpandedSourceId =
-					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_selection.ExpandedSourceId, source.SourceId);
-			}
-		}
-
-		if (headerRightClicked)
-		{
-			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectAsset(source.PrimaryAsset, requestFocus: false, folderPath: source.FolderPath);
-			ImGui.OpenPopup(LocalItemContextMenuId);
-		}
-
-		var popupOpen = ImGui.BeginPopup(LocalItemContextMenuId);
-		if (popupOpen)
-		{
-			DrawSourceContextMenu(
-				scene,
-				source,
-				BrowserContextTarget.ForSource(source.RelativeSourcePath, source.SourceId, source.PrimaryAsset.Id),
-				renameLabel: "Rename",
-				deleteLabel: "Delete");
-			ImGui.EndPopup();
-		}
-
-		if (source.SubAssets.Count > 0)
-		{
-			ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2.0f);
-			if (ImGui.SmallButton(isExpanded ? "Hide Sub-assets" : $"Show Sub-assets ({source.SubAssets.Count})"))
-			{
-				_selection.ExpandedSourceId =
-					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_selection.ExpandedSourceId, source.SourceId);
-			}
-		}
-
-		if (isExpanded)
-		{
-			for (var i = 0; i < source.SubAssets.Count; i++)
-			{
-				DrawSubAssetRow(source, source.SubAssets[i], scene);
-			}
-		}
-
-		ImGui.EndChild();
-		ImGui.PopID();
-	}
-
-	private void DrawSourceHeaderContents(AssetsWindowSourceItem source, Vector2 itemMin, Vector2 itemMax)
-	{
-		var drawList = ImGui.GetWindowDrawList();
-		var isSelected = _assetSelectionService.SelectedAssetId == source.PrimaryAsset.Id;
-		var backgroundColor = isSelected
-			? ImGui.GetColorU32(ImGuiCol.HeaderActive)
-			: ImGui.IsItemHovered()
-				? ImGui.GetColorU32(ImGuiCol.HeaderHovered)
-				: 0u;
-		if (backgroundColor != 0)
-		{
-			drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
-		}
-
-		var thumbnailMin =
-			new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
-		var thumbnailMax = thumbnailMin + ThumbnailSize;
-		DrawAssetThumbnail(drawList, thumbnailMin, thumbnailMax, source.PrimaryAsset);
-		AssetsWindowDrawing.DrawCardTextBlock(
-			drawList,
-			itemMin,
-			itemMax,
-			thumbnailMax.Y + 10.0f,
-			Path.GetFileName(source.RelativeSourcePath),
-			GetAssetSubtitle(source.PrimaryAsset, source.SubAssets.Count));
-	}
-
-	private void DrawSubAssetRow(AssetsWindowSourceItem source, AssetDatabaseEntry subAsset, EditorScene scene)
-	{
-		ImGui.PushID(subAsset.Id.ToString());
-		var isSelected = _assetSelectionService.SelectedAssetId == subAsset.Id;
-		if (ImGui.Selectable($"{subAsset.Name}  [{subAsset.Type}]", isSelected, ImGuiSelectableFlags.SpanAllColumns))
-		{
-			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectAsset(subAsset, folderPath: source.FolderPath);
-		}
-
-		if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-		{
-			OpenAsset(subAsset, scene);
-		}
-
-		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
-		if (rightClicked)
-		{
-			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectAsset(subAsset, requestFocus: false, folderPath: source.FolderPath);
-			ImGui.OpenPopup(LocalItemContextMenuId);
-		}
-
-		var popupOpen = ImGui.BeginPopup(LocalItemContextMenuId);
-		if (popupOpen)
-		{
-			DrawSourceContextMenu(
-				scene,
-				source,
-				BrowserContextTarget.ForSubAsset(source.RelativeSourcePath, source.SourceId, subAsset.Id),
-				renameLabel: "Rename Source Asset",
-				deleteLabel: "Delete Source Asset");
-			ImGui.EndPopup();
-		}
-
-		ImGui.PopID();
 	}
 
 	private void CompleteSuccessfulMove(AssetBrowserDragTarget dragTarget, string movedPath)
@@ -665,9 +344,14 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 		var canDelete =
 			string.Equals(folderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase) == false;
-		if (canDelete && ImGui.MenuItem("Rename"))
+		if (canDelete)
 		{
-			RequestRename(PendingRenameTarget.ForFolder(folderPath));
+			if (ImGui.MenuItem("Rename"))
+			{
+				RequestRename(PendingRenameTarget.ForFolder(folderPath));
+			}
+
+			RecordBrowserControl("context:rename");
 		}
 
 		if (canDelete && ImGui.MenuItem("Delete Folder"))
@@ -804,6 +488,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			RequestRename(PendingRenameTarget.ForSource(contextTarget.RelativeSourcePath!));
 		}
+
+		RecordBrowserControl("context:rename");
 
 		if (ImGui.MenuItem(deleteLabel))
 		{
@@ -1164,7 +850,12 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void SelectAsset(AssetDatabaseEntry asset, bool requestFocus = true, string? folderPath = null)
 	{
-		_selection.SetSelectedFolderPath(folderPath ?? ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath));
+		if (string.IsNullOrWhiteSpace(_assetSearchText))
+		{
+			_selection.SetSelectedFolderPath(folderPath ?? ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath));
+		}
+
+		_selection.ObserveBrowserSelection(asset.Id);
 		_assetSelectionService.Select(asset.Id, requestFocus);
 	}
 
@@ -1196,74 +887,6 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.PushStyleColor(ImGuiCol.Header, *selectedColor);
 		ImGui.PushStyleColor(ImGuiCol.HeaderHovered, *selectedColor);
 		ImGui.PushStyleColor(ImGuiCol.HeaderActive, *selectedColor);
-	}
-
-	private bool TryGetFolderIconTexture(out nint textureId)
-	{
-		return _icons.TryGet("folder", out textureId);
-	}
-
-	private void DrawAssetThumbnail(ImDrawListPtr drawList, Vector2 min, Vector2 max, AssetDatabaseEntry asset)
-	{
-		if (asset.Type == AssetType.Scene && _commandService.LoadingSceneAssetId == asset.Id)
-		{
-			EditorGui.DrawLoadingSpinner(drawList, (min + max) * 0.5f);
-			return;
-		}
-
-		if (asset.Type == AssetType.Texture2D)
-		{
-			var thumbnailState = _assetThumbnailLoader.GetTextureThumbnailState(asset, out var textureId);
-			if (thumbnailState == AssetThumbnailState.Loading)
-			{
-				EditorGui.DrawLoadingSpinner(drawList, (min + max) * 0.5f);
-				return;
-			}
-
-			if (thumbnailState == AssetThumbnailState.Ready)
-			{
-				drawList.AddImage(textureId, min, max);
-				return;
-			}
-		}
-
-		drawList.AddRect(min, max, AssetsWindowDrawing.SeparatorColor());
-		var label = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
-			? handler.ThumbnailLabel
-			: GetFallbackThumbnailLabel(asset.Type);
-		var textSize = ImGui.CalcTextSize(label);
-		var textPos = new Vector2(min.X + ((max.X - min.X) - textSize.X) * 0.5f,
-			min.Y + ((max.Y - min.Y) - textSize.Y) * 0.5f);
-		drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.TextDisabled), label);
-	}
-
-	private string GetAssetSubtitle(AssetDatabaseEntry asset, int childCount = 0)
-	{
-		var baseSubtitle = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
-			? handler.GetSubtitle(asset)
-			: asset.Type switch
-			{
-				AssetType.Model3D => "3D Model",
-				_ => asset.Type.ToString()
-			};
-		if (childCount <= 0)
-		{
-			return baseSubtitle;
-		}
-
-		var suffix = childCount == 1 ? "1 sub-asset" : $"{childCount} sub-assets";
-		return $"{baseSubtitle} | {suffix}";
-	}
-
-	private static string GetFallbackThumbnailLabel(AssetType assetType)
-	{
-		return assetType switch
-		{
-			AssetType.Scene => "SCN",
-			AssetType.Prefab => "PFB",
-			AssetType.Model3D => "3D",
-			_ => assetType.ToString().ToUpperInvariant()
-		};
 	}
 
 	private void ShowError(string errorMessage)

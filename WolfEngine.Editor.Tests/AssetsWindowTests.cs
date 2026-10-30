@@ -387,7 +387,7 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
-	public void GetFolderContents_SearchActive_DoesNotMatchPathsTypesOrSubAssetNames()
+	public void GetFolderContents_SearchActive_MatchesSubAssetNamesButNotPathsOrRawTypes()
 	{
 		using var assetsRoot = new TemporaryAssetsRoot();
 		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "PathOnly"));
@@ -422,7 +422,8 @@ public sealed class AssetsWindowTests
 		Assert.That(typeContents.Folders, Is.Empty);
 		Assert.That(typeContents.Sources, Is.Empty);
 		Assert.That(subAssetContents.Folders, Is.Empty);
-		Assert.That(subAssetContents.Sources, Is.Empty);
+		Assert.That(subAssetContents.Sources, Has.Count.EqualTo(1));
+		Assert.That(subAssetContents.Sources[0].SourceId, Is.EqualTo(sourceId));
 	}
 
 	[Test]

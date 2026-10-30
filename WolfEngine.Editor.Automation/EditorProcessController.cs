@@ -203,6 +203,25 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<UI.AnimationGraphEditorState> GetAnimationEditorStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetAnimationEditorStateAsync(cancellationToken);
 
+	public Task<UI.AssetBrowserState> GetAssetBrowserStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetAssetBrowserStateAsync(cancellationToken);
+
+	public Task ConfigureAssetBrowserAsync(
+		string folderPath,
+		string search,
+		Guid? expandedSourceId,
+		string subAssetSearch,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().ConfigureAssetBrowserAsync(
+			folderPath,
+			search,
+			expandedSourceId,
+			subAssetSearch,
+			cancellationToken);
+
+	public Task SetEditorKeyAsync(string key, bool pressed, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEditorKeyAsync(key, pressed, cancellationToken);
+
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		GetRunningEditor().CreateWorkspaceAsync(name, cancellationToken);
 
