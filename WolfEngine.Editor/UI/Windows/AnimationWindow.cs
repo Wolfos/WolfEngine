@@ -20,6 +20,7 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 	private readonly IRenderViewHost _host;
 	private readonly EditorRenderViews _views;
 	private readonly EditorViewportStateBus _viewUi;
+	private readonly ImGuiUiSystem _imgui;
 	private readonly Dictionary<Guid, AnimationDocument> _documents = new();
 	private readonly Dictionary<Guid, GraphViewState> _graphViews = new();
 	private readonly Dictionary<string, GraphRect> _toolbarBounds = new();
@@ -79,7 +80,8 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 		EditorRenderViews views,
 		EditorViewportStateBus viewUi,
 		IPropertyDrawerRegistry propertyDrawerRegistry,
-		IIconManager icons)
+		IIconManager icons,
+		ImGuiUiSystem imgui)
 	{
 		_project = project;
 		_pipeline = pipeline;
@@ -90,6 +92,7 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 		_viewUi = viewUi;
 		_propertyDrawerRegistry = propertyDrawerRegistry;
 		_icons = icons;
+		_imgui = imgui;
 	}
 
 	public void Open(AssetDatabaseEntry asset)
@@ -122,6 +125,7 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 		_selectedNode = (_document.Asset as AnimationGraph)?.Output ?? Guid.Empty;
 		_connectFrom = Guid.Empty;
 		_dragNode = Guid.Empty;
+		_panCanvas = false;
 		_compiledRevision = -1;
 		_diagnostic = null;
 		_requestedTab = SidebarTab.Node;

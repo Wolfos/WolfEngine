@@ -129,9 +129,22 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken,
 		bool? pressed = null,
 		int button = 0,
-		float wheel = 0.0f)
+		float wheel = 0.0f,
+		float wheelX = 0.0f,
+		[Description("Pinch magnification delta, e.g. 0.2 for a 20% increase or -0.2 for a 20% decrease.")] float magnification = 0.0f,
+		[Description("Optional Control key state for modifier-scroll zoom.")] bool? control = null,
+		[Description("Send trackpad scrolling instead of a mouse wheel; each unit pans 35 logical points.")] bool preciseScroll = false)
 	{
-		await _controller.SetEditorPointerAsync(new(x, y), pressed, button, wheel, cancellationToken).ConfigureAwait(false);
+		await _controller.SetEditorPointerAsync(
+			new(x, y),
+			pressed,
+			button,
+			wheel,
+			cancellationToken,
+			wheelX,
+			magnification,
+			control,
+			preciseScroll).ConfigureAwait(false);
 		return $"Editor pointer at ({x}, {y}).";
 	}
 

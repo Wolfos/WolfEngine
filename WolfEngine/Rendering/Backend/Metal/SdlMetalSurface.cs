@@ -26,6 +26,7 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 	private Int2 _requestedSize;
 	private bool _hasRequestedDrawableSize;
 	private Event _event;
+	private MacOSGestureResponder? _gestureResponder;
 
 	public SdlMetalSurface(IMacOSInputHandler inputHandler)
 	{
@@ -43,6 +44,8 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 		{
 			throw new InvalidOperationException("Failed to initialise SDL video subsystem.");
 		}
+
+		MacOSGestureResponder.EnableMomentumScrolling();
 
 		var titlePtr = SilkMarshal.StringToPtr(WindowTitle, NativeStringEncoding.UTF8);
 		try
@@ -68,6 +71,15 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 
 		CreateMetalView();
 		ConfigureNativeWindowChrome();
+		var contentView = ObjectiveC.IntPtr_objc_msgSend(_nativeWindow, "contentView");
+		if (contentView != IntPtr.Zero)
+		{
+			_gestureResponder = new MacOSGestureResponder(
+				contentView,
+				_inputHandler.HandleMagnification,
+				_inputHandler.HandleNativeScroll);
+			_inputHandler.UseNativeUiScroll = true;
+		}
 
 		return GetLayer();
 	}
@@ -137,6 +149,7 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 	public MetalSurfaceEvents PumpEvents()
 	{
 		var events = MetalSurfaceEvents.None;
+		_gestureResponder?.EnsureAttached();
 		_inputHandler.StartInputFrame();
 
 		while (_sdl.PollEvent(ref _event) != 0)
@@ -167,6 +180,7 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 			}
 		}
 
+		_gestureResponder?.EnsureAttached();
 		_inputHandler.EndInputFrame();
 
 		return events;
@@ -174,6 +188,10 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 
 	public void Shutdown()
 	{
+		_gestureResponder?.Dispose();
+		_gestureResponder = null;
+		_inputHandler.UseNativeUiScroll = false;
+
 		if (_metalView is not null)
 		{
 			_sdl.MetalDestroyView(_metalView);

@@ -42,7 +42,11 @@ public sealed class RuntimeNullUi : IUiFrameProvider, IImGuiInputSink
 	{
 	}
 
-	public void AddMouseScroll(System.Numerics.Vector2 scroll)
+	public void AddMouseScroll(System.Numerics.Vector2 scroll, System.Numerics.Vector2? preciseDelta = null)
+	{
+	}
+
+	public void AddMouseMagnification(float delta)
 	{
 	}
 }

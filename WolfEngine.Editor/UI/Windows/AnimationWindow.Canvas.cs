@@ -9,6 +9,8 @@ public sealed partial class AnimationWindow
 	private GraphRect _canvasRect;
 	private Dictionary<Guid, Vector2> _canvasPositions = new();
 	private Guid _dragNode;
+	private bool _panCanvas;
+	private bool _panCanvasMoved;
 	private string? _canvasMessage;
 	private Guid _hoverNode;
 	private double _hoverStarted;
@@ -109,7 +111,7 @@ public sealed partial class AnimationWindow
 			draw.PopClipRect();
 			var hint = _canvasMessage ?? (_connectFrom != Guid.Empty
 				? "Choose an input to connect  /  Esc to cancel"
-				: "Scroll to zoom  /  Middle-drag or Space-drag to pan  /  F to focus  /  Home to fit all");
+				: "Trackpad scroll or drag background to pan  /  Pinch or mouse wheel to zoom  /  F to focus  /  Home to fit all");
 			draw.AddText(
 				new Vector2(_canvasRect.Min.X + 6.0f, _canvasRect.Max.Y + 7.0f),
 				ImGui.GetColorU32(ImGuiCol.TextDisabled),
@@ -120,7 +122,7 @@ public sealed partial class AnimationWindow
 				ImGui.GetColorU32(ImGuiCol.TextDisabled),
 				zoomText);
 			DrawCanvasContextMenu(graph, readOnly);
-			if (hovered && _dragNode == Guid.Empty && _connectFrom == Guid.Empty)
+			if (hovered && _dragNode == Guid.Empty && _connectFrom == Guid.Empty && _panCanvas == false)
 			{
 				var hit = HitGraph(graph, ImGui.GetMousePos());
 				if (hit.NodeId != _hoverNode || ImGui.GetIO().MouseDelta.LengthSquared() > 1.0f)
@@ -150,22 +152,61 @@ public sealed partial class AnimationWindow
 	{
 		var io = ImGui.GetIO();
 		var mouse = ImGui.GetMousePos();
-		var panGesture = ImGui.IsMouseDown(ImGuiMouseButton.Middle) || (ImGui.IsKeyDown(ImGuiKey.Space) && ImGui.IsMouseDown(ImGuiMouseButton.Left) && io.WantTextInput == false);
+		if (ImGui.IsMouseDown(ImGuiMouseButton.Left) == false && ImGui.IsMouseReleased(ImGuiMouseButton.Left) == false)
+		{
+			_panCanvas = false;
+			_dragNode = Guid.Empty;
+		}
+
+		var panGesture = ImGui.IsMouseDown(ImGuiMouseButton.Middle) ||
+			(ImGui.IsKeyDown(ImGuiKey.Space) && ImGui.IsMouseDown(ImGuiMouseButton.Left) && io.WantTextInput == false) ||
+			(_panCanvas && ImGui.IsMouseDown(ImGuiMouseButton.Left));
 		if ((hovered || ImGui.IsItemActive()) && panGesture)
 		{
-			_view.Camera = _view.Camera with
+			if (_panCanvas == false || ImGui.IsMouseDragging(ImGuiMouseButton.Left))
 			{
-				Pan = _view.Camera.Pan + io.MouseDelta
-			};
-			_view.AutoFrame = false;
+				_view.Camera = _view.Camera with
+				{
+					Pan = _view.Camera.Pan + io.MouseDelta
+				};
+				_view.AutoFrame = false;
+				_panCanvasMoved = true;
+			}
+
 			_dragNode = Guid.Empty;
 			ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeAll);
 		}
 
-		if (hovered && io.MouseWheel != 0.0f)
+		if (hovered)
 		{
-			_view.Camera = _view.Camera.ZoomAt(mouse - _canvasRect.Min, MathF.Pow(1.15f, io.MouseWheel));
-			_view.AutoFrame = false;
+			var scroll = new Vector2(io.MouseWheelH, io.MouseWheel);
+			var zoom = _imgui.MouseZoomFactor;
+			var pan = _imgui.MousePanDelta;
+			if (io.KeyCtrl || io.KeySuper)
+			{
+				zoom *= MathF.Pow(1.15f, scroll.Y);
+				pan = Vector2.Zero;
+			}
+			else
+			{
+				zoom *= MathF.Pow(1.15f, _imgui.MouseWheelZoomDelta.Y);
+				pan.X += _imgui.MouseWheelZoomDelta.X * 35.0f;
+			}
+
+			if (pan != Vector2.Zero)
+			{
+				_view.Camera = _view.Camera with
+				{
+					Pan = _view.Camera.Pan + pan
+				};
+				_view.AutoFrame = false;
+			}
+
+			if (zoom != 1.0f)
+			{
+				_view.Camera = _view.Camera.ZoomAt(mouse - _canvasRect.Min, zoom);
+				_view.AutoFrame = false;
+			}
 		}
 
 		if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
@@ -187,7 +228,8 @@ public sealed partial class AnimationWindow
 			var hit = HitGraph(graph, mouse);
 			if (hit.NodeId == Guid.Empty)
 			{
-				_selectedNode = Guid.Empty;
+				_panCanvas = true;
+				_panCanvasMoved = false;
 				_connectFrom = Guid.Empty;
 			}
 			else
@@ -239,6 +281,12 @@ public sealed partial class AnimationWindow
 
 		if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
 		{
+			if (_panCanvas && _panCanvasMoved == false)
+			{
+				_selectedNode = Guid.Empty;
+			}
+
+			_panCanvas = false;
 			if (_connectFrom != Guid.Empty && hovered && readOnly == false)
 			{
 				var hit = HitGraph(graph, mouse);

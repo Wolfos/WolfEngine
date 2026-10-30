@@ -716,18 +716,38 @@ public sealed partial class EditorRemoteAutomationController
 			NativeFocused = _inputSystem.PointerFocused, Origin = new[] { state.ImageMin.X, state.ImageMin.Y }, Size = new[] { state.ImageMax.X - state.ImageMin.X, state.ImageMax.Y - state.ImageMin.Y } });
 	}, cancellationToken);
 
-	public Task SetEditorPointerAsync(Vector2 position, bool? pressed, int button, float wheel, CancellationToken cancellationToken) =>
+	public Task SetEditorPointerAsync(
+		Vector2 position,
+		bool? pressed,
+		int button,
+		float wheel,
+		CancellationToken cancellationToken,
+		float wheelX = 0.0f,
+		float magnification = 0.0f,
+		bool? control = null,
+		bool preciseScroll = false) =>
 		Enqueue(() =>
 		{
 			if (button < 0 || button > 2) throw new ArgumentOutOfRangeException(nameof(button));
-			if (float.IsFinite(position.X) == false || float.IsFinite(position.Y) == false || float.IsFinite(wheel) == false)
+			if (float.IsFinite(position.X) == false ||
+				float.IsFinite(position.Y) == false ||
+				float.IsFinite(wheel) == false ||
+				float.IsFinite(wheelX) == false ||
+				float.IsFinite(magnification) == false ||
+				magnification <= -1.0f)
 			{
-				throw new ArgumentException("Pointer coordinates and wheel must be finite.");
+				throw new ArgumentException("Pointer input must be finite and magnification must exceed -1.");
 			}
 
 			_imguiInput.SetMousePosition(position);
 			if (pressed.HasValue) _imguiInput.SetMouseButton(button, pressed.Value);
-			if (wheel != 0.0f) _imguiInput.AddMouseScroll(new Vector2(0.0f, wheel));
+			if (control.HasValue) _imguiInput.SetKey(ImGuiNET.ImGuiKey.LeftCtrl, control.Value);
+			if (wheel != 0.0f || wheelX != 0.0f)
+			{
+				var scroll = new Vector2(wheelX, wheel);
+				_imguiInput.AddMouseScroll(scroll, preciseScroll ? scroll * 35.0f : null);
+			}
+			if (magnification != 0.0f) _imguiInput.AddMouseMagnification(magnification);
 		}, cancellationToken);
 
 	public Task<AnimationGraphEditorState> GetAnimationEditorStateAsync(CancellationToken cancellationToken) =>
