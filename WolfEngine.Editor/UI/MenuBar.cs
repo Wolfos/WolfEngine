@@ -611,9 +611,16 @@ public sealed class MenuBar : IMenuBar
 		ImGui.SameLine();
 		var clicked = ImGui.ImageButton("GameplayReload", _icons.Get("refresh"), Vector2.One * 15.5f);
 		var buttonRect = GetLastItemRect();
-		if (ImGui.IsItemHovered())
+		var isSourceStale = hasOpenProject && _gameplayAssemblyHost.IsSourceStale;
+		var lastBuildFailed = isSourceStale && _gameplayAssemblyHost.LastBuildFailedForCurrentSource;
+		if (isSourceStale)
 		{
-			ImGui.SetTooltip(isBuildInProgress ? "Gameplay build is already running." : "Build and reload gameplay");
+			DrawGameplayStaleBadge(lastBuildFailed);
+		}
+
+		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+		{
+			ImGui.SetTooltip(GetGameplayReloadTooltip(isBuildInProgress, isSourceStale, lastBuildFailed));
 		}
 
 		if (hasOpenProject == false || isBuildInProgress)
@@ -627,6 +634,38 @@ public sealed class MenuBar : IMenuBar
 		}
 
 		return buttonRect;
+	}
+
+	private static void DrawGameplayStaleBadge(bool lastBuildFailed)
+	{
+		var color = lastBuildFailed
+			? new Vector4(0.92f, 0.33f, 0.30f, 1.0f)
+			: new Vector4(0.95f, 0.70f, 0.22f, 1.0f);
+		var itemMin = ImGui.GetItemRectMin();
+		var itemMax = ImGui.GetItemRectMax();
+		var radius = 3.0f;
+		var center = new Vector2(itemMax.X - radius - 1.0f, itemMin.Y + radius + 1.0f);
+		ImGui.GetWindowDrawList().AddCircleFilled(center, radius, ImGui.ColorConvertFloat4ToU32(color));
+	}
+
+	private static string GetGameplayReloadTooltip(bool isBuildInProgress, bool isSourceStale, bool lastBuildFailed)
+	{
+		if (isBuildInProgress)
+		{
+			return "Gameplay build is already running.";
+		}
+
+		if (lastBuildFailed)
+		{
+			return "Last gameplay build failed. The loaded build is older than the source.";
+		}
+
+		if (isSourceStale)
+		{
+			return "Gameplay source changed. Build and reload gameplay";
+		}
+
+		return "Build and reload gameplay";
 	}
 
 	private static WindowChromeRect Union(WindowChromeRect left, WindowChromeRect right)

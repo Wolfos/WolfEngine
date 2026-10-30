@@ -239,6 +239,7 @@ public class WolfEngineEditor
 			if (_operationService.Current.IsActive == false)
 			{
 				HandleGameplayBuildAndReload();
+				_serviceProvider.GetRequiredService<IEditorCommandService>().ProcessDeferredSceneLoad();
 				ProcessSceneLoadRequest();
 				SyncCurrentScene();
 				ValidateSelection();

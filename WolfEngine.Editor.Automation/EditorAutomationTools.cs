@@ -224,6 +224,10 @@ public sealed class EditorAutomationTools
 	public Task<EditorUndoResult> Undo(CancellationToken cancellationToken) =>
 		_controller.UndoAsync(cancellationToken);
 
+	[McpServerTool(Name = "get_gameplay_state"), Description("Return the loaded gameplay assembly's generation and path, whether the gameplay source changed since that build (rescanned now), whether a build is running, and whether the last build failed for the current source.")]
+	public Task<GameplayStateResult> GetGameplayState(CancellationToken cancellationToken) =>
+		_controller.GetGameplayStateAsync(cancellationToken);
+
 	[McpServerTool(Name = "get_ray_tracing_scene_state"), Description("Return the latest renderer-side TLAS, BLAS, terrain, retirement, and GPU-submission diagnostics without synchronizing or restarting the renderer.")]
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneState(CancellationToken cancellationToken) =>
 		_controller.GetRayTracingSceneStateAsync(cancellationToken);

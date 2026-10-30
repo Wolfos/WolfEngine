@@ -35,6 +35,12 @@ public interface IEditorCommandService
 	bool DeleteFocusedSelection();
 	void ProcessShortcuts();
 	void DrawPendingDialogs();
+
+	/// <summary>
+	/// Starts a scene load that waited for a gameplay rebuild, once the editor has applied the rebuilt assembly.
+	/// Call it after the editor applies gameplay build results.
+	/// </summary>
+	void ProcessDeferredSceneLoad();
 }
 
 internal enum PendingSceneReplacementKind
@@ -68,6 +74,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private readonly IEditorOperationService _operationService;
 	private readonly IFileDialogService _fileDialogService;
 	private readonly IEditorDocumentEditor[] _documentEditors;
+	private readonly IGameplayAssemblyHost? _gameplayAssemblyHost;
 	private bool _leftCtrlDown;
 	private bool _rightCtrlDown;
 	private bool _leftShiftDown;
@@ -89,6 +96,8 @@ public sealed class EditorCommandService : IEditorCommandService
 	private bool _openUnsavedScenePopup;
 	private Guid? _loadingSceneAssetId;
 	private TaskCompletionSource? _automationSceneLoadCompletion;
+	private Guid? _sceneLoadAwaitingGameplayReload;
+	private TaskCompletionSource? _deferredAutomationSceneLoadCompletion;
 
 	public EditorCommandService(
 		IEditorSceneWorkspace sceneWorkspace,
@@ -103,7 +112,8 @@ public sealed class EditorCommandService : IEditorCommandService
 		IEditorOperationService operationService,
 		IFileDialogService fileDialogService,
 		IInputSystem inputSystem,
-		IEnumerable<IEditorDocumentEditor>? documentEditors = null)
+		IEnumerable<IEditorDocumentEditor>? documentEditors = null,
+		IGameplayAssemblyHost? gameplayAssemblyHost = null)
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
@@ -118,6 +128,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		_fileDialogService = fileDialogService ?? throw new ArgumentNullException(nameof(fileDialogService));
 		ArgumentNullException.ThrowIfNull(inputSystem);
 		_documentEditors = documentEditors?.ToArray() ?? [];
+		_gameplayAssemblyHost = gameplayAssemblyHost;
 
 		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRedo", InputActionBinding.KeyY, callback => _redoPressedThisFrame |= callback.Value);
@@ -636,6 +647,101 @@ public sealed class EditorCommandService : IEditorCommandService
 	}
 
 	private void StartSceneLoad(Guid assetId)
+	{
+		if (TryStartGameplayBuildBeforeSceneLoad(assetId))
+		{
+			return;
+		}
+
+		StartSceneLoadWithCurrentGameplay(assetId);
+	}
+
+	public void ProcessDeferredSceneLoad()
+	{
+		if (_sceneLoadAwaitingGameplayReload is not { } assetId ||
+		    _operationService.Current.IsActive)
+		{
+			return;
+		}
+
+		// The editor applies the build result on its own thread; the scene must not be read before that.
+		if (_gameplayAssemblyHost is not null &&
+		    (_gameplayAssemblyHost.HasPendingBuildResult || _gameplayAssemblyHost.IsBuildInProgress))
+		{
+			return;
+		}
+
+		_sceneLoadAwaitingGameplayReload = null;
+		_automationSceneLoadCompletion = _deferredAutomationSceneLoadCompletion;
+		_deferredAutomationSceneLoadCompletion = null;
+
+		// The build output was already reported when the failed result was applied.
+		if (_gameplayAssemblyHost?.LastBuildFailedForCurrentSource == true)
+		{
+			_notificationService.ReportError(GameplayStaleBuildMessage.Create(buildOutput: null));
+		}
+
+		StartSceneLoadWithCurrentGameplay(assetId);
+	}
+
+	/// <summary>
+	/// Rebuilds gameplay first when its source changed since the loaded build. A scene deserialized with the older
+	/// build leaves out the components and fields only the newer source declares, and saving would remove them.
+	/// </summary>
+	private bool TryStartGameplayBuildBeforeSceneLoad(Guid assetId)
+	{
+		if (_gameplayAssemblyHost is null ||
+		    _gameplayAssemblyHost.CheckSourceStale() == false)
+		{
+			return false;
+		}
+
+		// Rebuilding a tree that just failed would fail again; load with the older build and say so.
+		if (_gameplayAssemblyHost.LastBuildFailedForCurrentSource)
+		{
+			_notificationService.ReportError(GameplayStaleBuildMessage.Create(buildOutput: null));
+			return false;
+		}
+
+		var gameplayAssemblyHost = _gameplayAssemblyHost;
+		var automationCompletion = _automationSceneLoadCompletion;
+		_automationSceneLoadCompletion = null;
+		_loadingSceneAssetId = assetId;
+		if (_operationService.TryStart(
+				"Loading scene",
+				progress =>
+				{
+					progress.Report("Building gameplay...");
+					if (gameplayAssemblyHost.BuildAndQueueReload() == false)
+					{
+						// A build started from the toolbar is already running. Its result is applied the same way.
+						while (gameplayAssemblyHost.IsBuildInProgress)
+						{
+							Thread.Sleep(50);
+						}
+					}
+				},
+				completed: () =>
+				{
+					_sceneLoadAwaitingGameplayReload = assetId;
+					_deferredAutomationSceneLoadCompletion = automationCompletion;
+				},
+				failed: exception =>
+				{
+					_loadingSceneAssetId = null;
+					_notificationService.ReportError($"Failed to build gameplay before loading the scene: {exception.Message}");
+					automationCompletion?.TrySetException(exception);
+				}) == false)
+		{
+			_loadingSceneAssetId = null;
+			_automationSceneLoadCompletion = automationCompletion;
+			return false;
+		}
+
+		return true;
+	}
+
+	private void StartSceneLoadWithCurrentGameplay(Guid assetId)
 	{
 		var automationCompletion = _automationSceneLoadCompletion;
 		_automationSceneLoadCompletion = null;

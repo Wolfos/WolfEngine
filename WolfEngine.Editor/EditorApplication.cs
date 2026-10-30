@@ -86,7 +86,11 @@ public sealed class EditorApplication : IDisposable
 					progress.Report("Loading project assets...");
 					if (projects.OpenProject(lastProjectPath, out var error) == false) throw new InvalidOperationException(error);
 					progress.Report("Loading gameplay assembly...");
-					gameplay.EnsureLoaded();
+					var gameplayLoad = gameplay.EnsureLoaded();
+					if (gameplayLoad.BuildFailureOutput is { } buildFailureOutput)
+					{
+						notifications.ReportError(GameplayStaleBuildMessage.Create(buildFailureOutput));
+					}
 				},
 				completed: () => _services.GetRequiredService<IEditorCommandService>().RestoreLastScene(),
 				failed: exception => notifications.ReportError($"Failed to open project: {exception.Message}"));

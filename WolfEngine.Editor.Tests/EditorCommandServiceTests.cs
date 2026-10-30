@@ -681,7 +681,82 @@ public sealed class EditorCommandServiceTests
 		Assert.That(window.PendingRenameRelativePathForTesting, Is.EqualTo("Assets/Data"));
 	}
 
-	private static CommandFixture CreateCommandFixture()
+	[Test]
+	public void RequestLoadScene_WithStaleGameplay_BuildsAndAppliesItBeforeReadingTheScene()
+	{
+		var gameplayAssemblyHost = Substitute.For<IGameplayAssemblyHost>();
+		gameplayAssemblyHost.CheckSourceStale().Returns(true);
+		gameplayAssemblyHost.BuildAndQueueReload().Returns(true);
+		gameplayAssemblyHost.HasPendingBuildResult.Returns(true);
+		var fixture = CreateCommandFixture(gameplayAssemblyHost);
+		var sceneId = Guid.NewGuid();
+
+		fixture.Service.RequestLoadScene(sceneId);
+		fixture.Service.ProcessDeferredSceneLoad();
+
+		gameplayAssemblyHost.Received(1).BuildAndQueueReload();
+		fixture.SceneWorkspace.DidNotReceive().LoadSceneAsset(Arg.Any<Guid>());
+		Assert.That(fixture.Service.LoadingSceneAssetId, Is.EqualTo(sceneId));
+
+		// The editor applied the rebuilt assembly.
+		gameplayAssemblyHost.HasPendingBuildResult.Returns(false);
+		fixture.Service.ProcessDeferredSceneLoad();
+
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+		fixture.SceneWorkspace.Received(1).ReplaceCurrentScene(Arg.Any<EditorScene>());
+		Assert.That(fixture.Service.LoadingSceneAssetId, Is.Null);
+	}
+
+	[Test]
+	public void RequestLoadScene_WithFreshGameplay_LoadsWithoutBuilding()
+	{
+		var gameplayAssemblyHost = Substitute.For<IGameplayAssemblyHost>();
+		gameplayAssemblyHost.CheckSourceStale().Returns(false);
+		var fixture = CreateCommandFixture(gameplayAssemblyHost);
+		var sceneId = Guid.NewGuid();
+
+		fixture.Service.RequestLoadScene(sceneId);
+
+		gameplayAssemblyHost.DidNotReceive().BuildAndQueueReload();
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+	}
+
+	[Test]
+	public void RequestLoadScene_AfterAFailedBuildOfTheSameSource_LoadsAndWarnsWithoutRebuilding()
+	{
+		var gameplayAssemblyHost = Substitute.For<IGameplayAssemblyHost>();
+		gameplayAssemblyHost.CheckSourceStale().Returns(true);
+		gameplayAssemblyHost.LastBuildFailedForCurrentSource.Returns(true);
+		var fixture = CreateCommandFixture(gameplayAssemblyHost);
+		var sceneId = Guid.NewGuid();
+
+		fixture.Service.RequestLoadScene(sceneId);
+
+		gameplayAssemblyHost.DidNotReceive().BuildAndQueueReload();
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+		fixture.NotificationService.Received(1).ReportError(Arg.Is<string>(message => message.Contains("older than the source")));
+	}
+
+	[Test]
+	public void LoadSceneForAutomation_WithStaleGameplay_CompletesOnlyOnceTheSceneIsLoaded()
+	{
+		var gameplayAssemblyHost = Substitute.For<IGameplayAssemblyHost>();
+		gameplayAssemblyHost.CheckSourceStale().Returns(true);
+		gameplayAssemblyHost.BuildAndQueueReload().Returns(true);
+		var fixture = CreateCommandFixture(gameplayAssemblyHost);
+		var sceneId = Guid.NewGuid();
+
+		var load = fixture.Service.LoadSceneForAutomationAsync(sceneId);
+
+		Assert.That(load.IsCompleted, Is.False);
+
+		fixture.Service.ProcessDeferredSceneLoad();
+
+		Assert.That(load.IsCompletedSuccessfully, Is.True);
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+	}
+
+	private static CommandFixture CreateCommandFixture(IGameplayAssemblyHost? gameplayAssemblyHost = null)
 	{
 		var sceneWorkspace = Substitute.For<IEditorSceneWorkspace>();
 		var authoringScene = new EditorScene();
@@ -719,7 +794,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IEditorNotificationService>(),
 			Substitute.For<IEditorUndoRedoService>(),
 			operationService,
-			fileDialogService);
+			fileDialogService,
+			gameplayAssemblyHost);
 	}
 
 	private sealed record CommandFixture(
@@ -731,7 +807,8 @@ public sealed class EditorCommandServiceTests
 		IEditorNotificationService NotificationService,
 		IEditorUndoRedoService UndoRedoService,
 		IEditorOperationService OperationService,
-		IFileDialogService FileDialogService)
+		IFileDialogService FileDialogService,
+		IGameplayAssemblyHost? GameplayAssemblyHost)
 	{
 		public EditorCommandService Service { get; } = new(
 			SceneWorkspace,
@@ -745,7 +822,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IRenderer>(),
 			OperationService,
 			FileDialogService,
-			new InputSystem());
+			new InputSystem(),
+			gameplayAssemblyHost: GameplayAssemblyHost);
 	}
 
 	private struct SelectionTestLight : IEntityComponent;

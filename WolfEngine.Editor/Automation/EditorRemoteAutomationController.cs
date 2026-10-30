@@ -373,7 +373,12 @@ public sealed partial class EditorRemoteAutomationController
 		try
 		{
 			if (_projectService.OpenProject(_projectPath, out var error) == false) throw new InvalidOperationException(error);
-			_gameplayAssemblyHost.EnsureLoaded();
+			var gameplayLoad = _gameplayAssemblyHost.EnsureLoaded();
+			if (gameplayLoad.BuildFailureOutput is { } buildFailureOutput)
+			{
+				Console.WriteLine(GameplayStaleBuildMessage.Create(buildFailureOutput));
+			}
+
 			_ready.TrySetResult();
 		}
 		catch (Exception exception)
@@ -870,6 +875,14 @@ public sealed partial class EditorRemoteAutomationController
 			_commandService.Undo(),
 			_editorFrameCoordinator.CompletedSequence,
 			_renderFrameCoordinator.CompletedSequence), cancellationToken);
+
+	public Task<GameplayStateResult> GetGameplayStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => new GameplayStateResult(
+			_gameplayAssemblyHost.CurrentGeneration,
+			_gameplayAssemblyHost.LoadedAssemblyPath,
+			_gameplayAssemblyHost.CheckSourceStale(),
+			_gameplayAssemblyHost.IsBuildInProgress,
+			_gameplayAssemblyHost.LastBuildFailedForCurrentSource), cancellationToken);
 
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneStateAsync(CancellationToken cancellationToken) =>
 		Enqueue(() =>

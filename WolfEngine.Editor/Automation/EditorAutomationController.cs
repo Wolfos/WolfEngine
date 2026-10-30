@@ -75,6 +75,11 @@ public sealed class EditorAutomationController
 				return;
 			}
 
+			if (gameplay.BuildFailureOutput is { } buildFailureOutput)
+			{
+				Console.WriteLine(GameplayStaleBuildMessage.Create(buildFailureOutput));
+			}
+
 			var relativeScenePath = NormalizeProjectPath(_options.ScenePath);
 			var scene = _projectService.CurrentAssetDatabase.Assets.SingleOrDefault(asset =>
 				asset.Type == AssetType.Scene &&

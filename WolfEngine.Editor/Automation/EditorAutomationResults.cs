@@ -120,6 +120,13 @@ public sealed record AnimationStateResult(
     public int LastSkinningDispatchCount { get; init; }
 }
 
+public sealed record GameplayStateResult(
+	long Generation,
+	string? LoadedAssemblyPath,
+	bool IsSourceStale,
+	bool IsBuildInProgress,
+	bool LastBuildFailedForCurrentSource);
+
 public sealed record RayTracingSceneStateResult(
 	string TlasIdentity,
 	long TlasGeneration,

@@ -242,6 +242,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().UndoAsync(cancellationToken);
 
+	public Task<GameplayStateResult> GetGameplayStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetGameplayStateAsync(cancellationToken);
+
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetRayTracingSceneStateAsync(cancellationToken);
 
