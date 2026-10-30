@@ -49,7 +49,7 @@ internal readonly struct EditorField : IDisposable
 		if (compound == false)
 		{
 			var background = ImGui.GetStyle().Colors[(int)ImGuiCol.FrameBg];
-			if (referenceKind.HasValue)
+			if (referenceKind == EditorReferenceKind.Entity)
 			{
 				background = EditorPalette.Tint(background, _accent, 0.09f);
 			}
@@ -59,7 +59,7 @@ internal readonly struct EditorField : IDisposable
 				_max,
 				ImGui.GetColorU32(background),
 				ImGui.GetStyle().FrameRounding,
-				referenceKind.HasValue ? ImDrawFlags.None : ImDrawFlags.RoundCornersTop);
+				referenceKind == EditorReferenceKind.Entity ? ImDrawFlags.None : ImDrawFlags.RoundCornersTop);
 		}
 
 		ImGui.SetCursorScreenPos(_min + new Vector2(_padding + _prefixWidth, _labelSize + 8.0f));
@@ -104,15 +104,19 @@ internal readonly struct EditorField : IDisposable
 		drawList.PopClipRect();
 		if (_referenceKind.HasValue)
 		{
-			var border = focused ? EditorPalette.Primary : _accent;
-			border.W *= focused ? 1.0f : 0.50f;
-			drawList.AddRect(
-				_min + new Vector2(0.5f),
-				_max - new Vector2(0.5f),
-				ImGui.GetColorU32(border),
-				ImGui.GetStyle().FrameRounding,
-				ImDrawFlags.None,
-				focused ? 2.0f : 1.0f);
+			if (_referenceKind == EditorReferenceKind.Entity)
+			{
+				var border = focused ? EditorPalette.Primary : _accent;
+				border.W *= focused ? 1.0f : 0.50f;
+				drawList.AddRect(
+					_min + new Vector2(0.5f),
+					_max - new Vector2(0.5f),
+					ImGui.GetColorU32(border),
+					ImGui.GetStyle().FrameRounding,
+					ImDrawFlags.None,
+					focused ? 2.0f : 1.0f);
+			}
+
 			drawList.PushClipRect(_min, _max, true);
 			drawList.AddText(
 				ImGui.GetFont(),
@@ -123,7 +127,8 @@ internal readonly struct EditorField : IDisposable
 			DrawReferenceIcon(drawList);
 			drawList.PopClipRect();
 		}
-		else if (_compound == false)
+
+		if (_compound == false && _referenceKind != EditorReferenceKind.Entity)
 		{
 			drawList.AddLine(
 				new Vector2(_min.X, _max.Y - 1.0f),
