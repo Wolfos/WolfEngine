@@ -122,6 +122,23 @@ public sealed class EditorAutomationTools
 	[McpServerTool(Name = "get_scene_pointer_state"), Description("Read the Scene viewport pointer availability, capture, focus, logical origin and size after completed render frames.")]
 	public Task<string> GetScenePointerState(CancellationToken cancellationToken) => _controller.GetScenePointerStateAsync(cancellationToken);
 
+	[McpServerTool(Name = "set_editor_pointer"), Description("Move the editor UI pointer in window-relative logical points and optionally change a button or send wheel input. Works when the Scene viewport is hidden, including the Animation Graph workspace. Does not inject gameplay input.")]
+	public async Task<string> SetEditorPointer(
+		float x,
+		float y,
+		CancellationToken cancellationToken,
+		bool? pressed = null,
+		int button = 0,
+		float wheel = 0.0f)
+	{
+		await _controller.SetEditorPointerAsync(new(x, y), pressed, button, wheel, cancellationToken).ConfigureAwait(false);
+		return $"Editor pointer at ({x}, {y}).";
+	}
+
+	[McpServerTool(Name = "get_animation_editor_state"), Description("Read the open graph's last-drawn canvas, node and port bounds, zoom, selected node, toolbar bounds, and unsaved undo/redo state. Wait for render frames after an interaction before inspecting these coordinates.")]
+	public Task<UI.AnimationGraphEditorState> GetAnimationEditorState(CancellationToken cancellationToken) =>
+		_controller.GetAnimationEditorStateAsync(cancellationToken);
+
 	[McpServerTool(Name = "set_input_axis_2d"), Description("Set one named two-dimensional input binding in a running Play-mode scene, through the same input system used by gameplay.")]
 	public async Task<string> SetInputAxis2D(
 		[Description("InputActionBinding name, such as MouseDelta or GamepadLeftStick.")] string binding,

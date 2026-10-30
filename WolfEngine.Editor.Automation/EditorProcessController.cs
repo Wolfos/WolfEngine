@@ -179,6 +179,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<EditorUiStateResult> GetEditorUiStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetEditorUiStateAsync(cancellationToken);
 
+	public Task SetEditorPointerAsync(System.Numerics.Vector2 position, bool? pressed, int button, float wheel, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEditorPointerAsync(position, pressed, button, wheel, cancellationToken);
+
+	public Task<UI.AnimationGraphEditorState> GetAnimationEditorStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetAnimationEditorStateAsync(cancellationToken);
+
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		GetRunningEditor().CreateWorkspaceAsync(name, cancellationToken);
 

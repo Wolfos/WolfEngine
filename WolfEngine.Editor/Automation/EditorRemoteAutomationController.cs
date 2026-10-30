@@ -716,6 +716,23 @@ public sealed partial class EditorRemoteAutomationController
 			NativeFocused = _inputSystem.PointerFocused, Origin = new[] { state.ImageMin.X, state.ImageMin.Y }, Size = new[] { state.ImageMax.X - state.ImageMin.X, state.ImageMax.Y - state.ImageMin.Y } });
 	}, cancellationToken);
 
+	public Task SetEditorPointerAsync(Vector2 position, bool? pressed, int button, float wheel, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (button < 0 || button > 2) throw new ArgumentOutOfRangeException(nameof(button));
+			if (float.IsFinite(position.X) == false || float.IsFinite(position.Y) == false || float.IsFinite(wheel) == false)
+			{
+				throw new ArgumentException("Pointer coordinates and wheel must be finite.");
+			}
+
+			_imguiInput.SetMousePosition(position);
+			if (pressed.HasValue) _imguiInput.SetMouseButton(button, pressed.Value);
+			if (wheel != 0.0f) _imguiInput.AddMouseScroll(new Vector2(0.0f, wheel));
+		}, cancellationToken);
+
+	public Task<AnimationGraphEditorState> GetAnimationEditorStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => AnimationEditor.GetEditorState(), cancellationToken);
+
 	/// <summary>Injects a button binding through the same input system used by gameplay.</summary>
 	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>
 		Enqueue(() =>
