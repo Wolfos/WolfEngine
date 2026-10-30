@@ -561,18 +561,7 @@ public class WolfEngineEditor
 
 	private void RestoreSelectedEntities(EditorScene scene, IReadOnlyList<Guid> selectedEntityIds)
 	{
-		EditorGui.ClearEntitySelection();
-		foreach (var entityId in selectedEntityIds)
-		{
-			foreach (var entry in scene.EntityIds)
-			{
-				if (entry.Value == entityId)
-				{
-					EditorGui.AddEntitySelection(entry.Key, scene.World);
-					break;
-				}
-			}
-		}
+		EditorGui.RestoreEntitySelection(scene, selectedEntityIds);
 	}
 
 	private RenderConfig GetConfig()

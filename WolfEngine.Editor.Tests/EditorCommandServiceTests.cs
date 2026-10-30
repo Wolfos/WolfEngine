@@ -179,6 +179,25 @@ public sealed class EditorCommandServiceTests
 	}
 
 	[Test]
+	public void RestoredEntitySelection_DoesNotAskForTheComponentsWindow()
+	{
+		var runtimeScene = new EditorScene();
+		var kept = runtimeScene.World.CreateEntity("Kept");
+		var other = runtimeScene.World.CreateEntity("Other");
+		var keptId = Guid.NewGuid();
+		runtimeScene.EntityIds[kept] = keptId;
+		runtimeScene.EntityIds[other] = Guid.NewGuid();
+
+		// Entering Play restores the authoring selection onto the runtime copy; with a focus request
+		// pending, the editor would open Components in whichever workspace is active.
+		EditorGui.RestoreEntitySelection(runtimeScene, [keptId]);
+
+		Assert.That(EditorGui.SelectedEntities, Is.EqualTo(new[] { kept }));
+		Assert.That(EditorGui.ConsumeComponentsWindowFocusRequest(), Is.False);
+		EditorGui.ClearEntitySelection();
+	}
+
+	[Test]
 	public void EntitySelection_AggregatesComponentTypesAcrossSelectedEntitiesInSelectionOrder()
 	{
 		var world = new World(WorldTag.Authoring);

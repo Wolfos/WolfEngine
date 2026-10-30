@@ -288,6 +288,22 @@ public class EditorGui
 		_componentsWindowFocusRequested = requestFocus;
 	}
 
+	public static void RestoreEntitySelection(EditorScene scene, IReadOnlyList<Guid> selectedEntityIds)
+	{
+		ClearEntitySelection();
+		foreach (var entityId in selectedEntityIds)
+		{
+			foreach (var entry in scene.EntityIds)
+			{
+				if (entry.Value == entityId)
+				{
+					AddEntitySelection(entry.Key, scene.World, requestFocus: false);
+					break;
+				}
+			}
+		}
+	}
+
 	public static void ClearEntitySelection()
 	{
 		HasSelectedEntity = false;
