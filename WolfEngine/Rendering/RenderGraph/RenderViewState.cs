@@ -116,6 +116,13 @@ internal sealed class RenderViewState
 	/// </summary>
 	public readonly EditorSceneRenderTargetManager SceneRenderTarget = new();
 
+	/// <summary>
+	/// The finished, display-encoded image of a texture-output view: what the UI shows for it. It persists across
+	/// frames so the UI can keep showing the last image on frames that draw no scene, such as when the editor
+	/// limits how often the viewport renders. Backbuffer views encode into a transient texture instead.
+	/// </summary>
+	public readonly EditorSceneRenderTargetManager PresentedSceneTarget = new(TextureFormat.Bgra8Unorm);
+
 	// This frame's transient resources and debug-view selection. They are rebuilt every frame, but they are
 	// held here rather than on the frame builder because passes read them when they execute, not when they
 	// are recorded: with several views in one graph, a builder field would hold whichever view was recorded
@@ -174,6 +181,15 @@ internal sealed class RenderViewState
 	public IGfxTexture? Fsr3FrameInfoTexture;
 	public ResourceState Fsr3FrameInfoState = ResourceState.UnorderedAccess;
 	public uint Fsr3FrameIndex;
+
+	/// <summary>
+	/// Seconds since this view last recorded, which is what temporal effects advance by. It is not the presented
+	/// frame's time: frames that run no graph, such as when the editor limits the viewport's rate, still present.
+	/// </summary>
+	public float SceneFrameDeltaSeconds;
+
+	/// <summary><see cref="System.Diagnostics.Stopwatch"/> timestamp of the frame this view last recorded, or zero.</summary>
+	public long LastSceneFrameTimestamp;
 
 	// Volumetric fog froxel history. The grid is camera-frustum aligned, so it is per view by construction.
 	public readonly ViewHistory<FogHistoryShape> FogHistory = new("Volumetric fog", 1, DescribeFogHistory);
@@ -251,6 +267,7 @@ internal sealed class RenderViewState
 		ReleaseDdgiHistoryResources();
 		ReleaseFinalGatherHistoryResources();
 		SceneRenderTarget.Release(device);
+		PresentedSceneTarget.Release(device);
 		SceneRenderSize = Int2.Zero;
 		PreviousJitterPhaseCount = 0;
 		ResolvedProjection = Matrix4x4.Identity;

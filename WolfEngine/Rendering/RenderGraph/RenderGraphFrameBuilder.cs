@@ -220,11 +220,17 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly SkinningPass _skinningPass;
     public int LastSkinningDispatchCount => _skinningPass.LastDispatchedInstanceCount;
 	private readonly SkyboxPass _skyboxPass;
-	private readonly IImGuiRenderer _imGuiRenderer;
 	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
 	private SkyboxResources? _externalSkybox;
 	private RenderFrameSharedResources _sharedResources;
-	private UiFrameData _uiFrame = UiFrameData.Empty;
+
+	/// <summary>
+	/// The window's image before presentation: a backbuffer view's scene, with the editor UI drawn over it. It
+	/// persists across frames because the UI is drawn into it every frame, including frames that run no graph.
+	/// It is in the render-target state whenever no graph or UI submission is using it, which is what
+	/// <see cref="IRenderer.Render"/> expects of it.
+	/// </summary>
+	internal EditorSceneRenderTargetManager WindowColorTarget { get; } = new(TextureFormat.Bgra8Unorm);
 	private GameplayUiRenderFrame _gameplayUiFrame = GameplayUiRenderFrame.Empty;
 	private readonly List<GameplayTextureTarget> _gameplayTextureTargets = [];
 
@@ -237,6 +243,8 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly nint[] _viewportTextureIds = new nint[UiTextureIds.MaxViewports];
 	// Whether each view's output is drawn ignoring its alpha, because that alpha holds data rather than coverage.
 	private readonly bool[] _viewportOpaque = new bool[UiTextureIds.MaxViewports];
+	// Whether each view's output outlives its frame, so frames that run no graph can keep showing it.
+	private readonly bool[] _viewportPersistent = new bool[UiTextureIds.MaxViewports];
 	// Views set up this frame with their scene enabled, in setup order. Their databases feed the shared draw
 	// update, which runs once before any view's passes.
 	private readonly List<RenderViewId> _frameViews = [];
@@ -284,7 +292,6 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _motionVectorDebugExecute;
 	private readonly Action<RenderGraphContext> _gameplayScreenEncodedUiExecute;
 	private readonly Action<RenderGraphContext> _gameplayScreenFinalUiExecute;
-	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawViewUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawShadowCullExecute;
@@ -306,7 +313,6 @@ internal sealed class RenderGraphFrameBuilder
 		IRenderer renderer,
 		RenderGraphPassSet passSet,
 		GpuDrawResources gpuDrawResources,
-		IImGuiRenderer imGuiRenderer,
 		GameplayUiGpuRenderer gameplayUiRenderer,
 		IShaderProvider shaderProvider,
 		RenderViewRegistry viewRegistry)
@@ -346,7 +352,6 @@ internal sealed class RenderGraphFrameBuilder
 		_gpuDrawPass = passSet.GpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
 		_skyboxPass = passSet.SkyboxPass;
-		_imGuiRenderer = imGuiRenderer;
 		_gameplayUiRenderer = gameplayUiRenderer;
 		_view = GetOrCreateViewState(RenderViewId.Primary);
 
@@ -393,7 +398,6 @@ internal sealed class RenderGraphFrameBuilder
 		_motionVectorDebugExecute = ExecuteMotionVectorDebug;
 		_gameplayScreenEncodedUiExecute = ExecuteGameplayScreenEncodedUi;
 		_gameplayScreenFinalUiExecute = ExecuteGameplayScreenFinalUi;
-		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
 		_gpuDrawViewUpdateExecute = ExecuteGpuDrawViewUpdate;
 		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
@@ -509,12 +513,10 @@ internal sealed class RenderGraphFrameBuilder
 		_sharedResources = new()
 		{
 			FramebufferSize = framebufferSize,
-			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
-				framebufferSize.X,
-				framebufferSize.Y,
-				TextureFormat.Bgra8Unorm,
-				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f))),
+			FinalColor = _resources.ImportTexture(
+				WindowColorTarget.EnsureTarget(device, framebufferSize),
+				takeOwnership: false,
+				initialState: WindowColorTarget.CurrentState),
 			SkyboxEnvironment = skyboxEnvHandle,
 			SkyboxIrradiance = skyboxIrrHandle,
 			SkyboxPrefilter = skyboxPrefilterHandle,
@@ -1127,12 +1129,7 @@ internal sealed class RenderGraphFrameBuilder
 			: tonemappedLinearSceneColorHandle;
 
 		var encodedSceneColorHandle = sceneEnabled
-			? _resources.CreateTransientTexture(new TextureDescriptor(
-				framebufferSize.X,
-				framebufferSize.Y,
-				TextureFormat.Bgra8Unorm,
-				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
+			? CreateEncodedSceneColor(framebufferSize)
 			: default;
 
 		_view.FrameResources = new()
@@ -1322,11 +1319,6 @@ internal sealed class RenderGraphFrameBuilder
 				SceneDebugViewKind.Color);
 			_view.SceneDebugViewOptions = BuildSceneDebugViewOptions();
 		}
-	}
-
-	public void SetUiFrame(UiFrameData uiFrame)
-	{
-		_uiFrame = uiFrame;
 	}
 
 	/// <summary>Once per frame, before views are set up: releases what unregistered render features owned.</summary>
@@ -1969,20 +1961,30 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void RecordSharedPresentationPasses(RenderGraph graph)
 	{
-		var imguiBuilder = graph.AddPass("ImGui", PassKind.Graphics)
+		// The editor UI is drawn after the graph, in a submission of its own (see UiCompositor), so it cannot
+		// declare what it samples. This pass declares it instead: it leaves the window target ready to be drawn
+		// into, and every view's output readable by the UI. It records no work; its barriers are the point.
+		var handoffBuilder = graph.AddPass("UI Handoff", PassKind.Graphics)
 			.WriteTexture(_sharedResources.FinalColor, ResourceState.RenderTarget);
-		var selectedSceneDebugViewHandle = GetSelectedSceneDebugViewHandle();
-		if (selectedSceneDebugViewHandle.IsValid)
+		var boundView = _view;
+		for (var i = 0; i < _frameViews.Count; i++)
 		{
-			imguiBuilder.ReadTexture(selectedSceneDebugViewHandle, ResourceState.ShaderResource);
-		}
-		var sceneColorDebugViewHandle = GetSceneColorDebugViewHandle();
-		if (sceneColorDebugViewHandle.IsValid && sceneColorDebugViewHandle.Id != selectedSceneDebugViewHandle.Id)
-		{
-			imguiBuilder.ReadTexture(sceneColorDebugViewHandle, ResourceState.ShaderResource);
+			_view = GetOrCreateViewState(_frameViews[i]);
+			var selectedSceneDebugViewHandle = GetSelectedSceneDebugViewHandle();
+			if (selectedSceneDebugViewHandle.IsValid)
+			{
+				handoffBuilder.ReadTexture(selectedSceneDebugViewHandle, ResourceState.ShaderResource);
+			}
+
+			var sceneColorDebugViewHandle = GetSceneColorDebugViewHandle();
+			if (sceneColorDebugViewHandle.IsValid && sceneColorDebugViewHandle.Id != selectedSceneDebugViewHandle.Id)
+			{
+				handoffBuilder.ReadTexture(sceneColorDebugViewHandle, ResourceState.ShaderResource);
+			}
 		}
 
-		imguiBuilder.SetExecute(_imguiExecute);
+		_view = boundView;
+		handoffBuilder.SetExecute(static _ => { });
 	}
 
 	private void ReadSkyboxTextures(RenderGraphBuilder builder)
@@ -2010,6 +2012,24 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		Array.Clear(_viewportTextureIds);
 		Array.Clear(_viewportOpaque);
+		Array.Clear(_viewportPersistent);
+	}
+
+	/// <summary>
+	/// Starts a frame that runs no graph. Each view keeps the output it resolved on the last frame that did, but
+	/// only where that output outlives its frame: a debug view samples a transient texture that has since been
+	/// returned to the pool, so such a view shows nothing until the next frame draws it again.
+	/// </summary>
+	public void KeepPersistentViewportOutputs()
+	{
+		for (var i = 0; i < _viewportTextureIds.Length; i++)
+		{
+			if (_viewportPersistent[i] == false)
+			{
+				_viewportTextureIds[i] = 0;
+				_viewportOpaque[i] = false;
+			}
+		}
 	}
 
 	/// <summary>
@@ -2030,6 +2050,10 @@ internal sealed class RenderGraphFrameBuilder
 		var textureId = ResolveSceneViewportTextureId(out var activeDebugViewId, out var activeDebugViewKind);
 		_viewportTextureIds[_view.View.Index] = textureId;
 		_viewportOpaque[_view.View.Index] = activeDebugViewKind == SceneDebugViewKind.ColorIgnoreAlpha;
+		// Final Color of a texture-output view is its persistent presented target; every other output is transient.
+		_viewportPersistent[_view.View.Index] = textureId != 0 &&
+		                                        _view.Output == RenderViewOutput.Texture &&
+		                                        string.Equals(activeDebugViewId, SceneDebugViewIds.FinalColor, StringComparison.Ordinal);
 		_view.ResolvedSceneViewportState = new SceneViewportRenderState(
 			textureId,
 			_view.FrameResources.SceneFramebufferSize,
@@ -2284,10 +2308,12 @@ internal sealed class RenderGraphFrameBuilder
 	}
 
 	/// <summary>
-	/// Rewrites the UI frame's viewport sentinels to the outputs resolved this frame. Once per frame, after every
-	/// view has been prepared, because the UI frame holds the sentinels of all views together.
+	/// Rewrites the UI frame's viewport sentinels to the outputs the views resolved to. Once per presented frame,
+	/// after every view has been prepared on a frame that runs the graph, or after
+	/// <see cref="KeepPersistentViewportOutputs"/> on one that does not.
 	/// </summary>
-	public void ResolveUiViewportTextures() => ResolveViewportTextureIds(_uiFrame, _viewportTextureIds, _viewportOpaque);
+	public void ResolveUiViewportTextures(UiFrameData uiFrame) =>
+		ResolveViewportTextureIds(uiFrame, _viewportTextureIds, _viewportOpaque);
 
 	/// <summary>
 	/// Rewrites every viewport sentinel in the UI frame to the output its view resolved to this frame. The UI
@@ -2978,7 +3004,7 @@ internal sealed class RenderGraphFrameBuilder
 		var reset = _view.ResetTaaHistoryThisFrame || context.SceneData.ResetHistory || !_view.FrameResources.Fsr3.HistoryValid;
 		return Fsr3Constants.Build(size, size, size, size, depth,
 			context.SceneData.JitterPixels, context.SceneData.PreviousJitterPixels, verticalFov,
-			Math.Max(_uiFrame.DeltaTime, 1.0f / 1000.0f), reset ? 0.0f : _view.Fsr3FrameIndex);
+			Math.Max(_view.SceneFrameDeltaSeconds, 1.0f / 1000.0f), reset ? 0.0f : _view.Fsr3FrameIndex);
 	}
 
 	private void ExecuteFsr3PrepareInputs(RenderGraphContext context)
@@ -3303,15 +3329,6 @@ internal sealed class RenderGraphFrameBuilder
 		_motionVectorDebugPass.Record(context, in config);
 	}
 
-	private void ExecuteImGui(RenderGraphContext context)
-	{
-		var finalColor = context.GetTexture(_sharedResources.FinalColor);
-		var presentationView = _viewRegistry.GetOrCreate(RenderViewId.Primary);
-		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
-		_imGuiRenderer.Record(context, _uiFrame, finalColor,
-			clearTarget: presentationView.Output != RenderViewOutput.Backbuffer || presentationView.FrameResources.SceneEnabled == false);
-	}
-
 	private void ExecuteGameplayScreenEncodedUi(RenderGraphContext context) =>
 		ExecuteGameplayScreenUi(context, _view.FrameResources.EncodedSceneColor);
 
@@ -3322,14 +3339,14 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		var target = context.GetTexture(targetHandle);
 		_gameplayUiRenderer.EnsureResources(_renderer.GetGfxDevice(), _gameplayUiFrame.Screen);
-		_gameplayUiRenderer.Record(context, _gameplayUiFrame.Screen, target, clearTarget: false);
+		_gameplayUiRenderer.Record(context.CommandList, _gameplayUiFrame.Screen, target, clearTarget: false);
 	}
 
 	private void ExecuteGameplayTextureUi(RenderGraphContext context, GameplayTextureTarget target)
 	{
 		_gameplayUiRenderer.EnsureResources(_renderer.GetGfxDevice(), target.Surface.Frame);
 		_gameplayUiRenderer.Record(
-			context,
+			context.CommandList,
 			target.Surface.Frame,
 			target.Texture,
 			clearTarget: true,
@@ -3374,8 +3391,36 @@ internal sealed class RenderGraphFrameBuilder
 		_view.HasPreviousFrameShape = true;
 	}
 
+	/// <summary>
+	/// The bound view's display-encoded image. A texture-output view encodes into its persistent presented target,
+	/// which the UI keeps sampling on frames that draw no scene; a backbuffer view's image lives only this frame.
+	/// </summary>
+	private RenderGraphResourceHandle CreateEncodedSceneColor(Int2 framebufferSize)
+	{
+		if (_view.Output == RenderViewOutput.Texture)
+		{
+			var presentedTarget = _view.PresentedSceneTarget.EnsureTarget(_renderer.GetGfxDevice(), framebufferSize);
+			return _resources.ImportTexture(
+				presentedTarget,
+				takeOwnership: false,
+				initialState: _view.PresentedSceneTarget.CurrentState);
+		}
+
+		return _resources.CreateTransientTexture(new TextureDescriptor(
+			framebufferSize.X,
+			framebufferSize.Y,
+			TextureFormat.Bgra8Unorm,
+			TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)));
+	}
+
 	public void CompleteFrame()
 	{
+		if (_view.Output == RenderViewOutput.Texture && _view.FrameResources.EncodedSceneColor.IsValid)
+		{
+			_view.PresentedSceneTarget.SetCurrentState(_resources.GetResourceState(_view.FrameResources.EncodedSceneColor));
+		}
+
 		if (_view.FrameResources.ColorPyramidLevels is not { Length: > 0 } || _view.FrameResources.SceneEnabled == false)
 		{
 			_view.ColorPyramidValid = false;

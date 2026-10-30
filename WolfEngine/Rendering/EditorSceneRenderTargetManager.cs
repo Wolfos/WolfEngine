@@ -3,11 +3,21 @@ using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;
 
+/// <summary>
+/// One render target that outlives the frame that drew it, so a later frame can sample it without redrawing it.
+/// Resizing retires the old texture through the device, because a UI frame in flight may still sample it.
+/// </summary>
 internal sealed class EditorSceneRenderTargetManager : IDisposable
 {
+	private readonly TextureFormat _format;
 	private IGfxTexture? _sceneColor;
 	private Int2 _size = Int2.Zero;
 	private ResourceState _sceneColorState = ResourceState.Common;
+
+	public EditorSceneRenderTargetManager(TextureFormat format = TextureFormat.Rgba16Float)
+	{
+		_format = format;
+	}
 
 	public void Advance(IGfxDevice device)
 	{
@@ -46,7 +56,7 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 		_sceneColor = device.CreateTexture(new TextureDescriptor(
 			size.X,
 			size.Y,
-			TextureFormat.Rgba16Float,
+			_format,
 			TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 			new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)));
 		_sceneColorState = ResourceState.RenderTarget;

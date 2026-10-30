@@ -227,7 +227,6 @@ public sealed class ScreenSpaceDecalPassTests
 			renderer.Object,
 			passSet,
 			gpuDrawResources,
-			NullImGuiRenderer.Instance,
 			gameplayUiRenderer,
 			shaderProvider.Object,
 			// Shared with the graph, as in production: the graph names and tags passes from the same view state

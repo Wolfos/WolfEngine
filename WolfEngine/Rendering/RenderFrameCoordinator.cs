@@ -1,17 +1,23 @@
 namespace WolfEngine.Rendering;
 
 /// <summary>
-/// Publishes frame boundaries after the render graph has submitted and presented a frame.
+/// Publishes frame boundaries after the renderer has submitted and presented a frame.
 /// This is intentionally separate from <see cref="EditorFrameCoordinator"/>, whose sequence
 /// advances when the editor has only published work for the renderer.
 /// </summary>
+/// <remarks>
+/// Two sequences advance here. Every presented frame advances <see cref="CompletedSequence"/>; only a frame that ran
+/// the render graph also advances <see cref="CompletedSceneSequence"/>. They differ when the editor draws its UI
+/// more often than the scene, as when it limits the viewport's frame rate.
+/// </remarks>
 public sealed class RenderFrameCoordinator
 {
-	private sealed record Waiter(long TargetSequence, TaskCompletionSource<long> Completion);
+	private sealed record Waiter(long TargetSequence, bool SceneFrames, TaskCompletionSource<long> Completion);
 
 	private readonly object _sync = new();
 	private readonly List<Waiter> _waiters = [];
 	private long _completedSequence;
+	private long _completedSceneSequence;
 
 	public long CompletedSequence
 	{
@@ -24,22 +30,42 @@ public sealed class RenderFrameCoordinator
 		}
 	}
 
-	public long PublishCompletedFrame()
+	/// <summary>Frames that ran the render graph, as opposed to frames that only presented the UI.</summary>
+	public long CompletedSceneSequence
 	{
-		List<TaskCompletionSource<long>>? ready = null;
+		get
+		{
+			lock (_sync)
+			{
+				return _completedSceneSequence;
+			}
+		}
+	}
+
+	/// <param name="sceneFrame">Whether the frame ran the render graph, rather than only presenting the UI.</param>
+	public long PublishCompletedFrame(bool sceneFrame = true)
+	{
+		List<(TaskCompletionSource<long> Completion, long Sequence)>? ready = null;
 		long sequence;
 		lock (_sync)
 		{
 			sequence = ++_completedSequence;
+			if (sceneFrame)
+			{
+				_completedSceneSequence++;
+			}
+
 			for (var index = _waiters.Count - 1; index >= 0; index--)
 			{
-				if (_waiters[index].TargetSequence > sequence)
+				var waiter = _waiters[index];
+				var reached = waiter.SceneFrames ? _completedSceneSequence : sequence;
+				if (waiter.TargetSequence > reached)
 				{
 					continue;
 				}
 
 				ready ??= [];
-				ready.Add(_waiters[index].Completion);
+				ready.Add((waiter.Completion, reached));
 				_waiters.RemoveAt(index);
 			}
 		}
@@ -48,7 +74,7 @@ public sealed class RenderFrameCoordinator
 		{
 			for (var index = 0; index < ready.Count; index++)
 			{
-				ready[index].TrySetResult(sequence);
+				ready[index].Completion.TrySetResult(ready[index].Sequence);
 			}
 		}
 
@@ -70,6 +96,28 @@ public sealed class RenderFrameCoordinator
 		return WaitForSequenceAsync(targetSequence, cancellationToken);
 	}
 
+	/// <summary>
+	/// Waits for <paramref name="frameCount"/> more frames that ran the render graph, and returns the scene sequence
+	/// reached. Frames that only presented the UI do not count.
+	/// </summary>
+	public Task<long> WaitForCompletedSceneFramesAsync(int frameCount, CancellationToken cancellationToken = default)
+	{
+		if (frameCount <= 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(frameCount), "Frame count must be positive.");
+		}
+
+		TaskCompletionSource<long> completion;
+		lock (_sync)
+		{
+			completion = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+			_waiters.Add(new Waiter(checked(_completedSceneSequence + frameCount), SceneFrames: true, completion));
+		}
+
+		RegisterCancellation(completion, cancellationToken);
+		return completion.Task;
+	}
+
 	public Task<long> WaitForSequenceAsync(long targetSequence, CancellationToken cancellationToken = default)
 	{
 		if (targetSequence < 0)
@@ -86,15 +134,19 @@ public sealed class RenderFrameCoordinator
 			}
 
 			completion = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
-			_waiters.Add(new Waiter(targetSequence, completion));
+			_waiters.Add(new Waiter(targetSequence, SceneFrames: false, completion));
 		}
 
+		RegisterCancellation(completion, cancellationToken);
+		return completion.Task;
+	}
+
+	private void RegisterCancellation(TaskCompletionSource<long> completion, CancellationToken cancellationToken)
+	{
 		if (cancellationToken.CanBeCanceled)
 		{
-			cancellationToken.Register(() => CancelWaiter(completion!, cancellationToken));
+			cancellationToken.Register(() => CancelWaiter(completion, cancellationToken));
 		}
-
-		return completion.Task;
 	}
 
 	private void CancelWaiter(TaskCompletionSource<long> completion, CancellationToken cancellationToken)

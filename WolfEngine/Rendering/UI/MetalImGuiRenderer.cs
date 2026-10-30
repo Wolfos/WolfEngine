@@ -73,10 +73,10 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 		_pipeline = null;
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
+	public void Record(IGfxCommandList targetCommandList, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
 		ColorRGBA? clearColor = null)
 	{
-		var commandList = context.CommandList as MetalCommandList;
+		var commandList = targetCommandList as MetalCommandList;
 		if (commandList is null)
 		{
 			return;

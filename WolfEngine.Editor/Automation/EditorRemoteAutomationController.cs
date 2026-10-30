@@ -209,6 +209,22 @@ public sealed partial class EditorRemoteAutomationController
 
 	private static string FormatDockId(uint dockId) => $"0x{dockId:X8}";
 
+	public Task<string> SetViewportFrameLimitAsync(int maxFramesPerSecond, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (maxFramesPerSecond < 0)
+			{
+				throw new ArgumentOutOfRangeException(nameof(maxFramesPerSecond), "The limit cannot be negative.");
+			}
+
+			// Automation runs on isolated preferences, so this does not touch the user's saved settings.
+			EditorPreferences.SetLimitFPS(maxFramesPerSecond > 0);
+			EditorPreferences.SetMaxFPS(maxFramesPerSecond);
+			return maxFramesPerSecond > 0
+				? $"Viewport limited to {EditorPreferences.GetMaxFPS()} FPS."
+				: "Viewport frame limit off.";
+		}, cancellationToken);
+
 	public Task<string> SetAntiAliasingAsync(string mode, bool enabled, bool casSharpening, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
@@ -798,10 +814,14 @@ public sealed partial class EditorRemoteAutomationController
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		EnqueueAsync(async () =>
 		{
-			var renderSequence = await _renderFrameCoordinator
-				.WaitForCompletedFramesAsync(frameCount, cancellationToken)
+			var sceneSequence = await _renderFrameCoordinator
+				.WaitForCompletedSceneFramesAsync(frameCount, cancellationToken)
 				.ConfigureAwait(false);
-			return new RenderFrameWaitResult(frameCount, _editorFrameCoordinator.CompletedSequence, renderSequence);
+			return new RenderFrameWaitResult(
+				frameCount,
+				_editorFrameCoordinator.CompletedSequence,
+				_renderFrameCoordinator.CompletedSequence,
+				sceneSequence);
 		}, cancellationToken);
 
 	public Task<TerrainLayerPaintResult> PaintTerrainLayerAsync(

@@ -48,10 +48,13 @@ public sealed record PlayModeStateResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+/// <param name="RenderFrameSequence">Every presented frame, including frames that only drew the UI.</param>
+/// <param name="SceneFrameSequence">Frames that ran the render graph; the wait counts these.</param>
 public sealed record RenderFrameWaitResult(
 	int RequestedFrameCount,
 	long EditorFrameSequence,
-	long RenderFrameSequence);
+	long RenderFrameSequence,
+	long SceneFrameSequence);
 
 public sealed record TerrainLayerPaintResult(
 	Guid TerrainEntityId,

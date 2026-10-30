@@ -23,7 +23,9 @@ The editor opens a native window and needs the normal operating-system display p
 
 `capture_frame` reads back the scene color target, so the returned PNG contains the rendered scene and nothing else: no panels, dock tabs, or menus. Editor-UI work needs the other two automation tools.
 
-`capture_editor_window(output_path)` reads back the final presented target instead, after the ImGui pass has composited the editor over the scene. Use it whenever the thing under test is the interface rather than the image the renderer produced.
+`capture_editor_window(output_path)` reads back the final presented target instead, after the editor UI has been drawn over the scene. Use it whenever the thing under test is the interface rather than the image the renderer produced.
+
+The editor UI is drawn after the render graph, in a submission of its own, so a frame can present the UI without drawing the scene. That happens when the viewport frame limit is on: `set_viewport_frame_limit(fps)` sets it in memory, and `wait_for_render_frames` then reports a scene-frame sequence that advances more slowly than the presented-frame sequence. `wait_for_render_frames` counts scene frames, so a wait still means the scene was redrawn. On a frame that draws no scene, `capture_frame` returns the image the viewport is showing.
 
 `get_editor_ui_state()` reports the same frame as structured data: every registered panel with its open state, dock node, whether it is that node's selected tab, whether it is focused or hovered, and its position and size in ImGui points. Dock nodes are also grouped, so an assertion like "Components is still the selected tab of the right-hand node" needs no screenshot at all. The values are recorded while the panels draw, so wait for render frames after a change before reading them.
 
