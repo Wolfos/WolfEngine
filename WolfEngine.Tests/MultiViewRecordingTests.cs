@@ -18,13 +18,21 @@ public sealed class MultiViewRecordingTests
 
 		var primaryGBuffer = graph.Passes.Single(pass => pass.Name == "GBuffer" && pass.View == RenderViewId.Primary);
 		var secondGBuffer = graph.Passes.Single(pass => pass.Name == "GBuffer [view2]" && pass.View == Second);
+		builder.BindView(RenderViewId.Primary);
+		var primaryOutput = ViewState(builder).FrameResources.EncodedSceneColor;
+		builder.BindView(Second);
+		var secondOutput = ViewState(builder).FrameResources.EncodedSceneColor;
 		Assert.Multiple(() =>
 		{
 			// Each view writes its own G-buffer: sharing one would have the second view overwrite the first
 			// before any of the first view's lighting read it.
 			Assert.That(primaryGBuffer.Writes.Intersect(secondGBuffer.Writes), Is.Empty);
-			Assert.That(graph.Passes.Count(pass => pass.Name == "ImGui"), Is.EqualTo(1));
-			Assert.That(graph.Passes.Single(pass => pass.Name == "ImGui").View, Is.EqualTo(RenderViewId.None));
+			Assert.That(graph.Passes.Count(pass => pass.Name == "UI Handoff"), Is.EqualTo(1));
+			var uiHandoff = graph.Passes.Single(pass => pass.Name == "UI Handoff");
+			Assert.That(uiHandoff.View, Is.EqualTo(RenderViewId.None));
+			// The UI samples every view's output after the graph, so the handoff leaves each one readable.
+			Assert.That(uiHandoff.Reads, Does.Contain(primaryOutput));
+			Assert.That(uiHandoff.Reads, Does.Contain(secondOutput));
 		});
 	}
 
@@ -55,7 +63,7 @@ public sealed class MultiViewRecordingTests
 		var names = graph.Passes.Select(pass => pass.Name).ToList();
 		var lastViewPass = graph.Passes.Select((pass, index) => (pass, index)).Last(entry => entry.pass.View.IsValid).index;
 
-		Assert.That(names.IndexOf("ImGui"), Is.GreaterThan(lastViewPass), "presentation composites every view");
+		Assert.That(names.IndexOf("UI Handoff"), Is.GreaterThan(lastViewPass), "the UI handoff follows every view");
 	}
 
 	[Test]

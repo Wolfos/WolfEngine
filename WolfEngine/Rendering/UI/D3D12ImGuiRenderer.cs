@@ -108,7 +108,7 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 		_rootSignature = default;
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
+	public void Record(IGfxCommandList targetCommandList, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
 		ColorRGBA? clearColor = null)
 	{
 		var finalColor = finalColorTarget as ID3D12BackendTexture;
@@ -117,7 +117,7 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 			return;
 		}
 
-		var commandList = (context.CommandList as Backend.D3D12.D3D12CommandList)
+		var commandList = (targetCommandList as Backend.D3D12.D3D12CommandList)
 			                  ?? throw new InvalidOperationException("UI renderer requires a D3D12 command list.");
 		var native = (ID3D12GraphicsCommandList*) commandList.CommandList.Handle;
 

@@ -20,6 +20,8 @@ public class EditorPreferences
 
 	public Dictionary<ImGuiCol, ColorRGBA> EditorColors { get; set; } = new();
 	public float SceneViewportResolutionScale { get; set; } = 1.0f;
+	// Limit how often the 3D views are drawn, not the editor as a whole. The names predate that and stay so that
+	// saved preferences keep loading.
 	public bool LimitFPS { get; set; } = false;
 	public int MaxFPS { get; set; } = 0;
 	public string? LastProjectPath { get; set; }

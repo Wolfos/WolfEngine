@@ -164,7 +164,7 @@ public sealed class EditorAutomationTools
 		return $"Input axis '{binding}' is now ({x}, {y}).";
 	}
 
-	[McpServerTool(Name = "wait_for_render_frames"), Description("Wait for completed render-graph frames, rather than editor update ticks, and return the editor and render sequence numbers.")]
+	[McpServerTool(Name = "wait_for_render_frames"), Description("Wait for completed render-graph frames, rather than editor update ticks or frames that only redrew the UI, and return the editor, presented-frame and scene-frame sequence numbers.")]
 	public Task<RenderFrameWaitResult> WaitForRenderFrames(
 		[Description("Positive number of completed render frames to wait for.")] int frameCount,
 		CancellationToken cancellationToken) =>
@@ -237,6 +237,12 @@ public sealed class EditorAutomationTools
 	[McpServerTool(Name = "get_cpu_frame_profile"), Description("Return the latest completed CPU profiler tree for every profiled thread, including duration and managed allocation per scope.")]
 	public Task<CpuFrameProfileResult> GetCpuFrameProfile(CancellationToken cancellationToken) =>
 		_controller.GetCpuFrameProfileAsync(cancellationToken);
+
+	[McpServerTool(Name = "set_viewport_frame_limit"), Description("Limit how often the 3D views are drawn while the editor UI keeps running every frame, as the Limit viewport FPS preference does. In memory only. Compare wait_for_render_frames' scene-frame and presented-frame sequences to measure it.")]
+	public Task<string> SetViewportFrameLimit(
+		[Description("Maximum scene frames per second; 0 turns the limit off. Values below 20 are raised to 20.")] int maxFramesPerSecond,
+		CancellationToken cancellationToken) =>
+		_controller.SetViewportFrameLimitAsync(maxFramesPerSecond, cancellationToken);
 
 	[McpServerTool(Name = "set_anti_aliasing"), Description("Switch the authoring scene's anti-aliasing method in memory without saving its render config asset. Use with frame waits, GPU profiling, and captures to compare TAA/CAS and FSR3.")]
 	public Task<string> SetAntiAliasing(

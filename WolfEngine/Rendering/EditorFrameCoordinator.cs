@@ -4,6 +4,8 @@ public sealed class EditorFrameCoordinator
 {
     private readonly object _sync = new();
     private long _publishedSequence;
+    // The newest published frame the render thread has picked up.
+    private long _observedSequence;
     private bool _shutdownRequested;
 
     /// <summary>The most recently published editor frame sequence.</summary>
@@ -48,6 +50,25 @@ public sealed class EditorFrameCoordinator
         }
     }
 
+    /// <summary>
+    /// Editor thread: blocks until the render thread has picked up every published frame, or shutdown is requested.
+    /// </summary>
+    /// <remarks>
+    /// Keeps the editor at most one frame ahead of the renderer. Writing a scene snapshot already waits like this,
+    /// for its buffer slot, but a frame that publishes only UI writes no snapshot and would otherwise run ahead,
+    /// producing UI frames the renderer never draws.
+    /// </remarks>
+    public void WaitUntilObserved()
+    {
+        lock (_sync)
+        {
+            while (_observedSequence < _publishedSequence && _shutdownRequested == false)
+            {
+                Monitor.Wait(_sync);
+            }
+        }
+    }
+
     public bool TryWaitForNextFrame(long lastObservedSequence, Action pumpMainThreadWork, out long sequence)
     {
         ArgumentNullException.ThrowIfNull(pumpMainThreadWork);
@@ -82,6 +103,8 @@ public sealed class EditorFrameCoordinator
 
         if (_publishedSequence > lastObservedSequence)
         {
+            _observedSequence = _publishedSequence;
+            Monitor.PulseAll(_sync);
             published = true;
             return true;
         }

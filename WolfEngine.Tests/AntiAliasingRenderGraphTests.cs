@@ -153,14 +153,14 @@ public sealed class AntiAliasingRenderGraphTests
 		builder.Build(graph);
 
 		var gbuffer = graph.Passes.Single(pass => pass.Name == "GBuffer");
-		// Copy To Final reads the view's tonemapped colour, so it is a view pass; ImGui composites every view.
+		// Copy To Final reads the view's tonemapped colour, so it is a view pass; the UI handoff covers every view.
 		var copyToFinal = graph.Passes.Single(pass => pass.Name == "Copy To Final");
-		var imgui = graph.Passes.Single(pass => pass.Name == "ImGui");
+		var uiHandoff = graph.Passes.Single(pass => pass.Name == "UI Handoff");
 		Assert.Multiple(() =>
 		{
 			Assert.That(gbuffer.View, Is.EqualTo(RenderViewId.Primary));
 			Assert.That(copyToFinal.View, Is.EqualTo(RenderViewId.Primary));
-			Assert.That(imgui.View, Is.EqualTo(RenderViewId.None));
+			Assert.That(uiHandoff.View, Is.EqualTo(RenderViewId.None));
 		});
 	}
 
