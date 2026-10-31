@@ -766,6 +766,72 @@ public sealed class RigidbodySystemTests
 		return entity;
 	}
 
+	[TestCase(false)]
+	[TestCase(true)]
+	public void PhysicsUpdate_ColliderMovedInFrameUpdateFollowsEntity(bool kinematic)
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Moved Box", Matrix4x4.Identity);
+		world.AddComponent(entity, BoxCollider.CreateDefault());
+		if (kinematic)
+		{
+			var rigidbody = Rigidbody.CreateDefault();
+			rigidbody.BodyType = RigidbodyBodyType.Kinematic;
+			rigidbody.GravityFactor = 0.0f;
+			world.AddComponent(entity, rigidbody);
+		}
+
+		var transforms = new TransformSystem();
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(fixedDeltaTime, world);
+
+		// A frame update moves it, and the frame's transform pass resolves the move before the next fixed step.
+		world.SetLocalPosition(entity, new Vector3(5.0f, 0.0f, 0.0f));
+		transforms.PreRender(fixedDeltaTime, world);
+
+		for (var step = 0; step < 30; step++)
+		{
+			system.PhysicsUpdate(fixedDeltaTime, world);
+		}
+
+		Assert.That(
+			system.TryRaycast(world, new Vector3(5.0f, 5.0f, 0.0f), new Vector3(0.0f, -10.0f, 0.0f), out var hit),
+			Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(entity));
+		Assert.That(
+			system.TryRaycast(world, new Vector3(0.0f, 5.0f, 0.0f), new Vector3(0.0f, -10.0f, 0.0f), out _),
+			Is.False);
+		Assert.That(world.GetComponent<LocalTransform>(entity).LocalPosition.X, Is.EqualTo(5.0f).Within(0.001f));
+	}
+
+	[Test]
+	public void PhysicsUpdate_StaticChildColliderFollowsMovedParent()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = new World(WorldTag.Game);
+		var parent = world.CreateEntity("Parent", Matrix4x4.Identity);
+		var child = world.CreateEntity("Child Box", Matrix4x4.Identity);
+		world.SetParent(child, parent);
+		world.AddComponent(child, BoxCollider.CreateDefault());
+		var transforms = new TransformSystem();
+		using var system = new RigidbodySystem();
+		transforms.PreRender(fixedDeltaTime, world);
+		system.PhysicsUpdate(fixedDeltaTime, world);
+
+		world.SetLocalPosition(parent, new Vector3(0.0f, 0.0f, 4.0f));
+		transforms.PreRender(fixedDeltaTime, world);
+		system.PhysicsUpdate(fixedDeltaTime, world);
+
+		Assert.That(
+			system.TryRaycast(world, new Vector3(0.0f, 5.0f, 4.0f), new Vector3(0.0f, -10.0f, 0.0f), out var hit),
+			Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(child));
+		Assert.That(
+			system.TryRaycast(world, new Vector3(0.0f, 5.0f, 0.0f), new Vector3(0.0f, -10.0f, 0.0f), out _),
+			Is.False);
+	}
+
 	[Test]
 	public void TryMoveKinematicBody_MovesBodyWithoutRecreation()
 	{

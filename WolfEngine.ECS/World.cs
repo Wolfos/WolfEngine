@@ -152,6 +152,9 @@ public class World
 			return;
 		}
 
+		ref var worldTransform = ref GetComponent<WorldTransform>(entity);
+		worldTransform.Version = unchecked(worldTransform.Version + 1);
+
 		var pool = Pool<DirtyWorldTransform>();
 		if (pool.Has(entity))
 		{

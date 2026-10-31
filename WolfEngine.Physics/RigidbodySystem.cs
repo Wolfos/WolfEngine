@@ -41,6 +41,8 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 				}
 			}
 
+			state.StepCount++;
+
 			state.InterpolationClock.OnFixedStep(fixedDeltaTime);
 			SyncDynamicBodiesBackToWorld(world, state);
 			VehicleSystem.SyncVehicleVisuals(world, state, fixedDeltaTime);
@@ -135,6 +137,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 
 		worldRotation = Normalize(worldRotation);
 		state.BodyInterface.MoveKinematic(bodyState.BodyId, worldPosition, worldRotation, fixedDeltaTime);
+		bodyState.KinematicMoveStep = state.StepCount;
 		world.ApplyPhysicsWorldPose(entity, worldPosition, worldRotation);
 
 		var updatedDefinition = bodyState.Definition with
@@ -143,6 +146,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 			Rotation = worldRotation
 		};
 		bodyState.Definition = updatedDefinition;
+		bodyState.SyncedTransformVersion = GetTransformVersion(world, entity);
 		return true;
 	}
 
@@ -561,7 +565,8 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 						continue;
 					}
 
-					var currentDefinition = CreateDefinition(world, entity, bodyState.Definition);
+					var transformMoved = HasTransformMoved(world, entity, bodyState);
+					var currentDefinition = CreateDefinition(world, entity, bodyState.Definition, transformMoved);
 					if (currentDefinition is null)
 					{
 						bodiesToRemove.Add(entity);
@@ -575,6 +580,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 					}
 
 					ApplyBodyChanges(state, bodyState, currentDefinition.Value, fixedDeltaTime);
+					bodyState.SyncedTransformVersion = GetTransformVersion(world, entity);
 				}
 			}
 
@@ -674,6 +680,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 			}
 
 			CreateBody(state, entity, definition.Value, PhysicsBodyOwner.Rigidbody);
+			state.BodiesByEntity[entity].SyncedTransformVersion = GetTransformVersion(world, entity);
 			changed = true;
 		}
 	}
@@ -681,7 +688,8 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 	private static PhysicsBodyDefinition? CreateDefinition(
 		World world,
 		Entity entity,
-		PhysicsBodyDefinition? previousDefinition = null)
+		PhysicsBodyDefinition? previousDefinition = null,
+		bool transformMoved = false)
 	{
 		if (world.IsAlive(entity) == false || TryGetColliderKind(world, entity, out var colliderKind) == false)
 		{
@@ -705,6 +713,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 		var collisionFilterChanged = HasCollisionFilterChanged(world, entity, colliderKind, collisionFilter);
 		if (previousDefinition is { } cachedDefinition &&
 		    transformDirty == false &&
+		    transformMoved == false &&
 		    rigidbodyChanged == false &&
 		    shapeChanged == false &&
 		    collisionFilterChanged == false)
@@ -917,6 +926,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 					currentDefinition.Position,
 					currentDefinition.Rotation,
 					fixedDeltaTime);
+				bodyState.KinematicMoveStep = state.StepCount;
 			}
 			else
 			{
@@ -928,7 +938,16 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 			}
 		}
 
-		if (previousDefinition.LinearVelocity != currentDefinition.LinearVelocity ||
+		// A kinematic move's velocity only belongs to the step it was queued for. Once that step has run, the body
+		// would otherwise keep flying past its target.
+		var kinematicMoveFinished = bodyState.KinematicMoveStep >= 0 && bodyState.KinematicMoveStep < state.StepCount;
+		if (kinematicMoveFinished)
+		{
+			bodyState.KinematicMoveStep = -1;
+		}
+
+		if (kinematicMoveFinished ||
+		    previousDefinition.LinearVelocity != currentDefinition.LinearVelocity ||
 		    previousDefinition.AngularVelocity != currentDefinition.AngularVelocity)
 		{
 			state.BodyInterface.SetLinearAndAngularVelocity(
@@ -1135,6 +1154,32 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 		}
 
 		return BodyID.Invalid;
+	}
+
+	/// <summary>
+	/// Whether a static or kinematic body's entity moved since the body last matched it. This catches moves the
+	/// transform system has already resolved, which clears <see cref="LocalTransform.IsDirty"/> before the next fixed
+	/// step whenever the move happened in a frame update.
+	/// </summary>
+	/// <remarks>
+	/// Dynamic bodies are posed by the simulation, and their own pose writes and render interpolation also change the
+	/// entity's world transform, so only an unresolved authored change moves them.
+	/// </remarks>
+	private static bool HasTransformMoved(World world, Entity entity, PhysicsBodyState bodyState)
+	{
+		if (bodyState.Definition.MotionType == MotionType.Dynamic)
+		{
+			return false;
+		}
+
+		return GetTransformVersion(world, entity) != bodyState.SyncedTransformVersion;
+	}
+
+	private static uint GetTransformVersion(World world, Entity entity)
+	{
+		return world.HasComponent<WorldTransform>(entity)
+			? world.GetComponent<WorldTransform>(entity).Version
+			: 0;
 	}
 
 	private static bool RequiresBodyRecreation(

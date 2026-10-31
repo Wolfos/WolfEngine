@@ -67,6 +67,12 @@ public struct WorldTransform : IEntityComponent
 {
 	public Matrix4x4 LocalToWorld;
 	public Matrix4x4 WorldToLocal;
+
+	public Vector3 Position => LocalToWorld.Translation;
+
+	// Incremented by every change that reaches World.MarkWorldTransformChanged. Each consumer keeps the last version it
+	// saw, so one consumer catching up never hides a change from another, unlike LocalTransform.IsDirty.
+	public uint Version;
 }
 
 [ExcludeFromEditor]

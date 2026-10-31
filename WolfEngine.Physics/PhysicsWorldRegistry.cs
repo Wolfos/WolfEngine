@@ -191,6 +191,9 @@ internal sealed class PhysicsWorldState : IDisposable
 	public List<PhysicsContactEvent> ContactEvents { get; } = new();
 	public PhysicsInterpolationClock InterpolationClock { get; } = new();
 
+	/// <summary>Fixed steps simulated so far; the step about to run has this index.</summary>
+	public long StepCount { get; set; }
+
 	public List<PhysicsWorldPoseSyncItem> InterpolationPoseBuffer { get; } = new();
 	public int LastBoxColliderCount { get; set; } = -1;
 	public int LastSphereColliderCount { get; set; } = -1;
@@ -363,6 +366,15 @@ internal sealed class PhysicsBodyState : IDisposable
 	public PhysicsBodyOwner Owner { get; }
 
 	public PhysicsBodyInterpolationState Interpolation;
+
+	/// <summary>The entity's <see cref="WorldTransform.Version"/> when this body last matched its pose.</summary>
+	public uint SyncedTransformVersion;
+
+	/// <summary>
+	/// The fixed step a kinematic move was queued for, or -1. A move sets the velocity that reaches the target in one
+	/// step, and Jolt keeps that velocity until something replaces it.
+	/// </summary>
+	public long KinematicMoveStep = -1;
 
 	public void Dispose()
 	{
