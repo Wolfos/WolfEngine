@@ -94,8 +94,14 @@ public sealed class AnimationClipViewportWindow : EditorWindow
 		var hovered = ImGui.IsItemHovered();
 		var active = ImGui.IsItemActive();
 
+		// The preview view publishes no texture until the render graph has recorded it, which is the
+		// first frame after the panel opens or is shown again. Sampling it before then shows magenta.
+		var renderState = _viewUi.GetRenderState(preview.View);
 		var drawList = ImGui.GetWindowDrawList();
-		drawList.AddImage(UiTextureIds.Viewport(preview.View), imageMin, imageMax);
+		if (renderState.TextureId != 0)
+		{
+			drawList.AddImage(UiTextureIds.Viewport(preview.View), imageMin, imageMax);
+		}
 
 		var framebufferScale = ImGui.GetIO().DisplayFramebufferScale;
 		var viewportState = new SceneViewportUiState(
@@ -114,7 +120,7 @@ public sealed class AnimationClipViewportWindow : EditorWindow
 
 		HandleCamera(preview, hovered, active, size);
 
-		var viewProjection = _viewUi.GetRenderState(preview.View).ViewProjection;
+		var viewProjection = renderState.ViewProjection;
 		if (viewProjection.IsValid)
 		{
 			drawList.PushClipRect(imageMin, imageMax, true);
