@@ -164,9 +164,12 @@ public sealed class DataAssetEditor
 		set.Skeleton = skeleton;
 
 		InspectorLayout.DrawDecorations(AnimationSetClipsProperty);
-		foreach (var slot in set.Clips.Keys.ToArray())
+		var slots = set.Clips.Keys.ToArray();
+		for (var slotIndex = 0; slotIndex < slots.Length; slotIndex++)
 		{
-			ImGui.PushID(slot);
+			var slot = slots[slotIndex];
+
+			ImGui.PushID(slotIndex);
 			try
 			{
 				var name = slot;
