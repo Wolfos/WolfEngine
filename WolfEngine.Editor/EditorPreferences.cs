@@ -26,7 +26,13 @@ public class EditorPreferences
 	public bool LimitFPS { get; set; } = false;
 	public int MaxFPS { get; set; } = 0;
 	public string? LastProjectPath { get; set; }
-	public Dictionary<string, Guid> LastSceneAssetIds { get; set; } = new();
+	// The asset each document kind last had open, per project path. Assets are kept by GUID so that moving or
+	// renaming them while the editor is closed does not lose them.
+	public Dictionary<string, Dictionary<EditorDocumentKind, Guid>> LastDocumentAssetIds { get; set; } = new();
+
+	// Read only to migrate preferences saved before every document kind was remembered.
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public Dictionary<string, Guid>? LastSceneAssetIds { get; set; }
 	public EditorWorkspacePreferences? WorkspaceSettings { get; set; }
 
 	public EditorPreferences()
@@ -126,28 +132,47 @@ public class EditorPreferences
 			: Path.GetFullPath(projectPath);
 	}
 
-	public static Guid? GetLastSceneAssetId(string projectPath)
+	public static Guid? GetLastDocumentAssetId(string projectPath, EditorDocumentKind kind)
 	{
 		_instance ??= new EditorPreferences();
-		var key = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
+		var key = GetProjectKey(projectPath);
+		if (_instance.LastDocumentAssetIds.TryGetValue(key, out var assetIds) == false) return null;
 
-		return _instance.LastSceneAssetIds.TryGetValue(key, out var assetId) && assetId != Guid.Empty
+		return assetIds.TryGetValue(kind, out var assetId) && assetId != Guid.Empty
 			? assetId
 			: null;
 	}
 
-	public static void SetLastSceneAssetId(string projectPath, Guid assetId)
+	public static void SetLastDocumentAssetId(string projectPath, EditorDocumentKind kind, Guid assetId)
 	{
 		_instance ??= new EditorPreferences();
-		var key = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
+		var key = GetProjectKey(projectPath);
 		if (assetId == Guid.Empty)
 		{
-			_instance.LastSceneAssetIds.Remove(key);
+			if (_instance.LastDocumentAssetIds.TryGetValue(key, out var assetIds))
+			{
+				assetIds.Remove(kind);
+				if (assetIds.Count == 0)
+				{
+					_instance.LastDocumentAssetIds.Remove(key);
+				}
+			}
+
+			return;
 		}
-		else
+
+		if (_instance.LastDocumentAssetIds.TryGetValue(key, out var existing) == false)
 		{
-			_instance.LastSceneAssetIds[key] = assetId;
+			existing = new Dictionary<EditorDocumentKind, Guid>();
+			_instance.LastDocumentAssetIds[key] = existing;
 		}
+
+		existing[kind] = assetId;
+	}
+
+	private static string GetProjectKey(string projectPath)
+	{
+		return Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
 	}
 
 	public static EditorWorkspacePreferences? GetWorkspaceSettings()
@@ -190,12 +215,33 @@ public class EditorPreferences
 		}
 
 		_instance.SceneViewportResolutionScale = Math.Clamp(_instance.SceneViewportResolutionScale, 0.5f, 1.0f);
+		MigrateLastSceneAssetIds(_instance);
 
 		var style = ImGui.GetStyle();
 		foreach (var (id, color) in _instance.EditorColors)
 		{
 			style.Colors[(int)id] = color;
 		}
+	}
+
+	internal static void MigrateLastSceneAssetIds(EditorPreferences preferences)
+	{
+		if (preferences.LastSceneAssetIds is null) return;
+
+		foreach (var (projectPath, assetId) in preferences.LastSceneAssetIds)
+		{
+			if (assetId == Guid.Empty) continue;
+
+			if (preferences.LastDocumentAssetIds.TryGetValue(projectPath, out var assetIds) == false)
+			{
+				assetIds = new Dictionary<EditorDocumentKind, Guid>();
+				preferences.LastDocumentAssetIds[projectPath] = assetIds;
+			}
+
+			assetIds.TryAdd(EditorDocumentKind.Scene, assetId);
+		}
+
+		preferences.LastSceneAssetIds = null;
 	}
 
 	public static void Save()

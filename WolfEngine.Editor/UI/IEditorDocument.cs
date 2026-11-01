@@ -1,3 +1,5 @@
+using WolfEngine.AssetPipeline;
+
 namespace WolfEngine.Editor.UI;
 
 /// <summary>
@@ -31,6 +33,22 @@ public interface IEditorDocument
 	bool Save();
 	bool Undo();
 	bool Redo();
+}
+
+/// <summary>
+/// A document that edits one asset at a time and reopens it when the editor next opens the project. The
+/// asset is remembered by GUID, so moving or renaming it while the editor is closed does not lose it.
+/// </summary>
+public interface IEditorReopenableDocument : IEditorDocument
+{
+	/// <summary>Raised with the asset now open, or <see cref="Guid.Empty"/> once the document closes.</summary>
+	event Action<Guid>? OpenAssetChanged;
+
+	/// <summary>
+	/// Opens the asset this document had open in an earlier session, without changing workspace or focus.
+	/// Returns false when the asset is not one this document edits or cannot be opened.
+	/// </summary>
+	bool Reopen(AssetDatabaseEntry asset);
 }
 
 public static class EditorDocumentKindNames

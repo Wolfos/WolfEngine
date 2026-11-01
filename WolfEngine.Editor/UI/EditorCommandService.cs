@@ -24,6 +24,9 @@ public interface IEditorCommandService
 	bool RequestNewScene();
 	bool RequestLoadScene(Guid assetId);
 	bool RestoreLastScene();
+
+	/// <summary>Reopens the scene and every other document the open project last had open.</summary>
+	void RestoreLastDocuments();
 	Task LoadSceneForAutomationAsync(Guid assetId, CancellationToken cancellationToken = default);
 	Guid? LoadingSceneAssetId { get; }
 	bool SaveScene();
@@ -101,6 +104,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private bool _duplicatePressedThisFrame;
 	private bool _deletePressedThisFrame;
 	private bool _backspacePressedThisFrame;
+	private bool _tabPressedThisFrame;
 
 	private IEditorEntityDeletionHandler? _entityDeletionHandler;
 	private IEditorAssetDeletionHandler? _assetDeletionHandler;
@@ -151,6 +155,15 @@ public sealed class EditorCommandService : IEditorCommandService
 			.. documents ?? []
 		];
 
+		foreach (var document in _documents)
+		{
+			if (document is IEditorReopenableDocument reopenable)
+			{
+				var kind = reopenable.Kind;
+				reopenable.OpenAssetChanged += assetId => PersistLastDocument(kind, assetId);
+			}
+		}
+
 		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRedo", InputActionBinding.KeyY, callback => _redoPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutNew", InputActionBinding.KeyN, callback => _newPressedThisFrame |= callback.Value);
@@ -159,6 +172,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		RegisterTrackedButton(inputSystem, "ShortcutDuplicate", InputActionBinding.KeyD, callback => _duplicatePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutDelete", InputActionBinding.KeyDelete, callback => _deletePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutBackspace", InputActionBinding.KeyBackspace, callback => _backspacePressedThisFrame |= callback.Value);
+		RegisterTrackedButton(inputSystem, "ShortcutTab", InputActionBinding.KeyTab, callback => _tabPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutLeftCtrl", InputActionBinding.KeyLeftControl, callback => _leftCtrlDown = callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRightCtrl", InputActionBinding.KeyRightControl, callback => _rightCtrlDown = callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutLeftShift", InputActionBinding.KeyLeftShift, callback => _leftShiftDown = callback.Value);
@@ -226,7 +240,7 @@ public sealed class EditorCommandService : IEditorCommandService
 			return false;
 		}
 
-		var assetId = EditorPreferences.GetLastSceneAssetId(_projectService.ProjectRootPath);
+		var assetId = EditorPreferences.GetLastDocumentAssetId(_projectService.ProjectRootPath, EditorDocumentKind.Scene);
 		if (assetId.HasValue == false ||
 			_projectService.TryGetAsset(assetId.Value, out var asset) == false ||
 			asset.Type != AssetType.Scene)
@@ -235,6 +249,37 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 
 		return RequestLoadScene(assetId.Value);
+	}
+
+	public void RestoreLastDocuments()
+	{
+		RestoreLastScene();
+		if (_projectService.HasOpenProject == false ||
+			string.IsNullOrWhiteSpace(_projectService.ProjectRootPath))
+		{
+			return;
+		}
+
+		foreach (var document in _documents)
+		{
+			if (document is not IEditorReopenableDocument reopenable) continue;
+
+			var assetId = EditorPreferences.GetLastDocumentAssetId(_projectService.ProjectRootPath, reopenable.Kind);
+			if (assetId.HasValue == false ||
+				_projectService.TryGetAsset(assetId.Value, out var asset) == false)
+			{
+				continue;
+			}
+
+			try
+			{
+				reopenable.Reopen(asset);
+			}
+			catch (Exception exception)
+			{
+				_notificationService.ReportError($"Failed to reopen {EditorDocumentKindNames.Get(reopenable.Kind)} '{asset.Name}': {exception.Message}");
+			}
+		}
 	}
 
 	/// <summary>
@@ -492,12 +537,20 @@ public sealed class EditorCommandService : IEditorCommandService
 			_deletePressedThisFrame,
 			_backspacePressedThisFrame,
 			io.WantTextInput,
-			OperatingSystem.IsMacOS());
+			OperatingSystem.IsMacOS(),
+			_tabPressedThisFrame);
 		// A focused document editor owns every selection shortcut, so none of them can reach the scene
 		// through the sticky focused window while that editor has the keyboard.
 		var hasFocusedEditor = TryGetFocusedEditor(out var focusedEditor);
 		var focusedWindow = hasFocusedEditor ? EditorFocusedWindow.Document : _interactionState.FocusedWindow;
 		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, focusedWindow);
+		if (shortcut == EditorShortcutCommand.SwitchToPreviousWorkspace)
+		{
+			SwitchToPreviousWorkspace();
+			ResetShortcutPresses();
+			return;
+		}
+
 		if (hasFocusedEditor)
 		{
 			RunFocusedEditorShortcut(focusedEditor, shortcut);
@@ -576,6 +629,21 @@ public sealed class EditorCommandService : IEditorCommandService
 		_duplicatePressedThisFrame = false;
 		_deletePressedThisFrame = false;
 		_backspacePressedThisFrame = false;
+		_tabPressedThisFrame = false;
+	}
+
+	/// <summary>
+	/// Tab toggles between the current and the previously active workspace. A running game keeps Tab,
+	/// since games commonly bind it.
+	/// </summary>
+	private void SwitchToPreviousWorkspace()
+	{
+		if (_workspaces is null || _playSession.State == EditorPlayState.Playing)
+		{
+			return;
+		}
+
+		_workspaces.ActivatePrevious();
 	}
 
 	public void DrawPendingDialogs()
@@ -863,17 +931,23 @@ public sealed class EditorCommandService : IEditorCommandService
 
 	private void PersistLastScene(Guid assetId)
 	{
+		PersistLastDocument(EditorDocumentKind.Scene, assetId);
+	}
+
+	private void PersistLastDocument(EditorDocumentKind kind, Guid assetId)
+	{
 		var projectPath = _projectService.ProjectRootPath;
 		if (string.IsNullOrWhiteSpace(projectPath)) return;
 
 		try
 		{
-			EditorPreferences.SetLastSceneAssetId(projectPath, assetId);
+			EditorPreferences.SetLastDocumentAssetId(projectPath, kind, assetId);
 			EditorPreferences.Save();
 		}
 		catch (Exception exception)
 		{
-			_notificationService.ReportError($"Failed to save the last open scene preference: {exception.Message}");
+			var name = EditorDocumentKindNames.Get(kind).ToLowerInvariant();
+			_notificationService.ReportError($"Failed to save the last open {name} preference: {exception.Message}");
 		}
 	}
 

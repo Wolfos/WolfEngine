@@ -20,7 +20,7 @@ namespace WolfEngine.Editor.UI;
 /// the clip until keyed, and moving the playhead or starting playback discards it.
 /// </para>
 /// </summary>
-public sealed class AnimationClipEditorSession : IEditorDocument, IEditorDocumentEditor, IBoneEditSink, IDisposable
+public sealed class AnimationClipEditorSession : IEditorReopenableDocument, IEditorDocumentEditor, IBoneEditSink, IDisposable
 {
 	private readonly IEditorProjectService _project;
 	private readonly IProjectAssetPipelineService _pipeline;
@@ -140,6 +140,8 @@ public sealed class AnimationClipEditorSession : IEditorDocument, IEditorDocumen
 	/// <inheritdoc />
 	public bool HasShortcutFocus => HasClip && _focusedFrame >= ImGui.GetFrameCount() - 1;
 
+	public event Action<Guid>? OpenAssetChanged;
+
 	public EditorDocumentKind Kind => EditorDocumentKind.AnimationClip;
 	public string? DisplayName => HasClip ? ClipName : null;
 	public bool IsDirty => MetadataDocument?.IsDirty == true;
@@ -171,6 +173,17 @@ public sealed class AnimationClipEditorSession : IEditorDocument, IEditorDocumen
 	/// </summary>
 	public bool Open(AssetDatabaseEntry asset, UnsavedChangesPolicy unsavedChanges = UnsavedChangesPolicy.Prompt)
 	{
+		return OpenClip(asset, unsavedChanges, showWorkspace: true);
+	}
+
+	/// <summary>Opens the clip an earlier session had open, leaving the active workspace as it is.</summary>
+	public bool Reopen(AssetDatabaseEntry asset)
+	{
+		return OpenClip(asset, UnsavedChangesPolicy.Prompt, showWorkspace: false);
+	}
+
+	private bool OpenClip(AssetDatabaseEntry asset, UnsavedChangesPolicy unsavedChanges, bool showWorkspace)
+	{
 		ArgumentNullException.ThrowIfNull(asset);
 		CheckProject();
 
@@ -183,7 +196,10 @@ public sealed class AnimationClipEditorSession : IEditorDocument, IEditorDocumen
 		// would make a still-selected source, such as the imported clip just duplicated, look like a new
 		// selection and reopen it on the next frame.
 		_lastSeenSelection = _selection.SelectedAssetId;
-		ShowWorkspace();
+		if (showWorkspace)
+		{
+			ShowWorkspace();
+		}
 
 		if (asset.Id == AssetId)
 		{
@@ -199,6 +215,8 @@ public sealed class AnimationClipEditorSession : IEditorDocument, IEditorDocumen
 		try
 		{
 			LoadClip(asset);
+			OpenAssetChanged?.Invoke(asset.Id);
+
 			return true;
 		}
 		catch (Exception exception)
@@ -223,6 +241,8 @@ public sealed class AnimationClipEditorSession : IEditorDocument, IEditorDocumen
 		}
 
 		ResetState();
+		OpenAssetChanged?.Invoke(Guid.Empty);
+
 		return true;
 	}
 

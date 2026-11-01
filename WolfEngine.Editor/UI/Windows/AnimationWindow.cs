@@ -9,7 +9,7 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
-public sealed partial class AnimationWindow : EditorWindow, IEditorDocument, IDisposable
+public sealed partial class AnimationWindow : EditorWindow, IEditorReopenableDocument, IDisposable
 {
 	private readonly IEditorProjectService _project;
 	private readonly IProjectAssetPipelineService _pipeline;
@@ -54,6 +54,8 @@ public sealed partial class AnimationWindow : EditorWindow, IEditorDocument, IDi
 	public AnimationGraphInstance? PreviewInstance => _preview?.Instance;
 	public string? Diagnostic => _diagnostic;
 	public RenderViewId? PreviewView => _preview?.View;
+
+	public event Action<Guid>? OpenAssetChanged;
 
 	public EditorDocumentKind Kind => EditorDocumentKind.AnimationGraph;
 	public string? DisplayName => _document is null ? null : GetDocumentName(_document);
@@ -106,10 +108,31 @@ public sealed partial class AnimationWindow : EditorWindow, IEditorDocument, IDi
 
 	public void Open(AssetDatabaseEntry asset)
 	{
+		if (OpenDocument(asset) == false)
+		{
+			return;
+		}
+
+		if (_workspaces.Workspaces.Any(workspace => workspace.Id == EditorWorkspaceService.AnimationWorkspaceId))
+		{
+			_workspaces.Activate(EditorWorkspaceService.AnimationWorkspaceId);
+		}
+
+		_workspaces.OpenWindow(EditorWindowIds.Animation);
+		RequestFocus();
+	}
+
+	public bool Reopen(AssetDatabaseEntry asset)
+	{
+		return OpenDocument(asset);
+	}
+
+	private bool OpenDocument(AssetDatabaseEntry asset)
+	{
 		CheckProject();
 		if (AnimationAssetJson.GetAssetType(asset.RelativeSourcePath)is null)
 		{
-			return;
+			return false;
 		}
 
 		CommitGesture();
@@ -138,13 +161,9 @@ public sealed partial class AnimationWindow : EditorWindow, IEditorDocument, IDi
 		_compiledRevision = -1;
 		_diagnostic = null;
 		_requestedTab = SidebarTab.Node;
-		if (_workspaces.Workspaces.Any(workspace => workspace.Id == EditorWorkspaceService.AnimationWorkspaceId))
-		{
-			_workspaces.Activate(EditorWorkspaceService.AnimationWorkspaceId);
-		}
+		OpenAssetChanged?.Invoke(asset.Id);
 
-		_workspaces.OpenWindow(EditorWindowIds.Animation);
-		RequestFocus();
+		return true;
 	}
 
 	private void CheckProject()

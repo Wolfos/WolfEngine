@@ -10,7 +10,8 @@ internal enum EditorShortcutCommand
 	RefreshAssetDatabase,
 	DuplicateFocusedSelection,
 	ClearEntitySelection,
-	DeleteFocusedSelection
+	DeleteFocusedSelection,
+	SwitchToPreviousWorkspace
 }
 
 internal readonly record struct EditorShortcutSnapshot(
@@ -25,7 +26,8 @@ internal readonly record struct EditorShortcutSnapshot(
 	bool DeletePressed,
 	bool BackspacePressed,
 	bool IsTextInputActive,
-	bool IsMacOS);
+	bool IsMacOS,
+	bool TabPressed = false);
 
 internal static class EditorShortcutCommandResolver
 {
@@ -70,6 +72,14 @@ internal static class EditorShortcutCommandResolver
 			{
 				return EditorShortcutCommand.DuplicateFocusedSelection;
 			}
+		}
+
+		// Plain Tab only: Ctrl+Tab is ImGui's window switcher and Shift+Tab is reverse keyboard navigation.
+		if (snapshot.TabPressed &&
+		    snapshot.PrimaryModifierDown == false &&
+		    snapshot.ShiftDown == false)
+		{
+			return EditorShortcutCommand.SwitchToPreviousWorkspace;
 		}
 
 		if (snapshot.ShiftDown && snapshot.DuplicatePressed && focusedWindow != EditorFocusedWindow.Document)

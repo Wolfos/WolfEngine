@@ -63,6 +63,12 @@ public interface IEditorWorkspaceService
 	bool TryCreate(string name, EditorDocumentKind ownedDocument, out EditorWorkspace? workspace, out string error);
 	bool TryConfigure(Guid id, string name, EditorDocumentKind ownedDocument, out string error);
 	bool Activate(Guid id);
+
+	/// <summary>
+	/// Switches back to the workspace that was active before the current one. Only one step is
+	/// remembered, so calling this repeatedly toggles between two workspaces.
+	/// </summary>
+	bool ActivatePrevious();
 	bool Move(Guid id, int targetIndex);
 	bool Delete(Guid id);
 	bool IsWindowOpen(string windowId);
@@ -89,6 +95,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 	private readonly bool _persistToDisk;
 	private readonly List<EditorWorkspace> _workspaces = new();
 	private Guid _activeId;
+	private Guid _previousId;
 	private DateTime _lastIniSave = DateTime.MinValue;
 	private bool _imguiSettingsLoaded;
 	private bool _animationDockLayoutNeedsReset;
@@ -120,6 +127,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 
 		workspace = new EditorWorkspace(Guid.NewGuid(), normalized, ownedDocument, Array.Empty<string>());
 		_workspaces.Add(workspace);
+		_previousId = _activeId;
 		_activeId = workspace.Id;
 		Persist();
 		return true;
@@ -144,9 +152,17 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 	{
 		if (_workspaces.All(workspace => workspace.Id != id)) return false;
 		if (_activeId == id) return true;
+		_previousId = _activeId;
 		_activeId = id;
 		Persist();
 		return true;
+	}
+
+	public bool ActivatePrevious()
+	{
+		if (_previousId == Guid.Empty) return false;
+
+		return Activate(_previousId);
 	}
 
 	public bool Move(Guid id, int targetIndex)
@@ -172,6 +188,12 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 		{
 			_activeId = _workspaces[Math.Max(0, index - 1)].Id;
 		}
+
+		if (_previousId == id || _previousId == _activeId)
+		{
+			_previousId = Guid.Empty;
+		}
+
 		Persist();
 		return true;
 	}

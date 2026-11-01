@@ -92,7 +92,7 @@ public sealed class EditorApplication : IDisposable
 						notifications.ReportError(GameplayStaleBuildMessage.Create(buildFailureOutput));
 					}
 				},
-				completed: () => _services.GetRequiredService<IEditorCommandService>().RestoreLastScene(),
+				completed: () => _services.GetRequiredService<IEditorCommandService>().RestoreLastDocuments(),
 				failed: exception => notifications.ReportError($"Failed to open project: {exception.Message}"));
 		}
 		var editorThread = new Thread(editor.Run) { IsBackground = true, Name = "EditorThread" };

@@ -121,6 +121,34 @@ public sealed class EditorWorkspaceServiceTests
 	}
 
 	[Test]
+	public void ActivatePreviousTogglesBetweenTheLastTwoWorkspaces()
+	{
+		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
+		Assert.That(service.ActivatePrevious(), Is.False);
+
+		service.Activate(EditorWorkspaceService.AssetsWorkspaceId);
+		service.Activate(EditorWorkspaceService.AnimateWorkspaceId);
+
+		Assert.That(service.ActivatePrevious(), Is.True);
+		Assert.That(service.ActiveWorkspace.Id, Is.EqualTo(EditorWorkspaceService.AssetsWorkspaceId));
+
+		Assert.That(service.ActivatePrevious(), Is.True);
+		Assert.That(service.ActiveWorkspace.Id, Is.EqualTo(EditorWorkspaceService.AnimateWorkspaceId));
+	}
+
+	[Test]
+	public void DeletingPreviousWorkspaceForgetsIt()
+	{
+		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
+		service.TryCreate("Third", EditorDocumentKind.Scene, out var third, out _);
+		service.Activate(EditorWorkspaceService.SceneWorkspaceId);
+
+		Assert.That(service.Delete(third!.Id), Is.True);
+		Assert.That(service.ActivatePrevious(), Is.False);
+		Assert.That(service.ActiveWorkspace.Id, Is.EqualTo(EditorWorkspaceService.SceneWorkspaceId));
+	}
+
+	[Test]
 	public void DeletingActiveWorkspaceSelectsPrecedingWorkspace()
 	{
 		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
