@@ -335,7 +335,7 @@ public sealed partial class AnimationWindow : EditorWindow, IEditorReopenableDoc
 
 		ImGui.SameLine();
 		ImGui.BeginDisabled(readOnly);
-		if (ToolbarButton("Tidy", "arrange"))
+		if (ToolbarButton("Unspaghettify", "arrange"))
 		{
 			_arrangeRequested = true;
 		}
