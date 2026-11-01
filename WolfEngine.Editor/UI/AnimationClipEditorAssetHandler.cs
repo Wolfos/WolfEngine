@@ -62,6 +62,13 @@ public sealed class AnimationClipEditorAssetHandler : IEditorAssetHandler
 		}
 	}
 
+	public bool TryOpen(AssetDatabaseEntry asset)
+	{
+		_session.Open(asset);
+
+		return true;
+	}
+
 	/// <summary>
 	/// Creates a clip bound to the skeleton the selection implies (a selected skeleton or model), or
 	/// to the clip editor's current skeleton. With neither, the skeleton is chosen in the inspector.

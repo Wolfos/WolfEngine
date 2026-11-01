@@ -861,12 +861,16 @@ public sealed partial class AssetsWindow : EditorWindow, IEditorAssetDeletionHan
 
 	private void OpenAsset(AssetDatabaseEntry asset, EditorScene scene)
 	{
-		if (asset.Type != AssetType.Scene)
+		if (asset.Type == AssetType.Scene)
 		{
+			_commandService.RequestLoadScene(asset.Id);
 			return;
 		}
 
-		_commandService.RequestLoadScene(asset.Id);
+		if (_assetHandlerRegistry.TryGetHandler(asset.Type, out var handler))
+		{
+			handler.TryOpen(asset);
+		}
 	}
 
 	private void ValidateSelectionAfterProjectMutation()

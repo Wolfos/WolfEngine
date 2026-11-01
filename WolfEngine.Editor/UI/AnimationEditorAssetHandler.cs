@@ -12,6 +12,14 @@ public sealed class AnimationEditorAssetHandler(AssetType type, AnimationWindow 
     public string ThumbnailLabel => "ANIM";
     public string GetSubtitle(AssetDatabaseEntry asset) => DisplayName;
     public void DrawEditor(AssetDatabaseEntry asset) { if (ImGui.Button("Open in Animation")) window.Open(asset); }
+
+	public bool TryOpen(AssetDatabaseEntry asset)
+	{
+		window.Open(asset);
+
+		return true;
+	}
+
     public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [new() { Label = DisplayName, CreateAction = Create }];
     private EditorAssetCreationResult Create(string folder)
     {

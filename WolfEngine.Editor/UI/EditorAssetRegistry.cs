@@ -20,6 +20,12 @@ public interface IEditorAssetHandler
 	string GetSubtitle(AssetDatabaseEntry asset);
 	IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems();
 	void DrawEditor(AssetDatabaseEntry asset);
+
+	/// <summary>Opens the asset in its dedicated editor, as a double-click in Assets does. Returns false when the type has none.</summary>
+	bool TryOpen(AssetDatabaseEntry asset)
+	{
+		return false;
+	}
 }
 
 public interface IEditorAssetHandlerRegistry
