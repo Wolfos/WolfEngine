@@ -401,10 +401,10 @@ public class RenderPipeline : IRenderPipeline
 						if (animator.PreviousSkinningMatrices is not { Length: > 0 } previousSkinningMatrices) continue;
 
 						var paletteStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                        var meshToRig = skinnedRenderer.MeshBindToRig ?? (world.HasComponent<WorldTransform>(animatorEntity)
+                        var meshToAnimator = world.HasComponent<WorldTransform>(animatorEntity)
                             ? transform.LocalToWorld * world.GetComponent<WorldTransform>(animatorEntity).WorldToLocal
-                            : transform.LocalToWorld);
-                        skinnedRenderer.PrepareSkinningPalette(skinningMatrices, previousSkinningMatrices, animator.PoseGeneration, meshToRig);
+                            : transform.LocalToWorld;
+                        skinnedRenderer.PrepareSkinningPalette(skinningMatrices, previousSkinningMatrices, animator.PoseGeneration, meshToAnimator);
                         paletteTicks += System.Diagnostics.Stopwatch.GetTimestamp() - paletteStart;
                         var snapshotStart = System.Diagnostics.Stopwatch.GetTimestamp();
                         snapshot.AddSkinning(sourceMesh, instanceMesh, skinnedRenderer.LocalSkinningMatrices,

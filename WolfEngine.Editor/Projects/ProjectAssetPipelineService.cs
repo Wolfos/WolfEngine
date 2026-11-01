@@ -2431,7 +2431,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportComputeShaderSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				14,
+				15,
 				path =>
 				{
 					var extension = Path.GetExtension(path);

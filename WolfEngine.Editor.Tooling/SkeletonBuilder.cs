@@ -12,14 +12,18 @@ internal sealed class SkeletonBuildResult
 	internal SkeletonBuildResult(
 		ImportedSkeleton skeleton,
 		Dictionary<string, int> boneIndicesByName,
-		HashSet<string> skeletonNodeNames)
+		HashSet<string> skeletonNodeNames,
+		Matrix4x4 bindPlacement)
 	{
 		Skeleton = skeleton;
 		BoneIndicesByName = boneIndicesByName;
 		SkeletonNodeNames = skeletonNodeNames;
+		BindPlacement = bindPlacement;
 	}
 
 	internal ImportedSkeleton Skeleton { get; }
+
+	internal Matrix4x4 BindPlacement { get; }
 
 	/// <summary>Bone name to index within <see cref="Skeleton"/>.</summary>
 	internal Dictionary<string, int> BoneIndicesByName { get; }
@@ -112,7 +116,7 @@ internal static class SkeletonBuilder
 			return null;
 		}
 
-		var inverseBindMatrices = BuildInverseBindMatrices(
+		var (inverseBindMatrices, bindPlacement) = BuildInverseBindMatrices(
 			boneNames,
 			parentIndices,
 			bindPoseLocal,
@@ -129,7 +133,7 @@ internal static class SkeletonBuilder
 			bindPoseLocal.ToArray(),
 			inverseBindMatrices);
 
-		return new SkeletonBuildResult(skeleton, boneIndicesByName, skeletonNodeNames);
+		return new SkeletonBuildResult(skeleton, boneIndicesByName, skeletonNodeNames, bindPlacement);
 	}
 
 	private static unsafe Dictionary<string, Matrix4x4> CollectBoneOffsetMatrices(Scene* scene)
@@ -235,7 +239,7 @@ internal static class SkeletonBuilder
 		}
 	}
 
-	private static Matrix4x4[] BuildInverseBindMatrices(
+	private static (Matrix4x4[] InverseBind, Matrix4x4 BindPlacement) BuildInverseBindMatrices(
 		List<string> boneNames,
 		List<int> parentIndices,
 		List<BoneTransform> bindPoseLocal,
@@ -243,6 +247,7 @@ internal static class SkeletonBuilder
 	{
 		var inverseBind = new Matrix4x4[boneNames.Count];
 		var modelBind = new Matrix4x4[boneNames.Count];
+		Matrix4x4? bindPlacement = null;
 
 		for (var i = 0; i < boneNames.Count; i++)
 		{
@@ -253,16 +258,28 @@ internal static class SkeletonBuilder
 			if (offsetMatricesByBoneName.TryGetValue(boneNames[i], out var offsetMatrix))
 			{
 				inverseBind[i] = offsetMatrix;
+
+				// Every weighted bone gives the same placement while the scene rests in its bind pose, so the first
+				// one, the closest to the root, stands for them all.
+				bindPlacement ??= offsetMatrix * modelBind[i];
+			}
+		}
+
+		var placement = bindPlacement ?? Matrix4x4.Identity;
+		for (var i = 0; i < boneNames.Count; i++)
+		{
+			if (offsetMatricesByBoneName.ContainsKey(boneNames[i]))
+			{
 				continue;
 			}
 
-			// A pass-through node with no vertices weighted to it. Inverting its bind pose is the
+			// A pass-through node with no vertices weighted to it. Placing the vertex as the weighted bones do is the
 			// value that would make it a no-op if something ever does bind to it.
 			inverseBind[i] = Matrix4x4.Invert(modelBind[i], out var inverted)
-				? inverted
+				? placement * inverted
 				: Matrix4x4.Identity;
 		}
 
-		return inverseBind;
+		return (inverseBind, placement);
 	}
 }

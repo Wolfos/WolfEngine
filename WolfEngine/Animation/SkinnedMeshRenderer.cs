@@ -30,7 +30,11 @@ public struct SkinnedMeshRenderer : IEntityComponent, IJsonOnDeserialized
 	/// <summary>Entity carrying the driving <see cref="Animator"/>. Defaults to this entity when unset.</summary>
 	public Entity AnimatorEntity;
 
-	/// <summary>Imported mesh bind coordinates to the skeleton's model coordinates.</summary>
+	/// <summary>
+	/// Imported mesh bind coordinates to the skeleton's model coordinates: the part of the mesh's placement in the rig
+	/// that the skeleton's inverse bind matrices do not already apply. When unset, the mesh's placement relative to the
+	/// animator on its first drawn frame stands in.
+	/// </summary>
 	public Matrix4x4? MeshBindToRig;
 
 	[JsonIgnore] internal Matrix4x4[] LocalSkinningMatrices = [];
@@ -38,29 +42,39 @@ public struct SkinnedMeshRenderer : IEntityComponent, IJsonOnDeserialized
 	[JsonIgnore] internal uint LocalPoseGeneration;
 	[JsonIgnore] private uint _animatorPoseGeneration;
 	[JsonIgnore] private Matrix4x4 _cachedBindToRig;
+	[JsonIgnore] private Matrix4x4 _cachedMeshToAnimator;
 	[JsonIgnore] private Matrix4x4 _cachedRigToMesh;
 	[JsonIgnore] private Matrix4x4? _capturedBindToRig;
 	[JsonIgnore] private bool _paletteInitialized;
 	[JsonIgnore] private Matrix4x4[]? _sourcePalette;
 
+	/// <summary>
+	/// Converts the animator's rig-space skinning palette into this mesh's own coordinates.
+	/// </summary>
+	/// <param name="meshToAnimator">
+	/// Where this mesh entity sits relative to the animator's entity now. The palette undoes it, so a skinned mesh lands
+	/// where its skeleton puts it wherever the entity sits: at its bind, under a bone socket that follows the animation,
+	/// or anywhere else.
+	/// </param>
 	internal void PrepareSkinningPalette(
 		Matrix4x4[] current,
 		Matrix4x4[] previous,
 		uint generation,
-		in Matrix4x4 fallbackBindToRig)
+		in Matrix4x4 meshToAnimator)
 	{
-		_capturedBindToRig ??= fallbackBindToRig;
+		_capturedBindToRig ??= meshToAnimator;
 		var bind = MeshBindToRig ?? _capturedBindToRig.Value;
-		if (_paletteInitialized && ReferenceEquals(current, _sourcePalette) && generation == _animatorPoseGeneration && bind == _cachedBindToRig && LocalSkinningMatrices.Length == current.Length)
+		var spacesUnchanged = bind == _cachedBindToRig && meshToAnimator == _cachedMeshToAnimator;
+		if (_paletteInitialized && ReferenceEquals(current, _sourcePalette) && generation == _animatorPoseGeneration && spacesUnchanged && LocalSkinningMatrices.Length == current.Length)
 		{
 			return;
 		}
 
-		if (_paletteInitialized == false || bind != _cachedBindToRig)
+		if (_paletteInitialized == false || meshToAnimator != _cachedMeshToAnimator)
 		{
-			if (Matrix4x4.Invert(bind, out _cachedRigToMesh) == false)
+			if (Matrix4x4.Invert(meshToAnimator, out _cachedRigToMesh) == false)
 			{
-				throw new InvalidOperationException("Skinned mesh bind transform must be invertible.");
+				throw new InvalidOperationException("Skinned mesh transform relative to its animator must be invertible.");
 			}
 		}
 
@@ -72,12 +86,12 @@ public struct SkinnedMeshRenderer : IEntityComponent, IJsonOnDeserialized
 		}
 
 		// A consecutive generation's previous rig pose is the palette we converted last frame.
-		// Rebuild it when rendering skipped a generation or the mesh bind space changed.
+		// Rebuild it when rendering skipped a generation or either space changed.
 		var reusePrevious = _paletteInitialized && ReferenceEquals(current, _sourcePalette) &&
-			generation == unchecked(_animatorPoseGeneration + 1) && bind == _cachedBindToRig;
+			generation == unchecked(_animatorPoseGeneration + 1) && spacesUnchanged;
 		for (var bone = 0; bone < current.Length; bone++)
 		{
-			// Row vectors: mesh -> rig -> deformed rig -> mesh. The draw transform then
+			// Row vectors: mesh -> rig -> deformed rig -> this entity's own space. The draw transform then
 			// places mesh-local output in the scene. Sockets keep using rig-space poses.
 			var lastCurrent = LocalSkinningMatrices[bone];
 			LocalSkinningMatrices[bone] = bind * current[bone] * rigToMesh;
@@ -87,6 +101,7 @@ public struct SkinnedMeshRenderer : IEntityComponent, IJsonOnDeserialized
 		_sourcePalette = current;
 		_animatorPoseGeneration = generation;
 		_cachedBindToRig = bind;
+		_cachedMeshToAnimator = meshToAnimator;
 		_paletteInitialized = true;
 		LocalPoseGeneration++;
 	}

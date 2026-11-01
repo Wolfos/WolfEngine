@@ -320,6 +320,11 @@ public class ThreeDFileImporter : IThreeDFileImporter
             // into the skeleton instead of becoming entities, so they are skipped here.
             BuildNodes(scene->MRootNode, meshData, nodes, skeletonBuild?.SkeletonNodeNames);
 
+            if (skeletonBuild is not null)
+            {
+                RemoveBindPlacement(nodes, skeletonBuild.BindPlacement);
+            }
+
             if (skeletonBuild is not null || scene->MNumAnimations > 0)
             {
                 AnimationConverter.Convert(scene, skeletonBuild, animations);
@@ -695,6 +700,38 @@ public class ThreeDFileImporter : IThreeDFileImporter
         }
 
         return IsApproximatelyIdentity(GetTransform(root->MTransformation));
+    }
+
+    /// <summary>
+    /// Leaves each skinned node's <see cref="ImportedNode.SkinBindToRig"/> with only the part of its placement in the rig
+    /// that the inverse bind matrices do not already apply, so the renderer never places a vertex twice. A file whose
+    /// offsets are measured from the mesh node would otherwise have its mesh turned or moved again by its own bind,
+    /// which the bind pose hides and every rotating bone exposes as a wrong pivot.
+    /// </summary>
+    internal static void RemoveBindPlacement(List<ImportedNode> nodes, Matrix4x4 bindPlacement)
+    {
+        if (IsApproximatelyIdentity(bindPlacement))
+        {
+            return;
+        }
+
+        if (Matrix4x4.Invert(bindPlacement, out var rigToBindPlacement) == false)
+        {
+            throw new InvalidDataException("The skin's bind placement must be invertible.");
+        }
+
+        for (var i = 0; i < nodes.Count; i++)
+        {
+            if (nodes[i].SkinBindToRig is not { } skinBindToRig)
+            {
+                continue;
+            }
+
+            nodes[i] = nodes[i] with
+            {
+                SkinBindToRig = skinBindToRig * rigToBindPlacement
+            };
+        }
     }
 
     internal static unsafe void AppendNode(
