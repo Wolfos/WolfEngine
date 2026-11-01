@@ -17,7 +17,7 @@ public sealed class MenuBar : IMenuBar
 {
 	private const string NewProjectPopupId = "New Project";
 	private const string NotificationPopupId = "Editor Notification";
-	private const string WorkspaceNamePopupId = "Workspace Name";
+	private const string WorkspaceConfigurationPopupId = "###WorkspaceConfiguration";
 	private const string DeleteWorkspacePopupId = "Delete Workspace";
 	private const float MacTitlebarButtonInset = 70.0f;
 	private const float WindowsCaptionButtonWidth = 45.0f;
@@ -52,10 +52,11 @@ public sealed class MenuBar : IMenuBar
 	private string _notificationMessage = string.Empty;
 	private string _workspaceName = string.Empty;
 	private string _workspaceNameError = string.Empty;
-	private Guid? _renameWorkspaceId;
+	private Guid? _configureWorkspaceId;
+	private EditorDocumentKind _workspaceOwnedDocument;
 	private Guid? _deleteWorkspaceId;
 	private Guid? _draggingWorkspaceId;
-	private bool _openWorkspaceNamePopup;
+	private bool _openWorkspaceConfigurationPopup;
 	private bool _openDeleteWorkspacePopup;
 
 	public MenuBar(
@@ -223,7 +224,9 @@ public sealed class MenuBar : IMenuBar
 			{
 				_workspaces.Activate(workspace.Id);
 			}
-			if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) BeginRenameWorkspace(workspace);
+
+			DrawWorkspaceDirtyBadge(workspace);
+			if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) BeginConfigureWorkspace(workspace);
 			if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left)) _draggingWorkspaceId = workspace.Id;
 			if (_draggingWorkspaceId is { } dragged && dragged != workspace.Id &&
 			    ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem))
@@ -233,7 +236,11 @@ public sealed class MenuBar : IMenuBar
 			}
 			if (ImGui.BeginPopupContextItem($"WorkspaceContext-{workspace.Id:N}"))
 			{
-				if (ImGui.MenuItem("Rename")) BeginRenameWorkspace(workspace);
+				if (ImGui.MenuItem("Configure..."))
+				{
+					BeginConfigureWorkspace(workspace);
+				}
+
 				if (_workspaces.Workspaces.Count == 1) ImGui.BeginDisabled();
 				if (ImGui.MenuItem("Delete Workspace")) { _deleteWorkspaceId = workspace.Id; _openDeleteWorkspacePopup = true; }
 				if (_workspaces.Workspaces.Count == 1) ImGui.EndDisabled();
@@ -390,9 +397,11 @@ public sealed class MenuBar : IMenuBar
 			ImGui.BeginDisabled();
 		}
 
-		if (ImGui.MenuItem("Save Scene", "Ctrl/Cmd+S"))
+		var activeDocument = _commandService.ActiveDocument;
+		var canSave = activeDocument?.DisplayName is not null && activeDocument.CanSave;
+		if (ImGui.MenuItem(GetDocumentCommandLabel("Save", activeDocument), "Ctrl/Cmd+S", false, canSave))
 		{
-			_commandService.SaveScene();
+			_commandService.SaveActiveDocument();
 		}
 
 		if (ImGui.MenuItem("Refresh Asset Database", "Ctrl/Cmd+R"))
@@ -455,10 +464,24 @@ public sealed class MenuBar : IMenuBar
 		var menuRect = GetLastItemRect();
 		if (isOpen)
 		{
+			var activeDocument = _commandService.ActiveDocument;
+			if (ImGui.MenuItem("Undo", "Ctrl/Cmd+Z", false, activeDocument?.CanUndo == true))
+			{
+				_commandService.UndoActiveDocument();
+			}
+
+			var redoShortcut = OperatingSystem.IsMacOS() ? "Cmd+Shift+Z" : "Ctrl+Y";
+			if (ImGui.MenuItem("Redo", redoShortcut, false, activeDocument?.CanRedo == true))
+			{
+				_commandService.RedoActiveDocument();
+			}
+
+			ImGui.Separator();
 			if (ImGui.MenuItem("Project Settings..."))
 			{
 				_windows.Open(EditorWindowIds.ProjectSettings);
 			}
+
 			ImGui.EndMenu();
 		}
 
@@ -641,6 +664,37 @@ public sealed class MenuBar : IMenuBar
 		var color = lastBuildFailed
 			? new Vector4(0.92f, 0.33f, 0.30f, 1.0f)
 			: new Vector4(0.95f, 0.70f, 0.22f, 1.0f);
+		DrawItemBadge(color);
+	}
+
+	private void DrawWorkspaceDirtyBadge(EditorWorkspace workspace)
+	{
+		var document = _commandService.GetDocument(workspace.OwnedDocument);
+		if (document is null || document.IsDirty == false)
+		{
+			return;
+		}
+
+		DrawItemBadge(new Vector4(0.95f, 0.70f, 0.22f, 1.0f));
+		if (ImGui.IsItemHovered())
+		{
+			ImGui.SetTooltip($"{document.DisplayName} has unsaved changes.");
+		}
+	}
+
+	private static string GetDocumentCommandLabel(string command, IEditorDocument? document)
+	{
+		if (document?.DisplayName is not { } name)
+		{
+			return command;
+		}
+
+		return $"{command} {name}";
+	}
+
+	/// <summary>Draws a dot in the top-right corner of the last item.</summary>
+	private static void DrawItemBadge(Vector4 color)
+	{
 		var itemMin = ImGui.GetItemRectMin();
 		var itemMax = ImGui.GetItemRectMax();
 		var radius = 3.0f;
@@ -707,10 +761,10 @@ public sealed class MenuBar : IMenuBar
 			ImGui.OpenPopup(NotificationPopupId);
 			_openNotificationPopup = false;
 		}
-		if (_openWorkspaceNamePopup)
+		if (_openWorkspaceConfigurationPopup)
 		{
-			ImGui.OpenPopup(WorkspaceNamePopupId);
-			_openWorkspaceNamePopup = false;
+			ImGui.OpenPopup(WorkspaceConfigurationPopupId);
+			_openWorkspaceConfigurationPopup = false;
 		}
 		if (_openDeleteWorkspacePopup)
 		{
@@ -720,45 +774,100 @@ public sealed class MenuBar : IMenuBar
 
 		DrawNewProjectPopup();
 		DrawNotificationPopup();
-		DrawWorkspaceNamePopup();
+		DrawWorkspaceConfigurationPopup();
 		DrawDeleteWorkspacePopup();
 	}
 
 	private void BeginCreateWorkspace()
 	{
-		_renameWorkspaceId = null;
+		_configureWorkspaceId = null;
 		_workspaceName = string.Empty;
+		_workspaceOwnedDocument = EditorDocumentKind.Scene;
 		_workspaceNameError = string.Empty;
-		_openWorkspaceNamePopup = true;
+		_openWorkspaceConfigurationPopup = true;
 	}
 
-	private void BeginRenameWorkspace(EditorWorkspace workspace)
+	private void BeginConfigureWorkspace(EditorWorkspace workspace)
 	{
-		_renameWorkspaceId = workspace.Id;
+		_configureWorkspaceId = workspace.Id;
 		_workspaceName = workspace.Name;
+		_workspaceOwnedDocument = workspace.OwnedDocument;
 		_workspaceNameError = string.Empty;
-		_openWorkspaceNamePopup = true;
+		_openWorkspaceConfigurationPopup = true;
 	}
 
-	private void DrawWorkspaceNamePopup()
+	private void DrawWorkspaceConfigurationPopup()
 	{
+		var isCreating = _configureWorkspaceId.HasValue == false;
+		var title = (isCreating ? "New Workspace" : "Configure Workspace") + WorkspaceConfigurationPopupId;
 		var open = true;
-		if (!ImGui.BeginPopupModal(WorkspaceNamePopupId, ref open, ImGuiWindowFlags.AlwaysAutoResize)) return;
-		if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
+		if (ImGui.BeginPopupModal(title, ref open, ImGuiWindowFlags.AlwaysAutoResize) == false)
+		{
+			return;
+		}
+
+		if (ImGui.IsWindowAppearing())
+		{
+			ImGui.SetKeyboardFocusHere();
+		}
+
 		ImGui.SetNextItemWidth(360.0f);
 		var confirm = ImGui.InputText("Name", ref _workspaceName, 65, ImGuiInputTextFlags.EnterReturnsTrue);
-		if (!string.IsNullOrEmpty(_workspaceNameError)) ImGui.TextColored(new Vector4(0.95f, 0.35f, 0.35f, 1.0f), _workspaceNameError);
-		confirm |= ImGui.Button(_renameWorkspaceId.HasValue ? "Rename" : "Create", new Vector2(100.0f, 0.0f));
+
+		ImGui.SetNextItemWidth(360.0f);
+		DrawOwnedDocumentCombo();
+		ImGui.TextDisabled("Save, Undo and Redo act on this document while the workspace is active.");
+
+		if (string.IsNullOrEmpty(_workspaceNameError) == false)
+		{
+			ImGui.TextColored(new Vector4(0.95f, 0.35f, 0.35f, 1.0f), _workspaceNameError);
+		}
+
+		ImGui.Spacing();
+		confirm |= ImGui.Button(isCreating ? "Create" : "Apply", new Vector2(100.0f, 0.0f));
 		ImGui.SameLine();
-		if (ImGui.Button("Cancel", new Vector2(100.0f, 0.0f)) || ImGui.IsKeyPressed(ImGuiKey.Escape)) ImGui.CloseCurrentPopup();
+		if (ImGui.Button("Cancel", new Vector2(100.0f, 0.0f)) ||
+		    ImGui.IsKeyPressed(ImGuiKey.Escape))
+		{
+			ImGui.CloseCurrentPopup();
+		}
+
 		if (confirm)
 		{
-			var success = _renameWorkspaceId is { } id
-				? _workspaces.TryRename(id, _workspaceName, out _workspaceNameError)
-				: _workspaces.TryCreate(_workspaceName, out _, out _workspaceNameError);
-			if (success) ImGui.CloseCurrentPopup();
+			var success = _configureWorkspaceId is { } id
+				? _workspaces.TryConfigure(id, _workspaceName, _workspaceOwnedDocument, out _workspaceNameError)
+				: _workspaces.TryCreate(_workspaceName, _workspaceOwnedDocument, out _, out _workspaceNameError);
+			if (success)
+			{
+				ImGui.CloseCurrentPopup();
+			}
 		}
+
 		ImGui.EndPopup();
+	}
+
+	private void DrawOwnedDocumentCombo()
+	{
+		if (ImGui.BeginCombo("Owned document", EditorDocumentKindNames.Get(_workspaceOwnedDocument)) == false)
+		{
+			return;
+		}
+
+		foreach (var kind in Enum.GetValues<EditorDocumentKind>())
+		{
+			var selected = kind == _workspaceOwnedDocument;
+			if (ImGui.Selectable(EditorDocumentKindNames.Get(kind), selected))
+			{
+				_workspaceOwnedDocument = kind;
+			}
+
+			if (selected)
+			{
+				ImGui.SetItemDefaultFocus();
+			}
+		}
+
+		ImGui.EndCombo();
 	}
 
 	private void DrawDeleteWorkspacePopup()

@@ -23,10 +23,10 @@ public sealed class EditorWorkspaceServiceTests
 	public void CreateRenameAndReorderKeepStableIdentity()
 	{
 		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
-		Assert.That(service.TryCreate("  Lighting  ", out var created, out _), Is.True);
+		Assert.That(service.TryCreate("  Lighting  ", EditorDocumentKind.Scene, out var created, out _), Is.True);
 		var id = created!.Id;
 
-		Assert.That(service.TryRename(id, "World Building", out _), Is.True);
+		Assert.That(service.TryConfigure(id, "World Building", EditorDocumentKind.Scene, out _), Is.True);
 		Assert.That(service.Move(id, 0), Is.True);
 
 		Assert.That(service.Workspaces[0].Id, Is.EqualTo(id));
@@ -41,8 +41,70 @@ public sealed class EditorWorkspaceServiceTests
 	{
 		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
 
-		Assert.That(service.TryCreate(name, out _, out var error), Is.False);
+		Assert.That(service.TryCreate(name, EditorDocumentKind.Scene, out _, out var error), Is.False);
 		Assert.That(error, Is.Not.Empty);
+	}
+
+	[Test]
+	public void SeededWorkspacesOwnTheirEditorsDocument()
+	{
+		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
+
+		Assert.That(
+			service.Workspaces.Select(workspace => workspace.OwnedDocument),
+			Is.EqualTo(new[]
+			{
+				EditorDocumentKind.Scene,
+				EditorDocumentKind.Scene,
+				EditorDocumentKind.AnimationGraph,
+				EditorDocumentKind.AnimationClip
+			}));
+	}
+
+	[Test]
+	public void WorkspacesSavedWithoutAnOwnedDocumentGetTheirDefault()
+	{
+		var customId = Guid.NewGuid();
+		var settings = new EditorWorkspacePreferences
+		{
+			Version = 1,
+			AnimationWorkspaceSeeded = true,
+			AnimationGraphWorkspaceRenamed = true,
+			AnimateWorkspaceSeeded = true,
+			ActiveWorkspaceId = customId,
+			Workspaces =
+			[
+				new EditorWorkspacePreference { Id = EditorWorkspaceService.AnimationWorkspaceId, Name = "Animation Graph" },
+				new EditorWorkspacePreference { Id = EditorWorkspaceService.AnimateWorkspaceId, Name = "Animate" },
+				new EditorWorkspacePreference { Id = customId, Name = "Lighting" }
+			]
+		};
+
+		var service = new EditorWorkspaceService(settings);
+
+		Assert.That(
+			service.Workspaces.Select(workspace => workspace.OwnedDocument),
+			Is.EqualTo(new[]
+			{
+				EditorDocumentKind.AnimationGraph,
+				EditorDocumentKind.AnimationClip,
+				EditorDocumentKind.Scene
+			}));
+	}
+
+	[Test]
+	public void ConfiguredOwnedDocumentIsKeptOverDefaultAndPersisted()
+	{
+		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
+
+		Assert.That(
+			service.TryConfigure(EditorWorkspaceService.AnimateWorkspaceId, "Animate", EditorDocumentKind.None, out _),
+			Is.True);
+		var json = JsonSerializer.Serialize(EditorPreferences.GetWorkspaceSettings());
+		var restored = new EditorWorkspaceService(JsonSerializer.Deserialize<EditorWorkspacePreferences>(json));
+
+		var animate = restored.Workspaces.Single(workspace => workspace.Id == EditorWorkspaceService.AnimateWorkspaceId);
+		Assert.That(animate.OwnedDocument, Is.EqualTo(EditorDocumentKind.None));
 	}
 
 	[Test]
@@ -62,7 +124,7 @@ public sealed class EditorWorkspaceServiceTests
 	public void DeletingActiveWorkspaceSelectsPrecedingWorkspace()
 	{
 		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
-		service.TryCreate("Third", out var third, out _);
+		service.TryCreate("Third", EditorDocumentKind.Scene, out var third, out _);
 
 		Assert.That(service.Delete(third!.Id), Is.True);
 		Assert.That(service.ActiveWorkspace.Name, Is.EqualTo("Animate"));

@@ -39,15 +39,19 @@ public static class EditorWindowIds
 
 public sealed class EditorWorkspace
 {
-	internal EditorWorkspace(Guid id, string name, IEnumerable<string> openWindowIds)
+	internal EditorWorkspace(Guid id, string name, EditorDocumentKind ownedDocument, IEnumerable<string> openWindowIds)
 	{
 		Id = id;
 		Name = name;
+		OwnedDocument = ownedDocument;
 		OpenWindowIds = new HashSet<string>(openWindowIds, StringComparer.Ordinal);
 	}
 
 	public Guid Id { get; }
 	public string Name { get; internal set; }
+
+	/// <summary>The document that Save, Undo and Redo act on while this workspace is active.</summary>
+	public EditorDocumentKind OwnedDocument { get; internal set; }
 	public IReadOnlySet<string> OpenWindows => OpenWindowIds;
 	internal HashSet<string> OpenWindowIds { get; }
 }
@@ -56,8 +60,8 @@ public interface IEditorWorkspaceService
 {
 	IReadOnlyList<EditorWorkspace> Workspaces { get; }
 	EditorWorkspace ActiveWorkspace { get; }
-	bool TryCreate(string name, out EditorWorkspace? workspace, out string error);
-	bool TryRename(Guid id, string name, out string error);
+	bool TryCreate(string name, EditorDocumentKind ownedDocument, out EditorWorkspace? workspace, out string error);
+	bool TryConfigure(Guid id, string name, EditorDocumentKind ownedDocument, out string error);
 	bool Activate(Guid id);
 	bool Move(Guid id, int targetIndex);
 	bool Delete(Guid id);
@@ -106,7 +110,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 	public IReadOnlyList<EditorWorkspace> Workspaces => _workspaces;
 	public EditorWorkspace ActiveWorkspace => _workspaces.First(workspace => workspace.Id == _activeId);
 
-	public bool TryCreate(string name, out EditorWorkspace? workspace, out string error)
+	public bool TryCreate(string name, EditorDocumentKind ownedDocument, out EditorWorkspace? workspace, out string error)
 	{
 		if (!TryNormalizeName(name, null, out var normalized, out error))
 		{
@@ -114,14 +118,14 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 			return false;
 		}
 
-		workspace = new EditorWorkspace(Guid.NewGuid(), normalized, Array.Empty<string>());
+		workspace = new EditorWorkspace(Guid.NewGuid(), normalized, ownedDocument, Array.Empty<string>());
 		_workspaces.Add(workspace);
 		_activeId = workspace.Id;
 		Persist();
 		return true;
 	}
 
-	public bool TryRename(Guid id, string name, out string error)
+	public bool TryConfigure(Guid id, string name, EditorDocumentKind ownedDocument, out string error)
 	{
 		var workspace = _workspaces.FirstOrDefault(candidate => candidate.Id == id);
 		if (workspace is null)
@@ -131,6 +135,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 		}
 		if (!TryNormalizeName(name, id, out var normalized, out error)) return false;
 		workspace.Name = normalized;
+		workspace.OwnedDocument = ownedDocument;
 		Persist();
 		return true;
 	}
@@ -228,15 +233,16 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 					openWindows = [EditorWindowIds.Animation];
 					_animationDockLayoutNeedsReset = true;
 				}
-				_workspaces.Add(new EditorWorkspace(saved.Id, saved.Name.Trim()[..Math.Min(saved.Name.Trim().Length, 64)], openWindows));
+				var ownedDocument = saved.OwnedDocument ?? GetDefaultOwnedDocument(saved.Id);
+				_workspaces.Add(new EditorWorkspace(saved.Id, saved.Name.Trim()[..Math.Min(saved.Name.Trim().Length, 64)], ownedDocument, openWindows));
 			}
 		}
 
 		if (_workspaces.Count == 0)
 		{
-			_workspaces.Add(new EditorWorkspace(SceneWorkspaceId, "Scene",
+			_workspaces.Add(new EditorWorkspace(SceneWorkspaceId, "Scene", EditorDocumentKind.Scene,
 				[EditorWindowIds.Entities, EditorWindowIds.Scene, EditorWindowIds.Components, EditorWindowIds.AssetEditor, EditorWindowIds.Log]));
-			_workspaces.Add(new EditorWorkspace(AssetsWorkspaceId, "Assets",
+			_workspaces.Add(new EditorWorkspace(AssetsWorkspaceId, "Assets", EditorDocumentKind.Scene,
 				[EditorWindowIds.Assets, EditorWindowIds.Components, EditorWindowIds.AssetEditor, EditorWindowIds.Log]));
 		}
 		if (preferences?.AnimationGraphWorkspaceRenamed != true)
@@ -245,7 +251,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 		}
 
         if (preferences?.AnimationWorkspaceSeeded != true && !_workspaces.Any(w => w.Id == AnimationWorkspaceId || string.Equals(w.Name, AnimationGraphWorkspaceName, StringComparison.OrdinalIgnoreCase)))
-            _workspaces.Add(new EditorWorkspace(AnimationWorkspaceId, AnimationGraphWorkspaceName,
+            _workspaces.Add(new EditorWorkspace(AnimationWorkspaceId, AnimationGraphWorkspaceName, EditorDocumentKind.AnimationGraph,
                 [EditorWindowIds.Animation]));
 
 		// Seeded once, like the graph workspace, so deleting it is respected on later launches.
@@ -254,7 +260,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 			    workspace.Id == AnimateWorkspaceId ||
 			    string.Equals(workspace.Name, AnimateWorkspaceName, StringComparison.OrdinalIgnoreCase)) == false)
 		{
-			_workspaces.Add(new EditorWorkspace(AnimateWorkspaceId, AnimateWorkspaceName, EditorWindowIds.AnimationClipEditor));
+			_workspaces.Add(new EditorWorkspace(AnimateWorkspaceId, AnimateWorkspaceName, EditorDocumentKind.AnimationClip, EditorWindowIds.AnimationClipEditor));
 		}
 
         _activeId = preferences?.ActiveWorkspaceId is { } active && _workspaces.Any(workspace => workspace.Id == active)
@@ -262,6 +268,25 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 			: _workspaces[0].Id;
         if (preferences is not null) EditorPreferences.SetWorkspaceImGuiSettings(preferences.ImGuiSettings);
 		Persist(saveToDisk: false);
+	}
+
+	/// <summary>
+	/// What a workspace saved before workspaces owned a document gets. The seeded animation workspaces own
+	/// their editor's document; every other workspace owns the scene, which is what saving did before.
+	/// </summary>
+	internal static EditorDocumentKind GetDefaultOwnedDocument(Guid workspaceId)
+	{
+		if (workspaceId == AnimationWorkspaceId)
+		{
+			return EditorDocumentKind.AnimationGraph;
+		}
+
+		if (workspaceId == AnimateWorkspaceId)
+		{
+			return EditorDocumentKind.AnimationClip;
+		}
+
+		return EditorDocumentKind.Scene;
 	}
 
 	/// <summary>
@@ -314,6 +339,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 			{
 				Id = workspace.Id,
 				Name = workspace.Name,
+				OwnedDocument = workspace.OwnedDocument,
 				OpenWindowIds = workspace.OpenWindowIds.OrderBy(id => id, StringComparer.Ordinal).ToList()
 			}).ToList()
 		});

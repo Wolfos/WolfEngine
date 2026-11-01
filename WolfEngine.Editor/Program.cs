@@ -118,6 +118,8 @@ public static class Program
         services.AddSingleton<AnimationWindow>();
 		services.AddSingleton<AnimationClipEditorSession>();
 		services.AddSingleton<IEditorDocumentEditor>(provider => provider.GetRequiredService<AnimationClipEditorSession>());
+		services.AddSingleton<IEditorDocument>(provider => provider.GetRequiredService<AnimationClipEditorSession>());
+		services.AddSingleton<IEditorDocument>(provider => provider.GetRequiredService<AnimationWindow>());
 		services.AddSingleton<IEditorAssetHandler, AnimationClipEditorAssetHandler>();
         foreach (var type in new[] { AssetType.AnimationGraph })
             services.AddSingleton<IEditorAssetHandler>(provider => new AnimationEditorAssetHandler(type,

@@ -128,15 +128,38 @@ public sealed partial class EditorRemoteAutomationController
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
-			if (!_workspaces.TryCreate(name, out _, out var error)) throw new InvalidOperationException(error);
+			if (!_workspaces.TryCreate(name, EditorDocumentKind.Scene, out _, out var error)) throw new InvalidOperationException(error);
 			return CreateWorkspaceState();
 		}, cancellationToken);
 
-	public Task<EditorWorkspaceStateResult> RenameWorkspaceAsync(string workspaceId, string name, CancellationToken cancellationToken) =>
+	/// <summary>Renames a workspace and, when <paramref name="ownedDocument"/> is given, changes the document it owns.</summary>
+	public Task<EditorWorkspaceStateResult> ConfigureWorkspaceAsync(
+		string workspaceId,
+		string name,
+		string? ownedDocument,
+		CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
-			if (!Guid.TryParse(workspaceId, out var id)) throw new InvalidOperationException("workspace_id must be a GUID.");
-			if (!_workspaces.TryRename(id, name, out var error)) throw new InvalidOperationException(error);
+			if (Guid.TryParse(workspaceId, out var id) == false)
+			{
+				throw new InvalidOperationException("workspace_id must be a GUID.");
+			}
+
+			var workspace = _workspaces.Workspaces.FirstOrDefault(candidate => candidate.Id == id) ??
+				throw new InvalidOperationException("Workspace was not found.");
+			var kind = workspace.OwnedDocument;
+			if (ownedDocument is not null &&
+			    (Enum.TryParse(ownedDocument, ignoreCase: true, out kind) == false || Enum.IsDefined(kind) == false))
+			{
+				throw new InvalidOperationException(
+					$"owned_document must be one of: {string.Join(", ", Enum.GetNames<EditorDocumentKind>())}.");
+			}
+
+			if (_workspaces.TryConfigure(id, name, kind, out var error) == false)
+			{
+				throw new InvalidOperationException(error);
+			}
+
 			return CreateWorkspaceState();
 		}, cancellationToken);
 
@@ -165,7 +188,11 @@ public sealed partial class EditorRemoteAutomationController
 	private EditorWorkspaceStateResult CreateWorkspaceState() => new(
 		_workspaces.ActiveWorkspace.Id,
 		_workspaces.Workspaces.Select(workspace => new EditorWorkspaceSummaryResult(
-			workspace.Id, workspace.Name, workspace.OpenWindows.OrderBy(id => id, StringComparer.Ordinal).ToArray())).ToArray(),
+			workspace.Id,
+			workspace.Name,
+			workspace.OwnedDocument.ToString(),
+			_commandService.GetDocument(workspace.OwnedDocument)?.IsDirty == true,
+			workspace.OpenWindows.OrderBy(id => id, StringComparer.Ordinal).ToArray())).ToArray(),
 		EditorPreferences.GetWorkspaceSettings()?.ImGuiSettings.Length ?? 0);
 
 	/// <summary>
@@ -943,7 +970,7 @@ public sealed partial class EditorRemoteAutomationController
 
 	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
 		Enqueue(() => new EditorUndoResult(
-			_commandService.Undo(),
+			_commandService.SceneDocument.Undo(),
 			_editorFrameCoordinator.CompletedSequence,
 			_renderFrameCoordinator.CompletedSequence), cancellationToken);
 

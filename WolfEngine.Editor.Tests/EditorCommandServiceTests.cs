@@ -141,6 +141,74 @@ public sealed class EditorCommandServiceTests
 	}
 
 	[Test]
+	public void ActiveDocument_FollowsTheActiveWorkspacesOwnedDocument()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		var graph = Substitute.For<IEditorDocument>();
+		graph.Kind.Returns(EditorDocumentKind.AnimationGraph);
+		graph.CanSave.Returns(true);
+		graph.CanUndo.Returns(true);
+		graph.Save().Returns(true);
+		graph.Undo().Returns(true);
+		var workspaces = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
+		var service = CreateServiceWithDocuments(fixture, workspaces, graph);
+
+		Assert.That(service.ActiveDocument, Is.SameAs(service.SceneDocument));
+
+		workspaces.Activate(EditorWorkspaceService.AnimationWorkspaceId);
+
+		Assert.That(service.ActiveDocument, Is.SameAs(graph));
+		Assert.That(service.SaveActiveDocument(), Is.True);
+		Assert.That(service.UndoActiveDocument(), Is.True);
+		graph.Received(1).Save();
+		graph.Received(1).Undo();
+		fixture.SceneWorkspace.DidNotReceive().SaveCurrentScene();
+		fixture.UndoRedoService.DidNotReceive().Undo();
+	}
+
+	[Test]
+	public void ActiveDocument_IsNullWhenTheWorkspaceOwnsNoDocumentOrItsKindIsMissing()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		var workspaces = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
+		var service = CreateServiceWithDocuments(fixture, workspaces);
+
+		workspaces.TryConfigure(EditorWorkspaceService.SceneWorkspaceId, "Scene", EditorDocumentKind.None, out _);
+
+		Assert.That(service.ActiveDocument, Is.Null);
+		Assert.That(service.SaveActiveDocument(), Is.False);
+
+		workspaces.Activate(EditorWorkspaceService.AnimateWorkspaceId);
+
+		Assert.That(service.ActiveDocument, Is.Null);
+		fixture.SceneWorkspace.DidNotReceive().SaveCurrentScene();
+	}
+
+	private static EditorCommandService CreateServiceWithDocuments(
+		CommandFixture fixture,
+		IEditorWorkspaceService workspaces,
+		params IEditorDocument[] documents)
+	{
+		return new EditorCommandService(
+			fixture.SceneWorkspace,
+			fixture.ProjectService,
+			fixture.AssetRefreshService,
+			fixture.PlaySession,
+			fixture.InteractionState,
+			fixture.NotificationService,
+			fixture.UndoRedoService,
+			Substitute.For<IShaderProvider>(),
+			Substitute.For<IRenderer>(),
+			fixture.OperationService,
+			fixture.FileDialogService,
+			new InputSystem(),
+			documents: documents,
+			workspaces: workspaces);
+	}
+
+	[Test]
 	public void EntitySelection_PreservesInsertionOrderAndAddsVisibleRange()
 	{
 		var world = new World(WorldTag.Authoring);
@@ -232,7 +300,7 @@ public sealed class EditorCommandServiceTests
 			EditorShortcutCommandResolver.Resolve(
 				new EditorShortcutSnapshot(true, false, false, false, false, true, false, false, false, false, false, false),
 				EditorFocusedWindow.None),
-			Is.EqualTo(EditorShortcutCommand.SaveScene));
+			Is.EqualTo(EditorShortcutCommand.Save));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(

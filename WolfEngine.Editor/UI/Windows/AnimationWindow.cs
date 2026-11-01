@@ -9,7 +9,7 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
-public sealed partial class AnimationWindow : EditorWindow, IDisposable
+public sealed partial class AnimationWindow : EditorWindow, IEditorDocument, IDisposable
 {
 	private readonly IEditorProjectService _project;
 	private readonly IProjectAssetPipelineService _pipeline;
@@ -54,6 +54,14 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 	public AnimationGraphInstance? PreviewInstance => _preview?.Instance;
 	public string? Diagnostic => _diagnostic;
 	public RenderViewId? PreviewView => _preview?.View;
+
+	public EditorDocumentKind Kind => EditorDocumentKind.AnimationGraph;
+	public string? DisplayName => _document is null ? null : GetDocumentName(_document);
+	public bool IsDirty => _document?.Dirty == true;
+	public bool CanSave => CanEditDocument;
+	public bool CanUndo => CanEditDocument && (_document!.CanUndo || _gestureSnapshot is not null);
+	public bool CanRedo => CanEditDocument && _document!.CanRedo;
+	private bool CanEditDocument => _document is not null && _project.IsAssetReadOnly(_assetId) == false;
 
 	private enum SidebarTab
 	{
@@ -280,46 +288,11 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 	private void DrawToolbar(AnimationGraph graph, bool readOnly)
 	{
 		_toolbarBounds.Clear();
-		var sourceName = Path.GetFileName(_document!.Path);
-		var name = sourceName.EndsWith(AnimationGraph.Extension, StringComparison.OrdinalIgnoreCase) ? sourceName[..^AnimationGraph.Extension.Length] : Path.GetFileNameWithoutExtension(sourceName);
 		var bold = ImGuiUiSystem.PushBoldFont();
-		ImGui.TextUnformatted(name);
+		ImGui.TextUnformatted(GetDocumentName(_document!));
 		ImGuiUiSystem.PopFontIfPushed(bold);
 		ImGui.SameLine();
-		ImGui.TextDisabled(_document.Dirty ? "Animation graph  /  Unsaved changes" : "Animation graph");
-		ImGui.BeginDisabled(readOnly);
-		if (ToolbarButton("Save", "save"))
-		{
-			Save();
-		}
-
-		ImGui.SameLine();
-		ImGui.BeginDisabled(_document.CanUndo == false && _gestureSnapshot is null);
-		if (ToolbarButton("Undo", "undo"))
-		{
-			CommitGesture();
-			_document.Undo();
-			if (_view.AutoFrame)
-			{
-				_view.FitRequested = true;
-			}
-		}
-
-		ImGui.EndDisabled();
-		ImGui.SameLine();
-		ImGui.BeginDisabled(_document.CanRedo == false);
-		if (ToolbarButton("Redo", "redo"))
-		{
-			CommitGesture();
-			_document.Redo();
-			if (_view.AutoFrame)
-			{
-				_view.FitRequested = true;
-			}
-		}
-
-		ImGui.EndDisabled();
-		ImGui.EndDisabled();
+		ImGui.TextDisabled(_document!.Dirty ? "Unsaved changes" : "");
 		ImGui.SameLine(0.0f, 18.0f);
 		if (ToolbarButton("Fit all", "fit"))
 		{
@@ -343,7 +316,7 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 
 		ImGui.SameLine();
 		ImGui.BeginDisabled(readOnly);
-		if (ToolbarButton("Arrange", "arrange"))
+		if (ToolbarButton("Tidy", "arrange"))
 		{
 			_arrangeRequested = true;
 		}
@@ -497,26 +470,74 @@ public sealed partial class AnimationWindow : EditorWindow, IDisposable
 		}
 	}
 
-	public void Save()
+	public bool Save()
 	{
-		if (_document is null || _project.IsAssetReadOnly(_assetId))
+		if (CanSave == false)
 		{
-			return;
+			return false;
 		}
 
 		CommitGesture();
 		try
 		{
-			_document.Save();
+			_document!.Save();
 			if (_project.TryGetAsset(_assetId, out var asset))
 			{
 				_project.RefreshAssetSource(asset.RelativeSourcePath);
 			}
+
+			return true;
 		}
 		catch (Exception exception)
 		{
 			_diagnostic = exception.Message;
+			return false;
 		}
+	}
+
+	public bool Undo()
+	{
+		if (CanUndo == false)
+		{
+			return false;
+		}
+
+		CommitGesture();
+		_document!.Undo();
+		RequestFitAfterHistoryChange();
+		return true;
+	}
+
+	public bool Redo()
+	{
+		if (CanRedo == false)
+		{
+			return false;
+		}
+
+		CommitGesture();
+		_document!.Redo();
+		RequestFitAfterHistoryChange();
+		return true;
+	}
+
+	private void RequestFitAfterHistoryChange()
+	{
+		if (_view.AutoFrame)
+		{
+			_view.FitRequested = true;
+		}
+	}
+
+	private static string GetDocumentName(AnimationDocument document)
+	{
+		var sourceName = Path.GetFileName(document.Path);
+		if (sourceName.EndsWith(AnimationGraph.Extension, StringComparison.OrdinalIgnoreCase))
+		{
+			return sourceName[..^AnimationGraph.Extension.Length];
+		}
+
+		return Path.GetFileNameWithoutExtension(sourceName);
 	}
 
 	private bool DrawAssetRef<T>(string label, ref AssetRef<T> value)

@@ -20,7 +20,7 @@ namespace WolfEngine.Editor.UI;
 /// the clip until keyed, and moving the playhead or starting playback discards it.
 /// </para>
 /// </summary>
-public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEditSink, IDisposable
+public sealed class AnimationClipEditorSession : IEditorDocument, IEditorDocumentEditor, IBoneEditSink, IDisposable
 {
 	private readonly IEditorProjectService _project;
 	private readonly IProjectAssetPipelineService _pipeline;
@@ -139,6 +139,15 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 
 	/// <inheritdoc />
 	public bool HasShortcutFocus => HasClip && _focusedFrame >= ImGui.GetFrameCount() - 1;
+
+	public EditorDocumentKind Kind => EditorDocumentKind.AnimationClip;
+	public string? DisplayName => HasClip ? ClipName : null;
+	public bool IsDirty => MetadataDocument?.IsDirty == true;
+
+	// Saving or moving through history mid-gesture would split one edit in two.
+	public bool CanSave => CanEditMetadata && IsEditing == false;
+	public bool CanUndo => CanSave && MetadataDocument!.CanUndo;
+	public bool CanRedo => CanSave && MetadataDocument!.CanRedo;
 
 	private int ImportedFramesPerSecond =>
 		_importedClip is null ? AuthoredAnimationClipFile.DefaultFramesPerSecond : Math.Max(1, (int)MathF.Round(_importedClip.FramesPerSecond));
@@ -818,7 +827,7 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	/// <inheritdoc />
 	public bool Undo()
 	{
-		if (CanEditMetadata == false || IsEditing || MetadataDocument!.CanUndo == false)
+		if (CanUndo == false)
 		{
 			return false;
 		}
@@ -832,7 +841,7 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	/// <inheritdoc />
 	public bool Redo()
 	{
-		if (CanEditMetadata == false || IsEditing || MetadataDocument!.CanRedo == false)
+		if (CanRedo == false)
 		{
 			return false;
 		}
@@ -846,7 +855,7 @@ public sealed class AnimationClipEditorSession : IEditorDocumentEditor, IBoneEdi
 	/// <inheritdoc />
 	public bool Save()
 	{
-		if (CanEditMetadata == false || IsEditing)
+		if (CanSave == false)
 		{
 			return false;
 		}

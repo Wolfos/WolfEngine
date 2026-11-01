@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ImGuiNET;
+using WolfEngine.Editor.UI;
 using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor;
@@ -243,5 +244,9 @@ public sealed class EditorWorkspacePreference
 {
 	public Guid Id { get; set; }
 	public string Name { get; set; } = string.Empty;
+
+	/// <summary>Null for workspaces saved before workspaces owned a document.</summary>
+	public EditorDocumentKind? OwnedDocument { get; set; }
+
 	public List<string> OpenWindowIds { get; set; } = new();
 }

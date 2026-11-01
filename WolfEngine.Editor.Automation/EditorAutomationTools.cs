@@ -258,9 +258,13 @@ public sealed class EditorAutomationTools
 	public Task<EditorWorkspaceStateResult> CreateWorkspace(string name, CancellationToken cancellationToken) =>
 		_controller.CreateWorkspaceAsync(name, cancellationToken);
 
-	[McpServerTool(Name = "rename_workspace"), Description("Rename an editor workspace without changing its stable layout identity.")]
-	public Task<EditorWorkspaceStateResult> RenameWorkspace(string workspaceId, string name, CancellationToken cancellationToken) =>
-		_controller.RenameWorkspaceAsync(workspaceId, name, cancellationToken);
+	[McpServerTool(Name = "configure_workspace"), Description("Rename an editor workspace without changing its stable layout identity, and optionally change the document it owns (None, Scene, AnimationGraph or AnimationClip). Save, Undo and Redo act on the active workspace's owned document; omit owned_document to keep it.")]
+	public Task<EditorWorkspaceStateResult> ConfigureWorkspace(
+		string workspaceId,
+		string name,
+		string? ownedDocument = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.ConfigureWorkspaceAsync(workspaceId, name, ownedDocument, cancellationToken);
 
 	[McpServerTool(Name = "activate_workspace"), Description("Activate an editor workspace by stable id.")]
 	public Task<EditorWorkspaceStateResult> ActivateWorkspace(string workspaceId, CancellationToken cancellationToken) =>

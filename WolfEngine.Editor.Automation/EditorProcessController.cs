@@ -252,8 +252,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		GetRunningEditor().CreateWorkspaceAsync(name, cancellationToken);
 
-	public Task<EditorWorkspaceStateResult> RenameWorkspaceAsync(string workspaceId, string name, CancellationToken cancellationToken) =>
-		GetRunningEditor().RenameWorkspaceAsync(workspaceId, name, cancellationToken);
+	public Task<EditorWorkspaceStateResult> ConfigureWorkspaceAsync(
+		string workspaceId,
+		string name,
+		string? ownedDocument,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().ConfigureWorkspaceAsync(workspaceId, name, ownedDocument, cancellationToken);
 
 	public Task<EditorWorkspaceStateResult> ActivateWorkspaceAsync(string workspaceId, CancellationToken cancellationToken) =>
 		GetRunningEditor().ActivateWorkspaceAsync(workspaceId, cancellationToken);

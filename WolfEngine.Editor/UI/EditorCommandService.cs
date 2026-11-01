@@ -29,8 +29,18 @@ public interface IEditorCommandService
 	bool SaveScene();
 	bool RefreshAssetDatabase();
 	bool ReloadEngineShaders();
-	bool Undo();
-	bool Redo();
+
+	IEditorDocument SceneDocument { get; }
+
+	/// <summary>
+	/// The document the active workspace owns, or null when it owns none. Save, undo and redo act on it.
+	/// </summary>
+	IEditorDocument? ActiveDocument { get; }
+
+	IEditorDocument? GetDocument(EditorDocumentKind kind);
+	bool SaveActiveDocument();
+	bool UndoActiveDocument();
+	bool RedoActiveDocument();
 	bool DuplicateFocusedSelection();
 	bool DeleteFocusedSelection();
 	void ProcessShortcuts();
@@ -74,6 +84,8 @@ public sealed class EditorCommandService : IEditorCommandService
 	private readonly IEditorOperationService _operationService;
 	private readonly IFileDialogService _fileDialogService;
 	private readonly IEditorDocumentEditor[] _documentEditors;
+	private readonly IEditorDocument[] _documents;
+	private readonly IEditorWorkspaceService? _workspaces;
 	private readonly IGameplayAssemblyHost? _gameplayAssemblyHost;
 	private bool _leftCtrlDown;
 	private bool _rightCtrlDown;
@@ -113,7 +125,9 @@ public sealed class EditorCommandService : IEditorCommandService
 		IFileDialogService fileDialogService,
 		IInputSystem inputSystem,
 		IEnumerable<IEditorDocumentEditor>? documentEditors = null,
-		IGameplayAssemblyHost? gameplayAssemblyHost = null)
+		IGameplayAssemblyHost? gameplayAssemblyHost = null,
+		IEnumerable<IEditorDocument>? documents = null,
+		IEditorWorkspaceService? workspaces = null)
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
@@ -129,6 +143,13 @@ public sealed class EditorCommandService : IEditorCommandService
 		ArgumentNullException.ThrowIfNull(inputSystem);
 		_documentEditors = documentEditors?.ToArray() ?? [];
 		_gameplayAssemblyHost = gameplayAssemblyHost;
+		_workspaces = workspaces;
+		SceneDocument = new EditorSceneDocument(this);
+		_documents =
+		[
+			SceneDocument,
+			.. documents ?? []
+		];
 
 		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRedo", InputActionBinding.KeyY, callback => _redoPressedThisFrame |= callback.Value);
@@ -149,6 +170,21 @@ public sealed class EditorCommandService : IEditorCommandService
 	internal bool HasPendingSceneReplacement => _pendingSceneReplacement.HasValue;
 	internal PendingSceneReplacementKind? PendingSceneReplacementType => _pendingSceneReplacement?.Kind;
 	public Guid? LoadingSceneAssetId => _loadingSceneAssetId;
+	public IEditorDocument SceneDocument { get; }
+
+	public IEditorDocument? ActiveDocument
+	{
+		get
+		{
+			// Without workspaces, as in tests, the scene is the only document there is to act on.
+			if (_workspaces is null)
+			{
+				return SceneDocument;
+			}
+
+			return GetDocument(_workspaces.ActiveWorkspace.OwnedDocument);
+		}
+	}
 
 	public void BindDeletionHandlers(IEditorEntityDeletionHandler? entityDeletionHandler, IEditorAssetDeletionHandler? assetDeletionHandler)
 	{
@@ -358,13 +394,54 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 	}
 
-	public bool Undo()
+	public IEditorDocument? GetDocument(EditorDocumentKind kind)
 	{
-		return _undoRedoService.Undo();
+		foreach (var document in _documents)
+		{
+			if (document.Kind == kind)
+			{
+				return document;
+			}
+		}
+
+		return null;
 	}
 
-	/// <summary>A document editor with keyboard focus takes undo, redo and save away from the scene.</summary>
-	private bool TryGetFocusedDocument(out IEditorDocumentEditor target)
+	public bool SaveActiveDocument()
+	{
+		var document = ActiveDocument;
+		if (document is null || document.CanSave == false)
+		{
+			return false;
+		}
+
+		return document.Save();
+	}
+
+	public bool UndoActiveDocument()
+	{
+		var document = ActiveDocument;
+		if (document is null || document.CanUndo == false)
+		{
+			return false;
+		}
+
+		return document.Undo();
+	}
+
+	public bool RedoActiveDocument()
+	{
+		var document = ActiveDocument;
+		if (document is null || document.CanRedo == false)
+		{
+			return false;
+		}
+
+		return document.Redo();
+	}
+
+	/// <summary>A document editor with keyboard focus takes delete and duplicate away from the scene.</summary>
+	private bool TryGetFocusedEditor(out IEditorDocumentEditor target)
 	{
 		foreach (var candidate in _documentEditors)
 		{
@@ -377,11 +454,6 @@ public sealed class EditorCommandService : IEditorCommandService
 
 		target = null!;
 		return false;
-	}
-
-	public bool Redo()
-	{
-		return _undoRedoService.Redo();
 	}
 
 	public bool DeleteFocusedSelection()
@@ -421,14 +493,14 @@ public sealed class EditorCommandService : IEditorCommandService
 			_backspacePressedThisFrame,
 			io.WantTextInput,
 			OperatingSystem.IsMacOS());
-		// A focused document editor owns every selection and history shortcut, so none of them can
-		// reach the scene through the sticky focused window while that editor has the keyboard.
-		var hasDocument = TryGetFocusedDocument(out var document);
-		var focusedWindow = hasDocument ? EditorFocusedWindow.Document : _interactionState.FocusedWindow;
+		// A focused document editor owns every selection shortcut, so none of them can reach the scene
+		// through the sticky focused window while that editor has the keyboard.
+		var hasFocusedEditor = TryGetFocusedEditor(out var focusedEditor);
+		var focusedWindow = hasFocusedEditor ? EditorFocusedWindow.Document : _interactionState.FocusedWindow;
 		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, focusedWindow);
-		if (hasDocument)
+		if (hasFocusedEditor)
 		{
-			RunDocumentShortcut(document, shortcut);
+			RunFocusedEditorShortcut(focusedEditor, shortcut);
 			ResetShortcutPresses();
 			return;
 		}
@@ -436,16 +508,16 @@ public sealed class EditorCommandService : IEditorCommandService
 		switch (shortcut)
 		{
 			case EditorShortcutCommand.Undo:
-				Undo();
+				UndoActiveDocument();
 				break;
 			case EditorShortcutCommand.Redo:
-				Redo();
+				RedoActiveDocument();
 				break;
 			case EditorShortcutCommand.NewScene:
 				RequestNewScene();
 				break;
-			case EditorShortcutCommand.SaveScene:
-				SaveScene();
+			case EditorShortcutCommand.Save:
+				SaveActiveDocument();
 				break;
 			case EditorShortcutCommand.RefreshAssetDatabase:
 				RefreshAssetDatabase();
@@ -465,30 +537,31 @@ public sealed class EditorCommandService : IEditorCommandService
 	}
 
 	/// <summary>
-	/// Shortcuts while a document editor has focus. Refresh still works everywhere; scene-only commands
-	/// such as New Scene do nothing rather than act on a window the user is not looking at.
+	/// Shortcuts while a document editor has focus. Save, undo, redo and refresh work as anywhere else;
+	/// scene-only commands such as New Scene do nothing rather than act on a window the user is not
+	/// looking at.
 	/// </summary>
-	private void RunDocumentShortcut(IEditorDocumentEditor document, EditorShortcutCommand shortcut)
+	private void RunFocusedEditorShortcut(IEditorDocumentEditor editor, EditorShortcutCommand shortcut)
 	{
 		switch (shortcut)
 		{
 			case EditorShortcutCommand.Undo:
-				document.Undo();
+				UndoActiveDocument();
 				break;
 			case EditorShortcutCommand.Redo:
-				document.Redo();
+				RedoActiveDocument();
 				break;
-			case EditorShortcutCommand.SaveScene:
-				document.Save();
+			case EditorShortcutCommand.Save:
+				SaveActiveDocument();
 				break;
 			case EditorShortcutCommand.RefreshAssetDatabase:
 				RefreshAssetDatabase();
 				break;
 			case EditorShortcutCommand.DuplicateFocusedSelection:
-				document.DuplicateSelection();
+				editor.DuplicateSelection();
 				break;
 			case EditorShortcutCommand.DeleteFocusedSelection:
-				document.DeleteSelection();
+				editor.DeleteSelection();
 				break;
 		}
 	}
@@ -807,6 +880,48 @@ public sealed class EditorCommandService : IEditorCommandService
 	private bool CanSaveScene()
 	{
 		return _projectService.HasOpenProject && _playSession.IsActive == false;
+	}
+
+	/// <summary>The open scene as a document, so a workspace can own it like any other.</summary>
+	private sealed class EditorSceneDocument : IEditorDocument
+	{
+		private readonly EditorCommandService _commands;
+
+		public EditorSceneDocument(EditorCommandService commands)
+		{
+			_commands = commands;
+		}
+
+		public EditorDocumentKind Kind => EditorDocumentKind.Scene;
+
+		public string? DisplayName
+		{
+			get
+			{
+				var name = _commands._sceneWorkspace.CurrentScene.Name;
+				return string.IsNullOrWhiteSpace(name) ? "Untitled Scene" : name;
+			}
+		}
+
+		public bool IsDirty => _commands._interactionState.IsSceneDirty;
+		public bool CanSave => _commands.CanSaveScene();
+		public bool CanUndo => _commands._undoRedoService.CanUndo;
+		public bool CanRedo => _commands._undoRedoService.CanRedo;
+
+		public bool Save()
+		{
+			return _commands.SaveScene();
+		}
+
+		public bool Undo()
+		{
+			return _commands._undoRedoService.Undo();
+		}
+
+		public bool Redo()
+		{
+			return _commands._undoRedoService.Redo();
+		}
 	}
 
 	private bool IsPrimaryModifierDown()

@@ -6,7 +6,7 @@ internal enum EditorShortcutCommand
 	Undo,
 	Redo,
 	NewScene,
-	SaveScene,
+	Save,
 	RefreshAssetDatabase,
 	DuplicateFocusedSelection,
 	ClearEntitySelection,
@@ -57,7 +57,7 @@ internal static class EditorShortcutCommandResolver
 
 			if (snapshot.SavePressed)
 			{
-				return EditorShortcutCommand.SaveScene;
+				return EditorShortcutCommand.Save;
 			}
 
 			if (snapshot.RefreshPressed)

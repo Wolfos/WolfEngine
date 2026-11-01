@@ -96,11 +96,6 @@ public sealed class AnimationClipInspectorWindow : EditorWindow
 			DrawBindingPickers();
 		}
 
-		if (_session.CanEditMetadata)
-		{
-			DrawDocumentButtons();
-		}
-
 		ImGui.BeginDisabled(_session.CanEdit == false || _session.IsEditing);
 
 		if (DrawCommittedInt("FPS", _session.FramesPerSecond, ref _framesPerSecondField, out var framesPerSecond))
@@ -241,34 +236,6 @@ public sealed class AnimationClipInspectorWindow : EditorWindow
 		asset.IsGenerated
 			? $"{asset.Name} ({asset.RelativeSourcePath})"
 			: asset.RelativeSourcePath;
-
-	private void DrawDocumentButtons()
-	{
-		var document = _session.MetadataDocument!;
-		ImGui.BeginDisabled(document.IsDirty == false || _session.IsEditing);
-		if (ImGui.Button("Save"))
-		{
-			_session.Save();
-		}
-
-		ImGui.EndDisabled();
-		ImGui.SameLine();
-		ImGui.BeginDisabled(document.CanUndo == false || _session.IsEditing);
-		if (ImGui.Button("Undo"))
-		{
-			_session.Undo();
-		}
-
-		ImGui.EndDisabled();
-		ImGui.SameLine();
-		ImGui.BeginDisabled(document.CanRedo == false || _session.IsEditing);
-		if (ImGui.Button("Redo"))
-		{
-			_session.Redo();
-		}
-
-		ImGui.EndDisabled();
-	}
 
 	/// <summary>
 	/// An integer field that reports a value only once editing finishes (Enter, Tab or clicking away),

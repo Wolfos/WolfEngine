@@ -1,6 +1,11 @@
 namespace WolfEngine.Editor.Automation;
 
-public sealed record EditorWorkspaceSummaryResult(Guid Id, string Name, IReadOnlyList<string> OpenWindowIds);
+public sealed record EditorWorkspaceSummaryResult(
+	Guid Id,
+	string Name,
+	string OwnedDocument,
+	bool OwnedDocumentHasUnsavedChanges,
+	IReadOnlyList<string> OpenWindowIds);
 
 public sealed record EditorWorkspaceStateResult(
 	Guid ActiveWorkspaceId,
