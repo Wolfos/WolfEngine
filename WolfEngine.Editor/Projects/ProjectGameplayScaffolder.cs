@@ -112,7 +112,7 @@ internal static class ProjectGameplayScaffolder
 			  
 			  public sealed class GameplayModule : IGameplayModule
 			  {
-			  	public IEnumerable<ISystem> CreateSystems()
+			  	public IEnumerable<ISystem> CreateSystems(IServiceProvider serviceProvider)
 			  	{
 			  		yield break;
 			  	}
