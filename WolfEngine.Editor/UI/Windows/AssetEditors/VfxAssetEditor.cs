@@ -252,23 +252,14 @@ public sealed partial class VfxAssetEditor : IDisposable
 
 	private void DrawModelPicker(VfxPreviewScene preview)
 	{
-		var current = _project.TryGetAsset(_modelId, out var modelAsset) ? modelAsset.Name : "None";
-		EditorUIUtility.Combo("Preview model", current, () =>
+		var model = _modelId;
+		if (_propertyDrawers.DrawAssetPicker(
+			    "Preview model",
+			    ref model,
+			    asset => asset.Type is AssetType.Model3D or AssetType.Prefab))
 		{
-			if (ImGui.Selectable("None", _modelId == Guid.Empty))
-			{
-				SetModel(preview, Guid.Empty);
-			}
-
-			foreach (var asset in _project.CurrentAssetDatabase.Assets)
-			{
-				if (asset.Type is AssetType.Model3D or AssetType.Prefab &&
-				    ImGui.Selectable(asset.Name + "##" + asset.Id, _modelId == asset.Id))
-				{
-					SetModel(preview, asset.Id);
-				}
-			}
-		});
+			SetModel(preview, model);
+		}
 
 		if (_modelId == Guid.Empty)
 		{

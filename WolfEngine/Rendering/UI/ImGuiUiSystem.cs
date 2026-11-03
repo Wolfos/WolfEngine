@@ -76,6 +76,11 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		var io = ImGui.GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 		io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
+		if (OperatingSystem.IsMacOS())
+		{
+			Platform.SdlImGuiClipboard.Install(ImGui.GetPlatformIO());
+		}
+
 		ApplyDefaultStyle();
 
 		RebuildFonts(1.0f);

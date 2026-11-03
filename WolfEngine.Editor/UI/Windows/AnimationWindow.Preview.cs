@@ -18,24 +18,12 @@ public sealed partial class AnimationWindow
 		var model = _modelId;
 		var set = _previewSet;
 		var changed = false;
-		var current = _project.TryGetAsset(model, out var modelAsset) ? modelAsset.Name : "None";
-		EditorUIUtility.Combo("Preview model / prefab", current, () =>
-		{
-			if (ImGui.Selectable("None", model == Guid.Empty))
-			{
-				model = Guid.Empty;
-				changed = true;
-			}
-
-			foreach (var asset in _project.CurrentAssetDatabase.Assets)
-			{
-				if (asset.Type is AssetType.Model3D or AssetType.Prefab && ImGui.Selectable(asset.Name + "##" + asset.Id, model == asset.Id))
-				{
-					model = asset.Id;
-					changed = true;
-				}
-			}
-		});
+		var selectionButton = new AssetLinkSelectionButton(_icons.Get("search"), assetId => _selection.Select(assetId));
+		changed |= _propertyDrawerRegistry.DrawAssetPicker(
+			"Preview model / prefab",
+			ref model,
+			asset => asset.Type is AssetType.Model3D or AssetType.Prefab,
+			selectionButton);
 		changed |= DrawAssetRef("Preview clip set", ref set);
 		_modelId = model;
 		_previewSet = set;

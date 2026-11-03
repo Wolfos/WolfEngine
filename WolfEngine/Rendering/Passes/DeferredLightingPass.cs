@@ -121,14 +121,14 @@ public sealed class DeferredLightingPass
 		var shadowMapDepth2 = context.GetTexture(resources.ShadowMapDepth2);
 		var fogIntegrated = resources.FogIntegrated.IsValid ? context.GetTexture(resources.FogIntegrated) : null;
 
-		var environment = sharedResources.SkyboxEnvironment.IsValid
-			? context.GetTexture(sharedResources.SkyboxEnvironment)
+		var environment = resources.SkyboxEnvironment.IsValid
+			? context.GetTexture(resources.SkyboxEnvironment)
 			: emissive;
-		var irradiance = sharedResources.SkyboxIrradiance.IsValid
-			? context.GetTexture(sharedResources.SkyboxIrradiance)
+		var irradiance = resources.SkyboxIrradiance.IsValid
+			? context.GetTexture(resources.SkyboxIrradiance)
 			: emissive;
-		var prefilter = sharedResources.SkyboxPrefilter.IsValid
-			? context.GetTexture(sharedResources.SkyboxPrefilter)
+		var prefilter = resources.SkyboxPrefilter.IsValid
+			? context.GetTexture(resources.SkyboxPrefilter)
 			: emissive;
 		var brdfLut = sharedResources.SkyboxBrdfLut.IsValid
 			? context.GetTexture(sharedResources.SkyboxBrdfLut)

@@ -131,6 +131,9 @@ internal sealed class RenderViewState
 	// are recorded: with several views in one graph, a builder field would hold whichever view was recorded
 	// last by the time any pass ran.
 	public RenderViewResources FrameResources;
+
+	/// <summary>This view's procedural sky, built from its own sun and sky settings.</summary>
+	public readonly ProceduralSky Sky = new();
 	public readonly List<RenderGraphFrameBuilder.SceneDebugViewRegistration> SceneDebugViews = [];
 	public SceneDebugViewOption[] SceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
 	public string RequestedSceneDebugViewId = SceneDebugViewIds.FinalColor;
@@ -269,6 +272,7 @@ internal sealed class RenderViewState
 		ReleaseColorPyramidResources();
 		ReleaseDdgiHistoryResources();
 		ReleaseFinalGatherHistoryResources();
+		Sky.Release();
 		SceneRenderTarget.Release(device);
 		PresentedSceneTarget.Release(device);
 		SceneRenderSize = Int2.Zero;

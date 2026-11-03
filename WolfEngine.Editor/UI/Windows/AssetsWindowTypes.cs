@@ -92,7 +92,7 @@ internal sealed record PendingRenameTarget(
 	public static PendingRenameTarget ForSource(string relativeSourcePath)
 	{
 		var fileName = Path.GetFileName(relativeSourcePath);
-		var suffix = GetAssetSourceSuffix(fileName);
+		var suffix = AssetSourceSuffix.Get(fileName);
 		var editableName = suffix.Length == 0 ? fileName : fileName[..^suffix.Length];
 		return new PendingRenameTarget(
 			RenameTargetKind.Source,
@@ -111,27 +111,6 @@ internal sealed record PendingRenameTarget(
 			folderName,
 			string.Empty,
 			"Rename Folder");
-	}
-
-	private static string GetAssetSourceSuffix(string fileName)
-	{
-		string[] compoundSuffixes =
-		[
-			MaterialAsset.FileExtension,
-			DataAssetFile.FileExtension,
-			EditorSceneAssetFile.FileExtension,
-			PrefabAssetFile.FileExtension
-		];
-
-		for (var i = 0; i < compoundSuffixes.Length; i++)
-		{
-			if (fileName.EndsWith(compoundSuffixes[i], StringComparison.OrdinalIgnoreCase))
-			{
-				return fileName[^compoundSuffixes[i].Length..];
-			}
-		}
-
-		return Path.GetExtension(fileName);
 	}
 }
 

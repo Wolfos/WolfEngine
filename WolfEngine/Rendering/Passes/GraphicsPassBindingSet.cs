@@ -78,7 +78,7 @@ public sealed class GraphicsPassBindingSet
 
 		foreach (var constantBuffer in reflection.ConstantBuffersByName.Values)
 		{
-			if (IsBindlessResource(constantBuffer.Name, constantBuffer.RegisterIndex) ||
+			if (BindlessReflection.IsBindlessResource(constantBuffer.Name, constantBuffer.RegisterIndex) ||
 			    IsIndirectCommandConstant(constantBuffer.Name) ||
 			    perDrawResourceNames.Contains(constantBuffer.Name))
 				continue;
@@ -88,7 +88,7 @@ public sealed class GraphicsPassBindingSet
 
 		foreach (var resource in reflection.ResourcesByName.Values)
 		{
-			if (IsBindlessResource(resource.Name, resource.RegisterIndex) || perDrawResourceNames.Contains(resource.Name))
+			if (BindlessReflection.IsBindlessResource(resource.Name, resource.RegisterIndex) || perDrawResourceNames.Contains(resource.Name))
 				continue;
 			bindings.Add(new GraphicsPassBinding(resource.RegisterIndex, GraphicsPassBindingKind.StructuredBuffer,
 				ResolveRequiredResource(runtimeResources, resource.Name), ToPassVisibility(resource.Visibility), resource.Name));
@@ -112,11 +112,6 @@ public sealed class GraphicsPassBindingSet
 
 	private static bool IsIndirectCommandConstant(string name) =>
 		name.Equals(IndirectCommandConstantBufferName, StringComparison.Ordinal);
-
-	private static bool IsBindlessResource(string name, uint registerIndex) =>
-		registerIndex == 27 || name.Equals("BindlessCounts", StringComparison.Ordinal) ||
-		name.Contains("Heap", StringComparison.Ordinal) || name.StartsWith("g_Textures", StringComparison.Ordinal) ||
-		name.StartsWith("g_RWTextures", StringComparison.Ordinal) || name.StartsWith("g_Samplers", StringComparison.Ordinal);
 
 	private static GraphicsPassBindingVisibility ToPassVisibility(ShaderStage visibility) =>
 		visibility switch

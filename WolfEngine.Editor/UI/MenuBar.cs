@@ -374,15 +374,7 @@ public sealed class MenuBar : IMenuBar
 			});
 			if (string.IsNullOrWhiteSpace(selectedFolder) == false)
 			{
-				_operationService.TryStart(
-					"Opening project",
-					progress =>
-					{
-						progress.Report("Loading project assets...");
-						if (_projectService.OpenProject(selectedFolder, out var errorMessage) == false) throw new InvalidOperationException(errorMessage);
-					},
-					completed: PersistLastOpenedProject,
-					failed: exception => ShowError($"Failed to open project: {exception.Message}"));
+				_commandService.RequestOpenProject(selectedFolder);
 			}
 		}
 
@@ -920,15 +912,9 @@ public sealed class MenuBar : IMenuBar
 		ImGui.Spacing();
 		if (ImGui.Button("Create", new Vector2(100.0f, 0.0f)))
 		{
-			if (_projectService.CreateProject(_newProjectParentFolder, _newProjectName, out var errorMessage))
-			{
-				PersistLastOpenedProject();
-				ImGui.CloseCurrentPopup();
-			}
-			else
-			{
-				ShowError(errorMessage);
-			}
+			// Errors are reported once the scene is closed and the project is created in the background.
+			_commandService.RequestCreateProject(_newProjectParentFolder, _newProjectName);
+			ImGui.CloseCurrentPopup();
 		}
 
 		ImGui.SameLine();
@@ -970,11 +956,5 @@ public sealed class MenuBar : IMenuBar
 	private void ShowError(string errorMessage)
 	{
 		_notificationService.ReportError(errorMessage);
-	}
-
-	private void PersistLastOpenedProject()
-	{
-		EditorPreferences.SetLastProjectPath(_projectService.ProjectRootPath);
-		EditorPreferences.Save();
 	}
 }

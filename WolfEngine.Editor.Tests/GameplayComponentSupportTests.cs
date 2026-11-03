@@ -1096,6 +1096,15 @@ public sealed class GameplayComponentSupportTests
 			SeenContexts.Add(context);
 			return _draw(context);
 		}
+
+		public bool DrawAssetPicker(
+			string label,
+			ref Guid assetId,
+			Func<AssetDatabaseEntry, bool> isCandidate,
+			AssetLinkSelectionButton? selectionButton = null)
+		{
+			return false;
+		}
 	}
 
 	private sealed class TestAssetInstanceRegistry : IAssetInstanceRegistry

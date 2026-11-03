@@ -72,7 +72,6 @@ public sealed class DdgiPass
 	public DdgiPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
-		RenderFrameSharedResources sharedResources,
 		IGfxDevice device,
 		IRenderer renderer,
 		GpuDrawResources gpuDrawResources,
@@ -193,8 +192,8 @@ public sealed class DdgiPass
 			ProbeActivityMarksHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeActivityMarks)),
 			ProbeActivityMarksTexture = context.GetTexture(resources.DdgiProbeActivityMarks),
 			ProbeRelocationDecisionHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeRelocationDecision)),
-			EnvironmentHandle = sharedResources.SkyboxEnvironment.IsValid
-				? _bindlessRegistry.GetTextureHandle(context.GetTexture(sharedResources.SkyboxEnvironment))
+			EnvironmentHandle = resources.SkyboxEnvironment.IsValid
+				? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.SkyboxEnvironment))
 				: DescriptorHandle.Invalid,
 				SamplerHandle = _linearSampler,
 				ErrorTextureHandle = _bindlessRegistry.ErrorTextureHandle,

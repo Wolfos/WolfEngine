@@ -32,7 +32,6 @@ public sealed class DdgiFinalGatherPass
 	public DdgiFinalGatherPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
-		RenderFrameSharedResources sharedResources,
 		IGfxDevice device,
 		IRenderer renderer,
 		GpuDrawResources gpuDrawResources,
@@ -57,11 +56,11 @@ public sealed class DdgiFinalGatherPass
 		var ddgiConfig = resources.Config.DiffuseGlobalIllumination;
 		var settings = ddgiConfig.FinalGather;
 		var emissiveFallback = context.GetTexture(resources.GBufferEmissive);
-		var environment = sharedResources.SkyboxEnvironment.IsValid
-			? context.GetTexture(sharedResources.SkyboxEnvironment)
+		var environment = resources.SkyboxEnvironment.IsValid
+			? context.GetTexture(resources.SkyboxEnvironment)
 			: emissiveFallback;
-		var irradiance = sharedResources.SkyboxIrradiance.IsValid
-			? context.GetTexture(sharedResources.SkyboxIrradiance)
+		var irradiance = resources.SkyboxIrradiance.IsValid
+			? context.GetTexture(resources.SkyboxIrradiance)
 			: emissiveFallback;
 		var outputTexture = context.GetTexture(resources.DdgiFinalGatherTrace);
 		var directLight = DdgiPass.GetPrimaryDirectionalLight(sceneData);

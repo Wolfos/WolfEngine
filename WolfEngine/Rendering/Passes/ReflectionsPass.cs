@@ -69,14 +69,14 @@ public sealed class ReflectionsPass
 		}
 
 		var emissiveFallback = context.GetTexture(resources.GBufferEmissive);
-		var environment = sharedResources.SkyboxEnvironment.IsValid
-			? context.GetTexture(sharedResources.SkyboxEnvironment)
+		var environment = resources.SkyboxEnvironment.IsValid
+			? context.GetTexture(resources.SkyboxEnvironment)
 			: emissiveFallback;
-		var irradiance = sharedResources.SkyboxIrradiance.IsValid
-			? context.GetTexture(sharedResources.SkyboxIrradiance)
+		var irradiance = resources.SkyboxIrradiance.IsValid
+			? context.GetTexture(resources.SkyboxIrradiance)
 			: emissiveFallback;
-		var prefiltered = sharedResources.SkyboxPrefilter.IsValid
-			? context.GetTexture(sharedResources.SkyboxPrefilter)
+		var prefiltered = resources.SkyboxPrefilter.IsValid
+			? context.GetTexture(resources.SkyboxPrefilter)
 			: emissiveFallback;
 		var brdfLut = sharedResources.SkyboxBrdfLut.IsValid
 			? context.GetTexture(sharedResources.SkyboxBrdfLut)

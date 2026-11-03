@@ -48,22 +48,10 @@ public sealed class SkyboxPass
 	private ShaderPropertyWriter? _iblBrdfWriter;
 	private ShaderPropertyWriter? _proceduralBindlessWriter;
 	private ShaderPropertyWriter? _proceduralSkyParamsWriter;
-	private SkyboxResources? _proceduralSkybox;
-	private IGfxTexture? _proceduralEnvironment;
-	private IGfxTexture? _proceduralIrradiance;
-	private IGfxTexture? _proceduralPrefilter;
+	// The BRDF LUT depends on nothing about the sky, so every view's procedural sky shares this one.
 	private IGfxTexture? _proceduralBrdfLut;
-	private float _currentSunIntensityScale = 1.0f;
-	private float _lastGeneratedSunIntensityScale = 1.0f;
-	private Vector3 _currentSunDirection = Vector3.UnitY;
-	private Vector3 _lastGeneratedSunDirection = Vector3.UnitY;
-	private Config _currentConfig;
-	private Config _lastGeneratedConfig;
-	private bool _hasGeneratedSunDirection;
-	private bool _hasGeneratedConfig;
-	private bool _proceduralLightingValid;
 	private bool _proceduralBrdfValid;
-	private bool _hasGeneratedProceduralContent;
+	private bool _hasGeneratedBrdfLut;
 
 	public SkyboxPass(IRenderer renderer, IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -72,12 +60,14 @@ public sealed class SkyboxPass
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
-	public bool ShouldRecordProceduralLightingUpdate { get; private set; }
-
 	public bool ShouldRecordBrdfLutUpdate { get; private set; }
 
-	public ResourceState ProceduralResourcesInitialState =>
-		_hasGeneratedProceduralContent ? ResourceState.ShaderResource : ResourceState.UnorderedAccess;
+	public ResourceState BrdfLutInitialState => _hasGeneratedBrdfLut
+		? ResourceState.ShaderResource
+		: ResourceState.UnorderedAccess;
+
+	public IGfxTexture ProceduralBrdfLut => _proceduralBrdfLut
+		?? throw new InvalidOperationException("Procedural BRDF LUT texture was not created.");
 
 	public SkyboxResources CreateSkyboxResourcesIbl(Texture environmentTexture)
 	{
@@ -104,49 +94,58 @@ public sealed class SkyboxPass
 		};
 	}
 
-	public void PrepareFrame(IGfxDevice gfxDevice, Vector3 sunDirection, float sunIntensityScale, Config config)
+	/// <summary>Creates the shared BRDF LUT on first use and reports whether this frame must generate it.</summary>
+	public void PrepareBrdfLut(IGfxDevice gfxDevice)
 	{
 		ArgumentNullException.ThrowIfNull(gfxDevice);
 
-		EnsureProceduralResources(gfxDevice, out var createdResources);
+		if (_proceduralBrdfLut is null)
+		{
+			_proceduralBrdfLut = gfxDevice.CreateTexture(new TextureDescriptor(
+				BrdfSize,
+				BrdfSize,
+				TextureFormat.Rgba16Float,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
+			_proceduralBrdfValid = false;
+			_hasGeneratedBrdfLut = false;
+		}
 
-		_currentSunDirection = sunDirection == Vector3.Zero
+		ShouldRecordBrdfLutUpdate = _proceduralBrdfValid == false;
+	}
+
+	/// <summary>
+	/// Creates <paramref name="sky"/>'s textures on first use and records this frame's sun and settings, setting
+	/// <see cref="ProceduralSky.ShouldRecordLightingUpdate"/> when they differ from what it was last generated with.
+	/// </summary>
+	internal void PrepareSky(IGfxDevice gfxDevice, ProceduralSky sky, Vector3 sunDirection, float sunIntensityScale, Config config)
+	{
+		ArgumentNullException.ThrowIfNull(gfxDevice);
+		ArgumentNullException.ThrowIfNull(sky);
+
+		var createdResources = EnsureSkyTextures(gfxDevice, sky);
+		sky.SunDirection = sunDirection == Vector3.Zero
 			? Vector3.UnitY
 			: Vector3.Normalize(sunDirection);
-		_currentSunIntensityScale = Math.Clamp(sunIntensityScale, 0.0f, 1.0f);
-		_currentConfig = config;
+		sky.SunIntensityScale = Math.Clamp(sunIntensityScale, 0.0f, 1.0f);
+		sky.Config = config;
 
-		var sunChanged = _hasGeneratedSunDirection == false ||
-		                 Vector3.DistanceSquared(_lastGeneratedSunDirection, _currentSunDirection) > SunDirectionEpsilonSquared ||
-		                 MathF.Abs(_lastGeneratedSunIntensityScale - _currentSunIntensityScale) > SunIntensityScaleEpsilon;
-		var skyboxSettingsChanged = _hasGeneratedConfig == false || ConfigsDiffer(_lastGeneratedConfig, _currentConfig);
+		var sunChanged = Vector3.DistanceSquared(sky.GeneratedSunDirection, sky.SunDirection) > SunDirectionEpsilonSquared ||
+		                 MathF.Abs(sky.GeneratedSunIntensityScale - sky.SunIntensityScale) > SunIntensityScaleEpsilon;
+		var skyboxSettingsChanged = ConfigsDiffer(sky.GeneratedConfig, sky.Config);
 
-		ShouldRecordProceduralLightingUpdate = createdResources || _proceduralLightingValid == false || sunChanged || skyboxSettingsChanged;
-		ShouldRecordBrdfLutUpdate = createdResources || _proceduralBrdfValid == false;
-
-		_proceduralSkybox = new SkyboxResources
-		{
-			EnvironmentTexture = _proceduralEnvironment
-			                     ?? throw new InvalidOperationException("Procedural environment texture was not created."),
-			IrradianceTexture = _proceduralIrradiance
-			                    ?? throw new InvalidOperationException("Procedural irradiance texture was not created."),
-			PrefilteredEnvironment = _proceduralPrefilter
-			                         ?? throw new InvalidOperationException("Procedural prefilter texture was not created."),
-			BrdfLut = _proceduralBrdfLut
-			          ?? throw new InvalidOperationException("Procedural BRDF LUT texture was not created.")
-		};
+		sky.ShouldRecordLightingUpdate = createdResources ||
+			sky.HasGeneratedContent == false ||
+			sunChanged ||
+			skyboxSettingsChanged;
 	}
 
-	public SkyboxResources GetProceduralResources()
-	{
-		return _proceduralSkybox ?? throw new InvalidOperationException("Procedural skybox resources are not prepared.");
-	}
-
-	public void RecordEnvironment(RenderGraphContext context, Config config)
+	internal void RecordEnvironment(RenderGraphContext context, ProceduralSky sky)
 	{
 		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(sky);
 
-		var environment = _proceduralEnvironment ?? throw new InvalidOperationException("Procedural environment texture was not created.");
+		var config = sky.Config;
+		var environment = sky.Environment ?? throw new InvalidOperationException("Procedural environment texture was not created.");
 		var pipeline = GetProceduralSkyboxPipeline(GetGfxDevice());
 		var commandList = context.CommandList;
 		commandList.BindPipeline(pipeline);
@@ -162,7 +161,7 @@ public sealed class SkyboxPass
 		var skyParamsWriter = _proceduralSkyParamsWriter
 			?? throw new InvalidOperationException("Procedural skybox parameter writer was not initialized.");
 		skyParamsWriter.Clear();
-		skyParamsWriter.SetVector4("sunDirectionIntensity", new Vector4(_currentSunDirection, config.Intensity * _currentSunIntensityScale));
+		skyParamsWriter.SetVector4("sunDirectionIntensity", new Vector4(sky.SunDirection, config.Intensity * sky.SunIntensityScale));
 		skyParamsWriter.SetVector4("sunColorSharpness", new Vector4(config.SunColor.X, config.SunColor.Y, config.SunColor.Z, config.SunSharpness));
 		skyParamsWriter.SetColorRGBA("skyTop", config.TopColor);
 		skyParamsWriter.SetColorRGBA("skyHorizon", config.HorizonColor);
@@ -175,29 +174,28 @@ public sealed class SkyboxPass
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
-	public void RecordIrradiance(RenderGraphContext context)
+	internal void RecordIrradiance(RenderGraphContext context, ProceduralSky sky)
 	{
 		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(sky);
 
-		var environment = _proceduralEnvironment ?? throw new InvalidOperationException("Procedural environment texture was not created.");
-		var irradiance = _proceduralIrradiance ?? throw new InvalidOperationException("Procedural irradiance texture was not created.");
+		var environment = sky.Environment ?? throw new InvalidOperationException("Procedural environment texture was not created.");
+		var irradiance = sky.Irradiance ?? throw new InvalidOperationException("Procedural irradiance texture was not created.");
 		RecordIrradiance(context.CommandList, GetGfxDevice(), environment, irradiance, GetSkyboxSamplerHandle(GetGfxDevice()));
 	}
 
-	public void RecordPrefilter(RenderGraphContext context)
+	internal void RecordPrefilter(RenderGraphContext context, ProceduralSky sky)
 	{
 		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(sky);
 
-		var environment = _proceduralEnvironment ?? throw new InvalidOperationException("Procedural environment texture was not created.");
-		var prefilter = _proceduralPrefilter ?? throw new InvalidOperationException("Procedural prefilter texture was not created.");
+		var environment = sky.Environment ?? throw new InvalidOperationException("Procedural environment texture was not created.");
+		var prefilter = sky.Prefilter ?? throw new InvalidOperationException("Procedural prefilter texture was not created.");
 		RecordPrefilter(context.CommandList, GetGfxDevice(), environment, prefilter, GetSkyboxSamplerHandle(GetGfxDevice()));
-		_proceduralLightingValid = true;
-		_hasGeneratedProceduralContent = true;
-		_lastGeneratedSunDirection = _currentSunDirection;
-		_lastGeneratedSunIntensityScale = _currentSunIntensityScale;
-		_hasGeneratedSunDirection = true;
-		_lastGeneratedConfig = _currentConfig;
-		_hasGeneratedConfig = true;
+		sky.HasGeneratedContent = true;
+		sky.GeneratedSunDirection = sky.SunDirection;
+		sky.GeneratedSunIntensityScale = sky.SunIntensityScale;
+		sky.GeneratedConfig = sky.Config;
 	}
 
 	public void RecordBrdfLut(RenderGraphContext context)
@@ -207,7 +205,7 @@ public sealed class SkyboxPass
 		var brdfLut = _proceduralBrdfLut ?? throw new InvalidOperationException("Procedural BRDF LUT texture was not created.");
 		RecordBrdfLut(context.CommandList, GetGfxDevice(), brdfLut);
 		_proceduralBrdfValid = true;
-		_hasGeneratedProceduralContent = true;
+		_hasGeneratedBrdfLut = true;
 	}
 
 	private (IGfxTexture Irradiance, IGfxTexture Prefiltered, IGfxTexture BrdfLut) GenerateIblMaps(
@@ -323,60 +321,33 @@ public sealed class SkyboxPass
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
-	private void EnsureProceduralResources(IGfxDevice gfxDevice, out bool createdResources)
+	private static bool EnsureSkyTextures(IGfxDevice gfxDevice, ProceduralSky sky)
 	{
-		createdResources = false;
-
-		if (_proceduralEnvironment is null)
+		if (sky.HasTextures)
 		{
-			_proceduralEnvironment = gfxDevice.CreateTexture(new TextureDescriptor(
-				ProceduralEnvWidth,
-				ProceduralEnvHeight,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
-			createdResources = true;
+			return false;
 		}
 
-		if (_proceduralIrradiance is null)
-		{
-			_proceduralIrradiance = gfxDevice.CreateTexture(new TextureDescriptor(
-				IrradianceSize,
-				IrradianceSize,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
-			createdResources = true;
-		}
+		// A partly created sky is released whole, so its three textures always come from one device.
+		sky.Release();
+		sky.SetDevice(gfxDevice);
+		sky.Environment = gfxDevice.CreateTexture(new TextureDescriptor(
+			ProceduralEnvWidth,
+			ProceduralEnvHeight,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
+		sky.Irradiance = gfxDevice.CreateTexture(new TextureDescriptor(
+			IrradianceSize,
+			IrradianceSize,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
+		sky.Prefilter = gfxDevice.CreateTexture(new TextureDescriptor(
+			PrefilterWidth,
+			PrefilterSliceHeight * PrefilterSlices,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
 
-		if (_proceduralPrefilter is null)
-		{
-			_proceduralPrefilter = gfxDevice.CreateTexture(new TextureDescriptor(
-				PrefilterWidth,
-				PrefilterSliceHeight * PrefilterSlices,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
-			createdResources = true;
-		}
-
-		if (_proceduralBrdfLut is null)
-		{
-			_proceduralBrdfLut = gfxDevice.CreateTexture(new TextureDescriptor(
-				BrdfSize,
-				BrdfSize,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
-			createdResources = true;
-		}
-
-		if (createdResources)
-		{
-			_proceduralLightingValid = false;
-			_proceduralBrdfValid = false;
-			_hasGeneratedProceduralContent = false;
-			_hasGeneratedSunDirection = false;
-			_hasGeneratedConfig = false;
-			_currentSunIntensityScale = 1.0f;
-			_lastGeneratedSunIntensityScale = 1.0f;
-		}
+		return true;
 	}
 
 	private static bool ConfigsDiffer(in Config left, in Config right)

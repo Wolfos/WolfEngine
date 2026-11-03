@@ -924,14 +924,9 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			}
 		}
 
-		// Shared setup takes its sun and sky from the primary view; see BeginSharedFrame.
 		_frameBuilder.SetGameplayUiFrame(_gameplayUiFrame);
 		_frameBuilder.BeginRenderFeatures(RenderFeatures);
-		_frameBuilder.BeginSharedFrame(
-			frameBufferSize,
-			primarySnapshot.SunDirection,
-			primarySnapshot.SunIntensityScale,
-			primarySnapshot.Config.SkyboxConfig);
+		_frameBuilder.BeginSharedFrame(frameBufferSize);
 
 		var now = Stopwatch.GetTimestamp();
 		_sceneColorHandles.Clear();
@@ -1014,7 +1009,9 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				renderSceneToViewport || renderSceneToWindow,
 				viewSnapshot.DecalPackets.Count > 0,
 				viewSnapshot.Config,
-				viewCameraPosition);
+				viewCameraPosition,
+				viewSnapshot.SunDirection,
+				viewSnapshot.SunIntensityScale);
 			_frameBuilder.SetViewRenderFeatures(viewSnapshot.RenderFeatureFrames);
 			_frameBuilder.SetViewVfx(viewSnapshot.VfxFrame);
 		}

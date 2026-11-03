@@ -29,6 +29,18 @@ public readonly record struct AssetLinkSelectionButton(
 public interface IPropertyDrawerRegistry
 {
 	PropertyDrawerResult Draw(PropertyDrawerContext context);
+
+	/// <summary>
+	/// Draws the picker the generic inspectors use for asset fields, offering the project assets
+	/// <paramref name="isCandidate"/> accepts. For a field that takes more than one asset type, where
+	/// <see cref="PropertyDrawerRegistryExtensions.DrawAssetRef{T}"/> cannot describe it. Returns true when the
+	/// choice changed.
+	/// </summary>
+	bool DrawAssetPicker(
+		string label,
+		ref Guid assetId,
+		Func<AssetDatabaseEntry, bool> isCandidate,
+		AssetLinkSelectionButton? selectionButton = null);
 }
 
 public static class PropertyDrawerRegistryExtensions
@@ -219,11 +231,68 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			? asset
 			: null;
 
-		var nextId = currentId;
-		var changed = false;
-		EditorUIUtility.PopupButton(
+		var changed = DrawAssetPickerPopup(
 			context.Label,
 			AssetLinkPickerLogic.GetPreviewLabel(_projectService.HasOpenProject, currentId, currentAsset, descriptor, authoringTypeName, authoringTypeId),
+			currentId,
+			candidates,
+			context.AssetLinkSelectionButton,
+			out var nextId);
+
+		result = changed
+			? new PropertyDrawerResult(true, true, CreateAssetLinkValue(valueType, nextId))
+			: new PropertyDrawerResult(true, false, context.Value);
+		return true;
+	}
+
+	public bool DrawAssetPicker(
+		string label,
+		ref Guid assetId,
+		Func<AssetDatabaseEntry, bool> isCandidate,
+		AssetLinkSelectionButton? selectionButton = null)
+	{
+		ArgumentNullException.ThrowIfNull(isCandidate);
+
+		var candidates = _projectService.HasOpenProject
+			? _projectService.CurrentAssetCatalog.Assets
+				.Select(mounted => mounted.Asset)
+				.Where(isCandidate)
+				.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+				.ToList()
+			: [];
+		var currentAsset = _projectService.HasOpenProject && _projectService.TryGetAsset(assetId, out var asset)
+			? asset
+			: null;
+		var previewLabel = assetId == Guid.Empty
+			? "None"
+			: currentAsset is null
+				? "Missing"
+				: isCandidate(currentAsset)
+					? currentAsset.Name
+					: "Invalid";
+		if (DrawAssetPickerPopup(label, previewLabel, assetId, candidates, selectionButton, out var chosenId) == false)
+		{
+			return false;
+		}
+
+		assetId = chosenId;
+		return true;
+	}
+
+	/// <summary>The searchable asset popup behind every asset field. Returns true when the choice changed.</summary>
+	private bool DrawAssetPickerPopup(
+		string label,
+		string previewLabel,
+		Guid currentId,
+		IReadOnlyList<AssetDatabaseEntry> candidates,
+		AssetLinkSelectionButton? selectionButton,
+		out Guid chosenId)
+	{
+		var selectedId = currentId;
+		var changed = false;
+		EditorUIUtility.PopupButton(
+			label,
+			previewLabel,
 			AssetLinkPickerPopupId,
 			AssetLinkPickerSize,
 			() =>
@@ -251,7 +320,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 				{
 					if (ImGui.Selectable("None", noneSelected))
 					{
-						nextId = Guid.Empty;
+						selectedId = Guid.Empty;
 						changed = currentId != Guid.Empty;
 						ImGui.CloseCurrentPopup();
 					}
@@ -286,7 +355,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 					{
 						if (ImGui.Selectable(candidate.Name, isSelected))
 						{
-							nextId = candidate.Id;
+							selectedId = candidate.Id;
 							changed = candidate.Id != currentId;
 							ImGui.CloseCurrentPopup();
 						}
@@ -316,14 +385,12 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 				ImGui.EndChild();
 			}
 		},
-			context.AssetLinkSelectionButton is { } selectionButton
-				? () => DrawAssetLinkSelectionButton(selectionButton, currentId)
+			selectionButton is { } button
+				? () => DrawAssetLinkSelectionButton(button, currentId)
 				: null);
 
-		result = changed
-			? new PropertyDrawerResult(true, true, CreateAssetLinkValue(valueType, nextId))
-			: new PropertyDrawerResult(true, false, context.Value);
-		return true;
+		chosenId = selectedId;
+		return changed;
 	}
 
 	private static void DrawAssetLinkSelectionButton(AssetLinkSelectionButton selectionButton, Guid assetId)

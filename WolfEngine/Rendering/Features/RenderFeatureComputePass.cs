@@ -18,7 +18,6 @@ namespace WolfEngine.Rendering.Features;
 public sealed class RenderFeatureComputePass
 {
 	private const string ViewBufferName = "WolfView";
-	private const string BindlessCountsBufferName = "BindlessCounts";
 
 	private readonly RenderFeatureHost _host;
 	private readonly List<ShaderPropertyWriter> _writers = [];
@@ -62,7 +61,7 @@ public sealed class RenderFeatureComputePass
 
 		foreach (var buffer in kernel.ReflectionLayout.ConstantBuffersByName.Values)
 		{
-			if (buffer.Name == BindlessCountsBufferName)
+			if (BindlessReflection.IsBindlessResource(buffer.Name, buffer.RegisterIndex))
 			{
 				continue;
 			}

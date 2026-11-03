@@ -472,7 +472,7 @@ public sealed class EditorProjectService : IEditorProjectService
 			throw new FileNotFoundException($"Asset source '{normalizedRelativePath}' was not found.");
 		}
 
-		var suffix = GetAssetSourceSuffix(sourceName);
+		var suffix = AssetSourceSuffix.Get(sourceName);
 		var validatedName = ValidateNewFileSystemName(newName, "Asset name");
 		var newSourceName = validatedName + suffix;
 		var parentPath = ProjectPathUtility.GetFolderPath(normalizedRelativePath);
@@ -713,27 +713,6 @@ public sealed class EditorProjectService : IEditorProjectService
 				OldPath: path,
 				NewPath: ProjectPathUtility.NormalizeRelativePath(newFolderPath + "/" + path[oldPrefix.Length..])))
 			.ToList();
-	}
-
-	private static string GetAssetSourceSuffix(string fileName)
-	{
-		string[] compoundSuffixes =
-		[
-			MaterialAsset.FileExtension,
-			DataAssetFile.FileExtension,
-			EditorSceneAssetFile.FileExtension,
-			PrefabAssetFile.FileExtension
-		];
-
-		for (var i = 0; i < compoundSuffixes.Length; i++)
-		{
-			if (fileName.EndsWith(compoundSuffixes[i], StringComparison.OrdinalIgnoreCase))
-			{
-				return fileName[^compoundSuffixes[i].Length..];
-			}
-		}
-
-		return Path.GetExtension(fileName);
 	}
 
 	private static string ValidateNewFileSystemName(string newName, string label)

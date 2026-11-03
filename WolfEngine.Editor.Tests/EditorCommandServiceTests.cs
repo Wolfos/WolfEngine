@@ -475,6 +475,40 @@ public sealed class EditorCommandServiceTests
 	}
 
 	[Test]
+	public void RequestOpenProject_WithDirtyScene_QueuesConfirmationBeforeOpeningProject()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.InteractionState.MarkSceneDirty();
+
+		var completedImmediately = fixture.Service.RequestOpenProject("/other");
+
+		Assert.That(completedImmediately, Is.False);
+		Assert.That(fixture.Service.PendingSceneReplacementType, Is.EqualTo(PendingSceneReplacementKind.OpenProject));
+		fixture.ProjectService.DidNotReceive().OpenProject(Arg.Any<string>(), out Arg.Any<string>());
+		fixture.SceneWorkspace.DidNotReceive().ResetToNewScene();
+	}
+
+	[Test]
+	public void RequestOpenProject_ClosesSceneBeforeOpeningProject()
+	{
+		var fixture = CreateCommandFixture();
+		var oldSceneId = Guid.NewGuid();
+		EditorPreferences.SetLastDocumentAssetId("/project", EditorDocumentKind.Scene, oldSceneId);
+		fixture.ProjectService.OpenProject("/other", out Arg.Any<string>()).Returns(true);
+
+		var completedImmediately = fixture.Service.RequestOpenProject("/other");
+
+		Assert.That(completedImmediately, Is.True);
+		Received.InOrder(() =>
+		{
+			fixture.SceneWorkspace.ResetToNewScene();
+			fixture.ProjectService.OpenProject("/other", out Arg.Any<string>());
+		});
+		Assert.That(fixture.InteractionState.IsSceneDirty, Is.False);
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/project", EditorDocumentKind.Scene), Is.EqualTo(oldSceneId));
+	}
+
+	[Test]
 	public void ResolvePendingSceneReplacement_SaveThenNewScene_SavesAndClearsDirtyState()
 	{
 		var fixture = CreateCommandFixture();

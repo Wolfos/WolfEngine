@@ -426,6 +426,18 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_renderEncoder.SetFragmentBuffer(metalBuffer.Buffer, (nuint)offset, slot);
 	}
 
+	// Metal copies inline constants with setBytes, which aborts the process above this size instead of failing the call.
+	private const int MaxInlineConstantBytes = 4096;
+
+	private static void ThrowIfInlineConstantsTooLarge(uint slot, int length)
+	{
+		if (length <= MaxInlineConstantBytes) return;
+
+		throw new ArgumentOutOfRangeException(
+			nameof(length),
+			$"Constants for buffer slot {slot} are {length} bytes; Metal accepts at most {MaxInlineConstantBytes} bytes of inline constants. Bind a constant buffer instead.");
+	}
+
 	public void SetGraphicsConstants(uint slot, ReadOnlySpan<byte> data)
 	{
 		ThrowIfDisposed();
@@ -433,6 +445,8 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		{
 			return;
 		}
+
+		ThrowIfInlineConstantsTooLarge(slot, data.Length);
 
 		EnsureRenderEncoder();
 		fixed (byte* dataPtr = data)
@@ -449,6 +463,8 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		{
 			return;
 		}
+
+		ThrowIfInlineConstantsTooLarge(slot, data.Length);
 
 		EnsureComputeEncoder();
 		fixed (byte* dataPtr = data)

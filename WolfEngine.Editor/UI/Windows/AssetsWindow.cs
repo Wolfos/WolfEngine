@@ -83,6 +83,13 @@ public sealed partial class AssetsWindow : EditorWindow, IEditorAssetDeletionHan
 		return AssetsWindowDragDropState.MoveDragTarget(_projectService, dragTarget, targetFolderPath);
 	}
 
+	internal string SelectedFolderForTesting => _selection.SelectedFolderPath;
+
+	internal void CompleteSourceMoveForTesting(string relativePath, string movedPath)
+	{
+		CompleteSuccessfulMove(AssetBrowserDragTarget.ForSource(relativePath), movedPath);
+	}
+
 	internal void HandleCreationResultForTesting(EditorAssetCreationResult result)
 	{
 		HandleCreationResult(result);
@@ -302,14 +309,12 @@ public sealed partial class AssetsWindow : EditorWindow, IEditorAssetDeletionHan
 		switch (dragTarget.Kind)
 		{
 			case DragTargetKind.Source:
+				// The browser stays in the folder the asset was dragged from. Following the asset would open the
+				// drop folder, which is rarely where the user wants to keep working.
 				if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
 				    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
 				{
-					SelectAsset(selectedAsset, requestFocus: false);
-				}
-				else
-				{
-					_selection.SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(movedPath));
+					SelectAsset(selectedAsset, requestFocus: false, folderPath: _selection.SelectedFolderPath);
 				}
 
 				break;

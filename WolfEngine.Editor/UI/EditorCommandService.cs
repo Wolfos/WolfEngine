@@ -23,6 +23,15 @@ public interface IEditorCommandService
 	void BindDeletionHandlers(IEditorEntityDeletionHandler? entityDeletionHandler, IEditorAssetDeletionHandler? assetDeletionHandler);
 	bool RequestNewScene();
 	bool RequestLoadScene(Guid assetId);
+
+	/// <summary>
+	/// Closes the open scene, asking about unsaved changes first, then opens the project in the background, loads
+	/// its gameplay assembly and reopens the documents it last had open. Returns false while the user is asked.
+	/// </summary>
+	bool RequestOpenProject(string projectRoot);
+
+	/// <summary>Creates a project and opens it the way <see cref="RequestOpenProject"/> does.</summary>
+	bool RequestCreateProject(string parentFolder, string projectName);
 	bool RestoreLastScene();
 
 	/// <summary>Reopens the scene and every other document the open project last had open.</summary>
@@ -59,7 +68,8 @@ public interface IEditorCommandService
 internal enum PendingSceneReplacementKind
 {
 	NewScene,
-	LoadScene
+	LoadScene,
+	OpenProject
 }
 
 internal enum PendingSceneReplacementDecision
@@ -69,7 +79,13 @@ internal enum PendingSceneReplacementDecision
 	Cancel
 }
 
-internal readonly record struct PendingSceneReplacement(PendingSceneReplacementKind Kind, Guid AssetId);
+/// <summary>Opens or creates a project, returning false with a message when it cannot.</summary>
+internal delegate bool EditorProjectOpener(out string errorMessage);
+
+internal readonly record struct PendingSceneReplacement(
+	PendingSceneReplacementKind Kind,
+	Guid AssetId,
+	EditorProjectOpener? ProjectOpener = null);
 
 public sealed class EditorCommandService : IEditorCommandService
 {
@@ -230,6 +246,38 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 
 		return QueueSceneReplacement(new PendingSceneReplacement(PendingSceneReplacementKind.LoadScene, assetId));
+	}
+
+	public bool RequestOpenProject(string projectRoot)
+	{
+		if (string.IsNullOrWhiteSpace(projectRoot))
+		{
+			return false;
+		}
+
+		return RequestProjectSwitch((out string errorMessage) => _projectService.OpenProject(projectRoot, out errorMessage));
+	}
+
+	public bool RequestCreateProject(string parentFolder, string projectName)
+	{
+		return RequestProjectSwitch((out string errorMessage) => _projectService.CreateProject(parentFolder, projectName, out errorMessage));
+	}
+
+	private bool RequestProjectSwitch(EditorProjectOpener projectOpener)
+	{
+		if (_playSession.IsActive)
+		{
+			_notificationService.ReportError("Stop play mode before opening another project.");
+			return false;
+		}
+
+		if (_operationService.Current.IsActive || _loadingSceneAssetId.HasValue)
+		{
+			_notificationService.ReportError("Another editor operation is already in progress.");
+			return false;
+		}
+
+		return QueueSceneReplacement(new PendingSceneReplacement(PendingSceneReplacementKind.OpenProject, Guid.Empty, projectOpener));
 	}
 
 	public bool RestoreLastScene()
@@ -760,6 +808,12 @@ public sealed class EditorCommandService : IEditorCommandService
 				return;
 			}
 
+			if (replacement.Kind == PendingSceneReplacementKind.OpenProject)
+			{
+				StartProjectOpen(replacement.ProjectOpener ?? throw new InvalidOperationException("Opening a project requires a project opener."));
+				return;
+			}
+
 			_undoRedoService.Clear();
 			switch (replacement.Kind)
 			{
@@ -784,6 +838,65 @@ public sealed class EditorCommandService : IEditorCommandService
 				PendingSceneReplacementKind.NewScene => $"Failed to create scene: {ex.Message}",
 				_ => $"Failed to load scene: {ex.Message}"
 			});
+		}
+	}
+
+	/// <summary>
+	/// Replaces the scene with a new one before the project changes: the old scene holds the old project's assets
+	/// and gameplay components, which also keeps the old gameplay assembly from unloading.
+	/// </summary>
+	private void StartProjectOpen(EditorProjectOpener projectOpener)
+	{
+		_undoRedoService.Clear();
+		_sceneWorkspace.ResetToNewScene();
+		EditorGui.ClearEntitySelection();
+		_interactionState.ClearSceneDirty();
+
+		// The empty scene is not persisted: the closing project should still reopen the scene it last had open.
+		var gameplayAssemblyHost = _gameplayAssemblyHost;
+		if (_operationService.TryStart(
+				"Opening project",
+				progress =>
+				{
+					progress.Report("Loading project assets...");
+					if (projectOpener(out var errorMessage) == false)
+					{
+						throw new InvalidOperationException(errorMessage);
+					}
+
+					if (gameplayAssemblyHost is null)
+					{
+						return;
+					}
+
+					progress.Report("Loading gameplay assembly...");
+					var gameplayLoad = gameplayAssemblyHost.EnsureLoaded();
+					if (gameplayLoad.BuildFailureOutput is { } buildFailureOutput)
+					{
+						_notificationService.ReportError(GameplayStaleBuildMessage.Create(buildFailureOutput));
+					}
+				},
+				completed: () =>
+				{
+					PersistLastProject();
+					RestoreLastDocuments();
+				},
+				failed: exception => _notificationService.ReportError($"Failed to open project: {exception.Message}")) == false)
+		{
+			_notificationService.ReportError("Another editor operation is already in progress.");
+		}
+	}
+
+	private void PersistLastProject()
+	{
+		try
+		{
+			EditorPreferences.SetLastProjectPath(_projectService.ProjectRootPath);
+			EditorPreferences.Save();
+		}
+		catch (Exception exception)
+		{
+			_notificationService.ReportError($"Failed to save the last open project preference: {exception.Message}");
 		}
 	}
 
