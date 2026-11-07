@@ -90,6 +90,7 @@ public struct TransparentForwardPassConfig
 	public required IGfxBuffer? InstanceBuffer { get; init; }
 	public required IGfxBuffer? MaterialBuffer { get; init; }
 	public required IGfxBuffer? DrawArgsBuffer { get; init; }
+	public required IGfxBuffer? VisibleInstanceBuffer { get; init; }
 	public required IGfxBuffer? CameraBuffer { get; init; }
 	public required IGfxBuffer? TransparentEnvironmentBuffer { get; init; }
 	public required IGfxBuffer? TransparentLightingBuffer { get; init; }

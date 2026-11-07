@@ -22,9 +22,9 @@ internal sealed class RenderGraphPassSet
 		ArgumentNullException.ThrowIfNull(drawRecordEncoder);
 		ArgumentNullException.ThrowIfNull(gpuDrawDiagnosticsSampler);
 
-		var liveDraws = new GpuDrawLiveDrawSource(renderer);
+		var batches = new GpuDrawBatches(renderer.EnsureMeshResources);
 		var stalenessInputs = new GpuDrawStalenessInputSource(gpuDrawResources, renderer);
-		var drawRecords = new IndirectDrawRecords(drawRecordEncoder, liveDraws, stalenessInputs);
+		var drawRecords = new IndirectDrawRecords(drawRecordEncoder, batches, stalenessInputs);
 
 		AmbientOcclusionPass = new(shaderCompiler, bindlessResourceRegistry);
 		AmbientOcclusionBlurPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -67,7 +67,7 @@ internal sealed class RenderGraphPassSet
 			gpuDrawHardeningStats,
 			renderer,
 			drawRecords,
-			liveDraws,
+			batches,
 			stalenessInputs,
 			gpuDrawDiagnosticsSampler);
 		SkyboxPass = new(renderer, shaderCompiler, bindlessResourceRegistry);

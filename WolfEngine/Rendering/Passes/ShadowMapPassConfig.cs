@@ -117,6 +117,8 @@ public struct ShadowMapPassConfig
 	public required IGfxBuffer? TerrainMaterialBuffer { get; init; }
 	public required IGfxBuffer? TerrainLayerBuffer { get; init; }
 	public required IGfxBuffer? DrawArgsBuffer { get; init; }
+	/// <summary>Bound whole: each cascade's draw args already point into that cascade's slice.</summary>
+	public required IGfxBuffer? VisibleInstanceBuffer { get; init; }
 	public required IGfxBuffer? CameraBuffer { get; init; }
 	public required IGfxBuffer? MaterialGenerationBuffer { get; init; }
 	public required IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; init; }

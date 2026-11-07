@@ -21,7 +21,8 @@ public enum RayTracingSceneRebuildReason
 	Add = 1 << 1,
 	Remove = 1 << 2,
 	Transform = 1 << 3,
-	Mesh = 1 << 4
+	Mesh = 1 << 4,
+	Capacity = 1 << 5
 }
 
 public readonly struct RayTracingSceneStats
@@ -96,8 +97,9 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly Dictionary<uint, TerrainInstanceRecord> _terrainInstances = new();
 	private readonly Dictionary<int, TerrainIndexBufferRecord> _terrainIndexBuffers = new();
 	private readonly List<RayTracingInstanceDescription> _instanceDescriptions = new();
-	private readonly uint[] _instanceIndexToInstanceHandle = new uint[GpuDrawResources.MaxInstanceCount];
-	private readonly uint[] _instanceIndexToTerrainRayTracingResolution = new uint[GpuDrawResources.MaxInstanceCount];
+	// Indexed by TLAS instance index, and as long as the TLAS's capacity.
+	private uint[] _instanceIndexToInstanceHandle = Array.Empty<uint>();
+	private uint[] _instanceIndexToTerrainRayTracingResolution = Array.Empty<uint>();
 	private readonly List<IGfxBottomLevelAccelerationStructure> _pendingBlasBuilds = new();
 	private readonly List<TerrainVertexUpdateRecord> _pendingTerrainVertexUpdates = new();
 	private readonly List<uint> _pendingTerrainRetryHandles = new();
@@ -113,10 +115,14 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private ReadOnlyMemory<byte> _terrainVertexUpdateShaderBytecode;
 	private RayTracingSceneStats _lastStats;
 	private long _topLevelAccelerationStructureGeneration;
+	private int _topLevelCapacity;
 	private RayTracingSceneRebuildReason _lastTopLevelUpdateReason;
 	private int _pendingResourceRetirementCount;
 	private bool _bootstrapPending = true;
 	private bool _tlasDirty;
+
+	/// <summary>TLAS instances the scene starts with room for; the TLAS doubles as the scene outgrows it.</summary>
+	public const int InitialTopLevelCapacity = 4096;
 
 	public RayTracingSceneResources(IShaderProvider shaderCompiler)
 	{
@@ -165,13 +171,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		{
 			return;
 		}
-		EnsureSidecarResources(device);
-		if (_topLevelAccelerationStructure is null)
-		{
-			_topLevelAccelerationStructure = device.CreateTopLevelAccelerationStructure(
-				new TopLevelAccelerationStructureDescriptor(GpuDrawResources.MaxInstanceCount - 1));
-			_topLevelAccelerationStructureGeneration++;
-		}
+		EnsureTopLevelCapacity(device, 1);
 
 		var statsBuilder = new RayTracingSceneStatsBuilder();
 		var appliedBootstrap = false;
@@ -202,6 +202,11 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		_pendingBlasBuilds.Clear();
 
 		var tlasRebuildCount = 0;
+		if (EnsureTopLevelCapacity(device, _instances.Count + CountValidTerrainInstances()))
+		{
+			statsBuilder.TopLevelRebuildReason |= RayTracingSceneRebuildReason.Capacity;
+		}
+
 		if (_tlasDirty)
 		{
 			BuildInstanceDescriptions();
@@ -222,33 +227,60 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			_instanceIndexToInstanceHandleBuffer is not null);
 	}
 
-	private void EnsureSidecarResources(IGfxDevice device)
+	/// <summary>
+	/// Makes the TLAS and the maps from its instances back to draw instances hold at least
+	/// <paramref name="instanceCount"/> instances, doubling from the current capacity. A replacement TLAS is empty,
+	/// so it is marked for a full build; the replaced resources are retired, since frames in flight trace them.
+	/// </summary>
+	/// <returns>True when the TLAS was replaced.</returns>
+	private bool EnsureTopLevelCapacity(IGfxDevice device, int instanceCount)
 	{
-		if (ReferenceEquals(_sidecarDevice, device) &&
-		    _instanceIndexToInstanceHandleBuffer is not null &&
-		    _instanceIndexToTerrainRayTracingResolutionBuffer is not null)
+		var deviceChanged = ReferenceEquals(_sidecarDevice, device) == false;
+		if (deviceChanged == false &&
+		    _topLevelAccelerationStructure is not null &&
+		    instanceCount <= _topLevelCapacity)
 		{
-			return;
+			return false;
 		}
 
-		if (_instanceIndexToInstanceHandleBuffer is IDisposable disposableBuffer)
+		var capacity = GpuDrawResources.GrowCapacity(
+			deviceChanged ? 0 : _topLevelCapacity,
+			instanceCount,
+			InitialTopLevelCapacity,
+			GpuDrawResources.MaxInstanceCount - 1);
+
+		if (_topLevelAccelerationStructure is not null)
 		{
-			disposableBuffer.Dispose();
-		}
-		if (_instanceIndexToTerrainRayTracingResolutionBuffer is IDisposable disposableTerrainBuffer)
-		{
-			disposableTerrainBuffer.Dispose();
+			QueueResourceRetirement(_topLevelAccelerationStructure, _sidecarDevice ?? device);
 		}
 
+		if (_instanceIndexToInstanceHandleBuffer is not null)
+		{
+			QueueResourceRetirement(_instanceIndexToInstanceHandleBuffer, _sidecarDevice ?? device);
+		}
+
+		if (_instanceIndexToTerrainRayTracingResolutionBuffer is not null)
+		{
+			QueueResourceRetirement(_instanceIndexToTerrainRayTracingResolutionBuffer, _sidecarDevice ?? device);
+		}
+
+		_topLevelAccelerationStructure = device.CreateTopLevelAccelerationStructure(
+			new TopLevelAccelerationStructureDescriptor((uint)capacity));
+		_topLevelAccelerationStructureGeneration++;
 		_instanceIndexToInstanceHandleBuffer = device.CreateBuffer(new BufferDescriptor(
-			(ulong)(GpuDrawResources.MaxInstanceCount * sizeof(uint)),
+			(ulong)capacity * sizeof(uint),
 			BufferUsage.Structured,
 			BufferFlags.AllowShaderResource));
 		_instanceIndexToTerrainRayTracingResolutionBuffer = device.CreateBuffer(new BufferDescriptor(
-			(ulong)(GpuDrawResources.MaxInstanceCount * sizeof(uint)),
+			(ulong)capacity * sizeof(uint),
 			BufferUsage.Structured,
 			BufferFlags.AllowShaderResource));
+		_instanceIndexToInstanceHandle = new uint[capacity];
+		_instanceIndexToTerrainRayTracingResolution = new uint[capacity];
+		_topLevelCapacity = capacity;
 		_sidecarDevice = device;
+		_tlasDirty = true;
+		return true;
 	}
 
 	private void RebuildFromCurrentDrawEntries(
@@ -1017,6 +1049,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			terrainSidecarDisposable.Dispose();
 		}
 		_instanceIndexToTerrainRayTracingResolutionBuffer = null;
+		_topLevelCapacity = 0;
 		_sidecarDevice = null;
 	}
 

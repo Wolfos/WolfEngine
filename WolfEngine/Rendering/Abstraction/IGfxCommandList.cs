@@ -25,9 +25,13 @@ public enum PrimitiveTopology
 /// Byte offset of the view's slice of the draw args, so shadow cascades compact against their own
 /// visibility rather than the first cascade's.
 /// </param>
+/// <param name="BatchBuffer">
+/// The batch table, indexed by draw id. A batch's capacity bounds its visible count, and its lane says
+/// which lane's page emits it.
+/// </param>
 /// <param name="LaneIndex">
 /// Execution lane that owns this page's draws. Every lane allocates a page over the same draw id
-/// range, so a draw is emitted only by the lane its bucket names.
+/// range, so a draw is emitted only by the lane its batch names.
 /// </param>
 public readonly record struct NativeIndirectCompactionRequest(
 	IGfxIndirectCommandBuffer CommandBuffer,
@@ -35,7 +39,7 @@ public readonly record struct NativeIndirectCompactionRequest(
 	uint ExecutionRangeIndex,
 	IGfxBuffer DrawArgsBuffer,
 	ulong DrawArgsBaseOffsetBytes,
-	IGfxBuffer DrawCommandBuffer,
+	IGfxBuffer BatchBuffer,
 	uint PageStartCommandIndex,
 	uint PageCommandCapacity,
 	uint LaneIndex,

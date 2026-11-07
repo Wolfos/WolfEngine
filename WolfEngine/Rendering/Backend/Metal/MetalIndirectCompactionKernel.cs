@@ -25,8 +25,10 @@ internal sealed class MetalIndirectCompactionKernel : IDisposable
 	public const uint CommandBuffersBufferIndex = 0;
 	public const uint ExecutionRangeBufferIndex = 1;
 	public const uint DrawArgsBufferIndex = 2;
-	public const uint DrawCommandsBufferIndex = 3;
+	public const uint BatchesBufferIndex = 3;
 	public const uint ParamsBufferIndex = 4;
+	public const uint GeometryBufferIndex = 5;
+	public const uint IndexBufferIndex = 6;
 
 	private const string EntryPoint = "CSCompactIndirectCommands";
 	private const string SourceResourceName = "WolfEngine.Shaders.GpuDraw.Metal.gpu_draw_compact_icb.metal";

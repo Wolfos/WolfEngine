@@ -5,7 +5,7 @@ import "../Common/draw_data.slang";
 import "../Common/packed_vertex.slang";
 import "../Common/raytracing_common.slang";
 
-#define WOLF_MAX_INSTANCE_COUNT 65535
+#define WOLF_MAX_INSTANCE_COUNT 1048576
 
 cbuffer BindlessHandles : register(b0)
 {

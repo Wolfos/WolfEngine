@@ -45,6 +45,7 @@ internal sealed class MetalDrawRecordEncoder : IDrawRecordEncoder
 		uint commandIndex,
 		uint drawArgsCommandIndex,
 		Mesh mesh,
+		uint instanceCount,
 		in SharedDrawIndirectEncodeResources resources,
 		GraphicsPassBindingSet passBindings,
 		in SharedDrawPerDrawBindings perDrawBindings)
@@ -60,7 +61,8 @@ internal sealed class MetalDrawRecordEncoder : IDrawRecordEncoder
 		    resources.InstanceBuffer is not MetalBuffer instanceBuffer ||
 		    resources.MaterialBuffer is not MetalBuffer materialBuffer ||
 		    resources.DrawArgsBuffer is not MetalBuffer drawArgsBuffer ||
-		    resources.MaterialGenerationBuffer is not MetalBuffer materialGenerationBuffer)
+		    resources.MaterialGenerationBuffer is not MetalBuffer materialGenerationBuffer ||
+		    resources.VisibleInstanceBuffer is not MetalBuffer visibleInstanceBuffer)
 		{
 			return false;
 		}
@@ -85,11 +87,13 @@ internal sealed class MetalDrawRecordEncoder : IDrawRecordEncoder
 			mesh.IndexCount,
 			mesh.GetPackedIndexOffsetBytes(resources.IndexStream),
 			0,
+			instanceCount,
 			resources.DrawArgsBaseOffsetBytes + (drawArgsCommandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
 			instanceBuffer,
 			materialBuffer,
 			materialGenerationBuffer,
 			drawArgsBuffer,
+			visibleInstanceBuffer,
 			passBindings,
 			perDrawBindings,
 			descriptorTable.CountBuffer,

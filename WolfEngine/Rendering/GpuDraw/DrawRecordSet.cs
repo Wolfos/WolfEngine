@@ -9,15 +9,20 @@ public readonly struct DrawRecordPage
 		uint pageIndex,
 		uint pageStartCommandIndex,
 		uint pageCommandCapacity,
-		IGfxIndirectCommandBuffer commandBuffer)
+		IGfxIndirectCommandBuffer commandBuffer,
+		int compactedExecutionRangeIndex)
 	{
 		PageIndex = pageIndex;
 		PageStartCommandIndex = pageStartCommandIndex;
 		PageCommandCapacity = pageCommandCapacity;
 		CommandBuffer = commandBuffer ?? throw new ArgumentNullException(nameof(commandBuffer));
+		CompactedExecutionRangeIndex = compactedExecutionRangeIndex;
 	}
 
 	public uint PageIndex { get; }
+
+	/// <summary>This page's entry in its set's <see cref="DrawRecordSet.CompactedExecutionRangeBuffer"/>.</summary>
+	public int CompactedExecutionRangeIndex { get; }
 	public uint PageStartCommandIndex { get; }
 	public uint PageCommandCapacity { get; }
 	public IGfxIndirectCommandBuffer CommandBuffer { get; }
@@ -31,12 +36,18 @@ public sealed class DrawRecordSet : IDisposable
 {
 	public const uint IndirectCommandPageCapacity = 2048;
 
-	/// <summary>Highest page index a draw id can land on, which bounds the per-page count table.</summary>
+	/// <summary>Pages a draw id can land on, across the whole draw index range.</summary>
 	public static readonly uint MaxPageCount = ((GpuDrawResources.MaxDrawCount - 1) / IndirectCommandPageCapacity) + 1;
 
-	private readonly SortedDictionary<uint, IGfxIndirectCommandBuffer>[] _commandPages =
-		new SortedDictionary<uint, IGfxIndirectCommandBuffer>[GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
+	private const int InitialCompactedExecutionRangeCapacity = 64;
+
+	private readonly SortedDictionary<uint, AllocatedPage>[] _commandPages =
+		new SortedDictionary<uint, AllocatedPage>[GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
+	// One compaction range per allocated page, handed out as pages are created and never reused, since pages live
+	// as long as the set.
 	private IGfxBuffer? _compactedExecutionRanges;
+	private int _compactedExecutionRangeCapacity;
+	private int _compactedExecutionRangeCount;
 	private readonly ulong[] _appliedStructuralVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly DrawRecordStalenessInputs[] _encodedStalenessInputs = new DrawRecordStalenessInputs[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly ulong[] _encodedLaneGenerations = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
@@ -52,24 +63,54 @@ public sealed class DrawRecordSet : IDisposable
 		Array.Fill(_frameBindings, -1);
 		for (var i = 0; i < _commandPages.Length; i++)
 		{
-			_commandPages[i] = new SortedDictionary<uint, IGfxIndirectCommandBuffer>();
+			_commandPages[i] = new SortedDictionary<uint, AllocatedPage>();
 		}
 	}
 
 	/// <summary>
-	/// Per-page compacted execution ranges, one entry per (slot, lane, page). Written by the compaction
-	/// dispatch and read by the following execute to bound how many commands it walks.
+	/// Per-page compacted execution ranges, one entry per allocated page at its
+	/// <see cref="DrawRecordPage.CompactedExecutionRangeIndex"/>. Written by the compaction dispatch and read by the
+	/// following execute to bound how many commands it walks. Replaced by a larger one as pages are allocated.
 	/// </summary>
 	public IGfxBuffer? CompactedExecutionRangeBuffer => _compactedExecutionRanges;
+
+	/// <summary>Range entries in use, one per allocated page; compaction resets this many.</summary>
+	public int CompactedExecutionRangeEntryCount => _compactedExecutionRangeCount;
 
 	public void EnsureCreated(IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(device);
-		_compactedExecutionRanges ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)CompactedExecutionRangeEntryCount * IndirectCompactionExecutionRange.StrideInBytes,
+		EnsureCompactedExecutionRangeCapacity(device, Math.Max(_compactedExecutionRangeCount, 1));
+	}
+
+	/// <summary>
+	/// Grows the range buffer to hold <paramref name="entryCount"/> entries. Ranges are rewritten by every
+	/// compaction, so the replacement starts empty; the one it replaces is retired, since frames in flight read it.
+	/// </summary>
+	private void EnsureCompactedExecutionRangeCapacity(IGfxDevice device, int entryCount)
+	{
+		if (_compactedExecutionRanges is not null && entryCount <= _compactedExecutionRangeCapacity)
+		{
+			return;
+		}
+
+		var capacity = Math.Max(_compactedExecutionRangeCapacity, InitialCompactedExecutionRangeCapacity);
+		while (capacity < entryCount)
+		{
+			capacity *= 2;
+		}
+
+		if (_compactedExecutionRanges is IDisposable previous)
+		{
+			device.Retire(previous, "SharedDrawCompactedExecutionRanges");
+		}
+
+		_compactedExecutionRanges = device.CreateBuffer(new BufferDescriptor(
+			(ulong)capacity * IndirectCompactionExecutionRange.StrideInBytes,
 			BufferUsage.Indirect,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
 			name: "SharedDrawCompactedExecutionRanges"));
+		_compactedExecutionRangeCapacity = capacity;
 	}
 
 	/// <summary>The pass whose lanes this set's records draw.</summary>
@@ -84,17 +125,6 @@ public sealed class DrawRecordSet : IDisposable
 		InvalidateEncoding();
 	}
 
-	public static int CompactedExecutionRangeEntryCount =>
-		GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount * (int)MaxPageCount;
-
-	public static int GetCompactedExecutionRangeIndex(int slotIndex, int executionLaneIndex, uint pageIndex)
-	{
-		ValidateSlot(slotIndex);
-		ValidateLane(executionLaneIndex);
-		ValidatePage(pageIndex);
-		return (FlattenSlotLaneIndex(slotIndex, executionLaneIndex) * (int)MaxPageCount) + (int)pageIndex;
-	}
-
 	internal IGfxIndirectCommandBuffer EnsurePage(
 		IGfxDevice device,
 		int slotIndex,
@@ -107,17 +137,19 @@ public sealed class DrawRecordSet : IDisposable
 		ValidatePage(pageIndex);
 
 		var pages = _commandPages[FlattenSlotLaneIndex(slotIndex, executionLaneIndex)];
-		if (pages.TryGetValue(pageIndex, out var commandBuffer))
+		if (pages.TryGetValue(pageIndex, out var page))
 		{
-			return commandBuffer;
+			return page.CommandBuffer;
 		}
 
 		var laneName = ResolveLaneDebugName(executionLaneIndex);
-		commandBuffer = _encoder.CreatePage(
+		var commandBuffer = _encoder.CreatePage(
 			device,
 			IndirectCommandPageCapacity,
 			$"{laneName} slot{slotIndex} page{pageIndex}");
-		pages.Add(pageIndex, commandBuffer);
+		pages.Add(pageIndex, new AllocatedPage(commandBuffer, _compactedExecutionRangeCount));
+		_compactedExecutionRangeCount++;
+		EnsureCompactedExecutionRangeCapacity(device, _compactedExecutionRangeCount);
 		return commandBuffer;
 	}
 
@@ -141,7 +173,14 @@ public sealed class DrawRecordSet : IDisposable
 		ValidateSlot(slotIndex);
 		ValidateLane(executionLaneIndex);
 		ValidatePage(pageIndex);
-		return _commandPages[FlattenSlotLaneIndex(slotIndex, executionLaneIndex)].TryGetValue(pageIndex, out commandBuffer!);
+		if (_commandPages[FlattenSlotLaneIndex(slotIndex, executionLaneIndex)].TryGetValue(pageIndex, out var page))
+		{
+			commandBuffer = page.CommandBuffer;
+			return true;
+		}
+
+		commandBuffer = null!;
+		return false;
 	}
 
 	public bool TryGetPageForCommand(
@@ -174,7 +213,8 @@ public sealed class DrawRecordSet : IDisposable
 				page.Key,
 				page.Key * IndirectCommandPageCapacity,
 				IndirectCommandPageCapacity,
-				page.Value);
+				page.Value.CommandBuffer,
+				page.Value.CompactedExecutionRangeIndex);
 		}
 
 		return result;
@@ -238,11 +278,13 @@ public sealed class DrawRecordSet : IDisposable
 	{
 		(_compactedExecutionRanges as IDisposable)?.Dispose();
 		_compactedExecutionRanges = null;
+		_compactedExecutionRangeCapacity = 0;
+		_compactedExecutionRangeCount = 0;
 		for (var i = 0; i < _commandPages.Length; i++)
 		{
-			foreach (var commandBuffer in _commandPages[i].Values)
+			foreach (var page in _commandPages[i].Values)
 			{
-				(commandBuffer as IDisposable)?.Dispose();
+				(page.CommandBuffer as IDisposable)?.Dispose();
 			}
 
 			_commandPages[i].Clear();
@@ -266,6 +308,8 @@ public sealed class DrawRecordSet : IDisposable
 
 		return $"lane{executionLaneIndex}";
 	}
+
+	private readonly record struct AllocatedPage(IGfxIndirectCommandBuffer CommandBuffer, int CompactedExecutionRangeIndex);
 
 	public static uint GetPageIndex(uint commandIndex) => commandIndex / IndirectCommandPageCapacity;
 

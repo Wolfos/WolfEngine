@@ -1,6 +1,6 @@
 import "../Common/draw_data.slang";
 
-#define WOLF_MAX_MATERIAL_COUNT 65535
+#define WOLF_MAX_MATERIAL_COUNT 1048576
 
 static const uint HARDEN_COUNTER_STALE_REJECT = 0;
 

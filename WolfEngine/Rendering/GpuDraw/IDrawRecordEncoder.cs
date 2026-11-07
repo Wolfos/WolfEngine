@@ -28,6 +28,11 @@ public interface IDrawRecordEncoder
 
 	void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex);
 
+	/// <param name="drawArgsCommandIndex">The draw index, which locates the draw's args and visible instances.</param>
+	/// <param name="instanceCount">
+	/// Instances drawn when the record executes uncompacted. Compaction overwrites it with the visible count, and
+	/// shaders discard instances at or above the visible count, so drawing the full capacity stays correct.
+	/// </param>
 	/// <returns>False when the resources cannot be encoded on this backend; the caller then resets the record.</returns>
 	bool TryEncodeIndexedDrawCommand(
 		IGfxDevice device,
@@ -35,6 +40,7 @@ public interface IDrawRecordEncoder
 		uint commandIndex,
 		uint drawArgsCommandIndex,
 		Mesh mesh,
+		uint instanceCount,
 		in SharedDrawIndirectEncodeResources resources,
 		GraphicsPassBindingSet passBindings,
 		in SharedDrawPerDrawBindings perDrawBindings);

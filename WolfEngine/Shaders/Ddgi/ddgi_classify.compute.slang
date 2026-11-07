@@ -3,7 +3,9 @@ import "../Common/draw_data.slang";
 import "ddgi_common.slang";
 
 static const uint DRAW_FLAG_ACTIVE = 1u;
-static const uint WOLF_MAX_INSTANCE_COUNT = 65535u;
+static const uint WOLF_MAX_INSTANCE_COUNT = 1048576u;
+// Mirrors DdgiUtilities.ActivityScatterRowWidth. One row stays within D3D12's baseline dispatch limit.
+static const uint DDGI_ACTIVITY_SCATTER_ROW_WIDTH = 65535u;
 
 StructuredBuffer<GpuDrawCommand> g_DrawCommands : register(t2);
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t3);
@@ -32,27 +34,29 @@ void DdgiProbeActivityClearCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     marks[uint2(physicalProbeIndex % atlasColumns, physicalProbeIndex / atlasColumns)] = 0u;
 }
 
-// A draw visits only probe cells near its bounds. One thread group owns a draw,
+// An instance visits only probe cells near its bounds. One thread group owns an instance,
 // so even a scene-wide bound distributes its probe tests across 64 lanes.
 [numthreads(64, 1, 1)]
 void DdgiProbeActivityScatterCS(
     uint3 groupId : SV_GroupID,
     uint3 groupThreadId : SV_GroupThreadID)
 {
-    uint drawIndex = groupId.x;
-    if (drawIndex >= activeDrawCommandUpperBound)
+    // The command table is indexed by instance index.
+    uint instanceIndex = groupId.x + groupId.y * DDGI_ACTIVITY_SCATTER_ROW_WIDTH;
+    if (instanceIndex >= activeInstanceUpperBound)
     {
         return;
     }
 
-    GpuDrawCommand command = g_DrawCommands[drawIndex];
+    GpuDrawCommand command = g_DrawCommands[instanceIndex];
     if ((command.flags & DRAW_FLAG_ACTIVE) == 0u || !IsPackedHandleValid(command.instanceHandle))
     {
         return;
     }
 
-    uint instanceIndex = GetHandleIndex(command.instanceHandle);
-    if (instanceIndex == 0u || instanceIndex >= WOLF_MAX_INSTANCE_COUNT)
+    if (GetHandleIndex(command.instanceHandle) != instanceIndex ||
+        instanceIndex == 0u ||
+        instanceIndex >= WOLF_MAX_INSTANCE_COUNT)
     {
         return;
     }

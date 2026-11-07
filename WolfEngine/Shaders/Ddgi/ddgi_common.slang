@@ -4,8 +4,8 @@ import "../Common/draw_data.slang";
 import "ddgi_visibility.slang";
 import "ddgi_sample.slang";
 
-#define WOLF_MAX_INSTANCE_COUNT 65535
-#define WOLF_MAX_MATERIAL_COUNT 65535
+#define WOLF_MAX_INSTANCE_COUNT 1048576
+#define WOLF_MAX_MATERIAL_COUNT 1048576
 
 static const float WOLF_PI = 3.14159265359f;
 static const float DDGI_HISTORY_SH_BASIS_L0 = 0.28209479177f;
@@ -89,7 +89,7 @@ cbuffer DdgiSettings : register(b1)
     uint frameIndex;
     uint historyValid;
     uint sidecarHitShadingAvailable;
-    uint activeDrawCommandUpperBound;
+    uint activeInstanceUpperBound;
     uint debugFirstProbeRelocationReadback;
     uint debugProbeRelocationReadbackIndex;
     uint relocationIteration;

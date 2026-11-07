@@ -45,6 +45,15 @@ cbuffer BindlessCounts : register(b27)
     uint g_BindlessFallbackRWTexture3D;
 };
 
+// The D3D12 accessors below mark a handle's index with NonUniformResourceIndex. A handle is not uniform across a
+// wave in general: one batched draw covers instances with different materials, so neighbouring vertices and
+// pixels read different descriptors. D3D12 leaves an unmarked divergent index undefined (it samples the wrong
+// descriptor on some hardware). Metal argument buffers index divergently without marking, and Slang rejects
+// NonUniformResourceIndex in Metal compute entry points, so the Metal accessors leave it out.
+//
+// Keep the fallback as its own return. Folding it into the index (assigning the fallback, then one marked
+// access) makes Slang's HLSL output share a single index variable across every inlined accessor, so all of a
+// shader's textures sample whichever was fetched last.
 uint SafeDescriptorIndex(uint handle, uint expectedKind, uint descriptorCount)
 {
     uint kind = GetDescriptorKind(handle);
@@ -245,7 +254,7 @@ Texture2D<float4> GetTexture(uint handle)
     {
         return g_Textures[0];
     }
-    return g_Textures[index];
+    return g_Textures[NonUniformResourceIndex(index)];
 }
 
 /// Same descriptors as GetTexture, viewed as volumes. Only valid for textures created with
@@ -257,7 +266,7 @@ Texture3D<float4> GetTexture3D(uint handle)
     {
         return g_Textures3D[g_BindlessFallbackTexture3D];
     }
-    return g_Textures3D[index];
+    return g_Textures3D[NonUniformResourceIndex(index)];
 }
 
 #if !defined(WOLF_NO_RW_TEXTURES)
@@ -268,7 +277,7 @@ RWTexture2D<float4> GetRWTexture(uint handle)
     {
         return g_RWTextures[0];
     }
-    return g_RWTextures[index];
+    return g_RWTextures[NonUniformResourceIndex(index)];
 }
 
 RWTexture3D<float4> GetRWTexture3D(uint handle)
@@ -278,7 +287,7 @@ RWTexture3D<float4> GetRWTexture3D(uint handle)
     {
         return g_RWTextures3D[g_BindlessFallbackRWTexture3D];
     }
-    return g_RWTextures3D[index];
+    return g_RWTextures3D[NonUniformResourceIndex(index)];
 }
 
 /// Same descriptor as GetRWTexture, viewed as a single-channel uint image. Only valid
@@ -291,7 +300,7 @@ RWTexture2D<uint> GetRWTextureUint(uint handle)
     {
         return g_RWTexturesUint[0];
     }
-    return g_RWTexturesUint[index];
+    return g_RWTexturesUint[NonUniformResourceIndex(index)];
 }
 
 /// Coherent load/store over the same descriptor as GetRWTexture. Needed when other thread
@@ -309,7 +318,7 @@ float4 LoadRWTextureCoherent(uint handle, int2 pixel)
     {
         return g_RWTexturesCoherent[0][pixel];
     }
-    return g_RWTexturesCoherent[index][pixel];
+    return g_RWTexturesCoherent[NonUniformResourceIndex(index)][pixel];
 }
 
 void StoreRWTextureCoherent(uint handle, int2 pixel, float4 value)
@@ -319,7 +328,7 @@ void StoreRWTextureCoherent(uint handle, int2 pixel, float4 value)
     {
         return;
     }
-    g_RWTexturesCoherent[index][pixel] = value;
+    g_RWTexturesCoherent[NonUniformResourceIndex(index)][pixel] = value;
 }
 #endif
 
@@ -330,6 +339,6 @@ SamplerState GetSampler(uint handle)
     {
         return g_Samplers[0];
     }
-    return g_Samplers[index];
+    return g_Samplers[NonUniformResourceIndex(index)];
 }
 #endif

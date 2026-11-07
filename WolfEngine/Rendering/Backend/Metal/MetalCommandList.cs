@@ -731,12 +731,19 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		if (request.ExecutionRangeBuffer is not MetalBuffer executionRangeBuffer ||
 		    request.DrawArgsBuffer is not MetalBuffer drawArgsBuffer ||
-		    request.DrawCommandBuffer is not MetalBuffer drawCommandBuffer)
+		    request.BatchBuffer is not MetalBuffer batchBuffer)
 		{
 			throw new InvalidOperationException("Compaction input buffers were not created by the Metal backend.");
 		}
 
-		if (executionRangeBuffer.IsDisposed || drawArgsBuffer.IsDisposed || drawCommandBuffer.IsDisposed)
+		if (executionRangeBuffer.IsDisposed || drawArgsBuffer.IsDisposed || batchBuffer.IsDisposed)
+		{
+			return;
+		}
+
+		// A page with no encoded commands has nothing to copy, and no index buffer to issue draws from.
+		var indexBuffer = metalCommandBuffer.CompactionIndexBuffer;
+		if (indexBuffer.NativePtr == IntPtr.Zero)
 		{
 			return;
 		}
@@ -771,9 +778,19 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			(nuint)request.DrawArgsBaseOffsetBytes,
 			MetalIndirectCompactionKernel.DrawArgsBufferIndex);
 		_computeEncoder.SetBuffer(
-			drawCommandBuffer.Buffer,
+			batchBuffer.Buffer,
 			0,
-			MetalIndirectCompactionKernel.DrawCommandsBufferIndex);
+			MetalIndirectCompactionKernel.BatchesBufferIndex);
+		_computeEncoder.SetBuffer(
+			metalCommandBuffer.CompactionGeometry,
+			0,
+			MetalIndirectCompactionKernel.GeometryBufferIndex);
+		// Only the address is taken: the draw it issues reads the indices when the compacted commands execute,
+		// which is where the commands' own references make the buffer resident.
+		_computeEncoder.SetBuffer(
+			indexBuffer,
+			0,
+			MetalIndirectCompactionKernel.IndexBufferIndex);
 
 		var parameters = new MetalIndirectCompactionParams
 		{

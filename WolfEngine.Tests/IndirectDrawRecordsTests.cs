@@ -70,7 +70,7 @@ public sealed class IndirectDrawRecordsTests
 		_encoder.ClearLog();
 
 		AddLiveDraw(7);
-		_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle(7), _lane.Key, _mesh);
+		_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle(7), _lane.Key, _mesh, 1u);
 		Prepare(first);
 		Prepare(second);
 
@@ -94,7 +94,7 @@ public sealed class IndirectDrawRecordsTests
 		Prepare(second);
 		_encoder.ClearLog();
 
-		_records.RecordStructuralChange(GpuDrawUpdateType.Remove, Handle(3), _lane.Key, null);
+		_records.RecordStructuralChange(GpuDrawUpdateType.Remove, Handle(3), _lane.Key, null, 0u);
 		Prepare(first);
 		Prepare(second);
 
@@ -114,10 +114,79 @@ public sealed class IndirectDrawRecordsTests
 		Prepare(set);
 		_encoder.ClearLog();
 
-		_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle(9), _lane.Key, _mesh);
+		_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle(9), _lane.Key, _mesh, 1u);
 		Prepare(set);
 
 		Assert.That(_encoder.EncodedDraws, Is.Empty, "a draw removed or reused before replay must not be encoded");
+	}
+
+	[Test]
+	public void RemoveOfADrawNoLongerCurrent_StillResetsItsRecord()
+	{
+		AddLiveDraw(3);
+		var set = _records.CreateSet(Participation, _lanes);
+		Prepare(set);
+
+		// A batch that died has already released its slot by the time its removal replays.
+		_liveDraws.CurrentHandles.Remove(Handle(3).Value);
+		_records.RecordStructuralChange(GpuDrawUpdateType.Remove, Handle(3), _lane.Key, null, 0u);
+		Prepare(set);
+
+		Assert.That(DrawsIn(set), Is.Empty);
+	}
+
+	[Test]
+	public void InstanceCount_ReachesTheEncoder_OnFullEncodeAndOnReplay()
+	{
+		AddLiveDraw(3, instanceCount: 12);
+		var set = _records.CreateSet(Participation, _lanes);
+		Prepare(set);
+		Assert.That(_encoder.EncodedInstanceCounts[3], Is.EqualTo(12u));
+
+		_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle(3), _lane.Key, _mesh, 13u);
+		Prepare(set);
+		Assert.That(_encoder.EncodedInstanceCounts[3], Is.EqualTo(13u), "a capacity change re-encodes the record");
+	}
+
+	[Test]
+	public void AddWithNoInstances_ResetsTheRecord()
+	{
+		AddLiveDraw(3);
+		var set = _records.CreateSet(Participation, _lanes);
+		Prepare(set);
+
+		_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle(3), _lane.Key, _mesh, 0u);
+		Prepare(set);
+
+		Assert.That(DrawsIn(set), Is.Empty);
+	}
+
+	[Test]
+	public void EveryAllocatedPage_GetsItsOwnCompactionRange()
+	{
+		AddLiveDraw(1);
+		AddLiveDraw(DrawRecordSet.IndirectCommandPageCapacity + 1);
+		AddLiveDraw((DrawRecordSet.IndirectCommandPageCapacity * 400) + 1);
+		var set = _records.CreateSet(Participation, _lanes);
+
+		PrepareEverySlot(set);
+
+		var rangeIndices = new List<int>();
+		for (var slotIndex = 0; slotIndex < GpuDrawResources.IndirectCommandBufferSlotCount; slotIndex++)
+		{
+			foreach (var page in set.GetAllocatedPages(slotIndex, _lane.ExecutionIndex))
+			{
+				rangeIndices.Add(page.CompactedExecutionRangeIndex);
+			}
+		}
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(rangeIndices, Has.Count.EqualTo(3 * GpuDrawResources.IndirectCommandBufferSlotCount));
+			Assert.That(rangeIndices, Is.Unique);
+			Assert.That(rangeIndices.Max(), Is.EqualTo(rangeIndices.Count - 1), "ranges are dense, one per page");
+			Assert.That(set.CompactedExecutionRangeEntryCount, Is.EqualTo(rangeIndices.Count));
+		});
 	}
 
 	[TestCase(StalenessInput.SharedDrawBuffers)]
@@ -226,7 +295,7 @@ public sealed class IndirectDrawRecordsTests
 		{
 			_records.BeginFrame();
 			AddLiveDraw((uint)(10 + frame));
-			_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle((uint)(10 + frame)), _lane.Key, _mesh);
+			_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle((uint)(10 + frame)), _lane.Key, _mesh, 1u);
 			PrepareEverySlot(busy);
 		}
 
@@ -247,7 +316,7 @@ public sealed class IndirectDrawRecordsTests
 		PrepareEverySlot(released);
 
 		AddLiveDraw(7);
-		_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle(7), _lane.Key, _mesh);
+		_records.RecordStructuralChange(GpuDrawUpdateType.Add, Handle(7), _lane.Key, _mesh, 1u);
 		PrepareEverySlot(kept);
 		Assert.That(_records.PendingStructuralChangeCount, Is.EqualTo(1), "the other set has not replayed it yet");
 
@@ -267,7 +336,7 @@ public sealed class IndirectDrawRecordsTests
 			_device,
 			slotIndex,
 			frameSlot ?? slotIndex,
-			new SharedDrawIndirectEncodeResources(null, null, null, 0, null, indexStream));
+			new SharedDrawIndirectEncodeResources(null, null, null, 0, null, null, indexStream));
 	}
 
 	private void PrepareEverySlot(DrawRecordSet set)
@@ -278,9 +347,9 @@ public sealed class IndirectDrawRecordsTests
 		}
 	}
 
-	private void AddLiveDraw(uint drawIndex)
+	private void AddLiveDraw(uint drawIndex, uint instanceCount = 1)
 	{
-		_liveDraws.Draws.Add(new LiveDraw(drawIndex, _lane.Key, _mesh));
+		_liveDraws.Draws.Add(new LiveDraw(drawIndex, _lane.Key, _mesh, instanceCount));
 		_liveDraws.CurrentHandles.Add(Handle(drawIndex).Value);
 	}
 

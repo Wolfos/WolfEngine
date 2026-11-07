@@ -181,6 +181,7 @@ public sealed class TransparentForwardPass
 			InstanceBuffer = gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = gpuDrawResources.MaterialBuffer,
 			DrawArgsBuffer = gpuDrawResources.DrawArgsBuffer,
+			VisibleInstanceBuffer = gpuDrawResources.VisibleInstanceBuffer,
 			CameraBuffer = gpuDrawResources.CameraBuffer,
 			TransparentEnvironmentBuffer = gpuDrawResources.TransparentEnvironmentBuffer,
 			TransparentLightingBuffer = gpuDrawResources.TransparentLightingBuffer,
@@ -219,6 +220,7 @@ public sealed class TransparentForwardPass
 		if (config.InstanceBuffer is null ||
 		    config.MaterialBuffer is null ||
 		    config.DrawArgsBuffer is null ||
+		    config.VisibleInstanceBuffer is null ||
 		    config.CameraBuffer is null)
 		{
 			commandList.EndPass();
@@ -348,6 +350,7 @@ public sealed class TransparentForwardPass
 				commandList.BindConstantBuffer(bucket.BufferBindings.InstanceRegisterIndex, config.InstanceBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.MaterialRegisterIndex, config.MaterialBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.DrawArgsRegisterIndex, config.DrawArgsBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.VisibleInstanceRegisterIndex, config.VisibleInstanceBuffer);
 				if (config.MaterialGenerationBuffer is not null)
 				{
 					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);

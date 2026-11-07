@@ -29,6 +29,7 @@ public sealed class D3D12DrawRecordEncoder : IDrawRecordEncoder
 		uint commandIndex,
 		uint drawArgsCommandIndex,
 		Mesh mesh,
+		uint instanceCount,
 		in SharedDrawIndirectEncodeResources resources,
 		GraphicsPassBindingSet passBindings,
 		in SharedDrawPerDrawBindings perDrawBindings)
@@ -46,8 +47,13 @@ public sealed class D3D12DrawRecordEncoder : IDrawRecordEncoder
 		{
 			return false;
 		}
-		if (perDrawBindings.InstanceRegisterIndex != 10 || perDrawBindings.MaterialRegisterIndex != 11 ||
-			perDrawBindings.DrawArgsRegisterIndex != 12 || perDrawBindings.MaterialGenerationRegisterIndex != 13)
+		// The pass binds these once as root descriptors rather than per record, so the shader has to declare
+		// them where the root signature puts them.
+		if (perDrawBindings.InstanceRegisterIndex != 10 ||
+		    perDrawBindings.MaterialRegisterIndex != 11 ||
+		    perDrawBindings.DrawArgsRegisterIndex != 12 ||
+		    perDrawBindings.MaterialGenerationRegisterIndex != 13 ||
+		    perDrawBindings.VisibleInstanceRegisterIndex != 9)
 		{
 			return false;
 		}
@@ -70,6 +76,7 @@ public sealed class D3D12DrawRecordEncoder : IDrawRecordEncoder
 			materialGenerationBuffer,
 			resources.DrawArgsBaseOffsetBytes,
 			drawArgsCommandIndex,
+			instanceCount,
 			passBindings,
 			perDrawBindings,
 			resources.IndexStream);

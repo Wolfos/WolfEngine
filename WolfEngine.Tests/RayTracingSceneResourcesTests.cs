@@ -12,6 +12,50 @@ namespace WolfEngine.Tests;
 [TestFixture]
 public sealed class RayTracingSceneResourcesTests
 {
+	[TestCase(0u)]
+	[TestCase(1u)]
+	[TestCase(65534u)]
+	[TestCase(65535u)]
+	[TestCase(65536u)]
+	[TestCase(131070u)]
+	[TestCase((uint)GpuDrawResources.MaxInstanceCount)]
+	public void DdgiActivityScatterDispatch_CoversEveryInstanceWithinBaselineGroupLimits(uint instanceUpperBound)
+	{
+		var (x, y, z) = DdgiUtilities.GetActivityScatterDispatchGroupCount(instanceUpperBound);
+		var source = File.ReadAllText(ShaderPath("Ddgi/ddgi_classify.compute.slang"));
+		var rowWidth = MetalIndirectCompactionKernelTests.ReadUintConstant(source, "DDGI_ACTIVITY_SCATTER_ROW_WIDTH");
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(x, Is.InRange(1u, 65535u));
+			Assert.That(y, Is.InRange(1u, 65535u));
+			Assert.That(z, Is.EqualTo(1u));
+			Assert.That(rowWidth, Is.EqualTo(DdgiUtilities.ActivityScatterRowWidth));
+		});
+
+		var nextInstance = 0u;
+		for (var groupY = 0u; groupY < y; groupY++)
+		{
+			for (var groupX = 0u; groupX < x; groupX++)
+			{
+				var instanceIndex = groupX + groupY * rowWidth;
+				if (instanceIndex >= instanceUpperBound)
+				{
+					continue;
+				}
+
+				if (instanceIndex != nextInstance)
+				{
+					Assert.Fail($"Expected instance {nextInstance}, got {instanceIndex}.");
+				}
+
+				nextInstance++;
+			}
+		}
+
+		Assert.That(nextInstance, Is.EqualTo(instanceUpperBound));
+	}
+
 	[Test]
 	public void DdgiScatterBoundsCoverEveryIntersectingProbe()
 	{

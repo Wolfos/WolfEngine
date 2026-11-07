@@ -42,6 +42,9 @@ internal sealed class FakeDrawRecordEncoder : IDrawRecordEncoder
 	/// <summary>The draw index of every record encoded since the last <see cref="ClearLog"/>, in order.</summary>
 	public List<uint> EncodedDraws { get; } = new();
 
+	/// <summary>The instance count each draw index was last encoded with.</summary>
+	public Dictionary<uint, uint> EncodedInstanceCounts { get; } = new();
+
 	public IGfxIndirectCommandBuffer CreatePage(IGfxDevice device, uint commandCapacity, string name)
 	{
 		var page = new FakeRecordPage(name, commandCapacity);
@@ -64,12 +67,14 @@ internal sealed class FakeDrawRecordEncoder : IDrawRecordEncoder
 		uint commandIndex,
 		uint drawArgsCommandIndex,
 		Mesh mesh,
+		uint instanceCount,
 		in SharedDrawIndirectEncodeResources resources,
 		GraphicsPassBindingSet passBindings,
 		in SharedDrawPerDrawBindings perDrawBindings)
 	{
 		((FakeRecordPage)commandBuffer).Records[commandIndex] = drawArgsCommandIndex;
 		EncodedDraws.Add(drawArgsCommandIndex);
+		EncodedInstanceCounts[drawArgsCommandIndex] = instanceCount;
 		return true;
 	}
 
@@ -117,7 +122,7 @@ internal sealed class FakeLaneBindingProvider : ILaneBindingProvider
 	public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => true;
 
 	public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
-		new SharedDrawGraphicsBufferBindings(0, 10, 11, 12, 13);
+		new SharedDrawGraphicsBufferBindings(0, 10, 11, 12, 13, 9);
 
 	public GraphicsPassBindingSet? GetPassBindings(GpuDrawExecutionLaneDefinition lane) =>
 		new GraphicsPassBindingSet(Array.Empty<GraphicsPassBinding>());

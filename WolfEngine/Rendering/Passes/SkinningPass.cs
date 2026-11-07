@@ -184,7 +184,8 @@ public sealed class SkinningPass
 
 		_lastDispatchedInstanceCount = 0;
         _frameSubmission = device.LastPrimarySubmission.Value;
-		if (EnsureResources(device) == false)
+		if (EnsureResources(device) == false ||
+		    EnsureSkinnedInstanceCapacity(device, drawDatabase.MeshSlotCount) == false)
 		{
 			return;
 		}
@@ -379,21 +380,10 @@ public sealed class SkinningPass
 	public bool EnsureResources(IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(device);
-		if (_skinnedInstanceBuffer is null)
+		if (_skinnedInstanceBuffer is null &&
+		    EnsureSkinnedInstanceCapacity(device, GpuDrawResources.InitialMeshCapacity) == false)
 		{
-			var buffer = device.CreateBuffer(new BufferDescriptor(
-				(ulong)GpuDrawResources.MaxMeshCount * (ulong)Marshal.SizeOf<GpuSkinnedInstanceData>(),
-				BufferUsage.Structured,
-				BufferFlags.AllowShaderResource,
-				"SkinnedInstanceBuffer"));
-			if (buffer is not IWritableGpuBuffer writableInstances)
-			{
-				return false;
-			}
-
-			_instanceShadow = new GpuSkinnedInstanceData[GpuDrawResources.MaxMeshCount];
-			writableInstances.Write<GpuSkinnedInstanceData>(_instanceShadow);
-			_skinnedInstanceBuffer = buffer;
+			return false;
 		}
 
 		if (_skinVertexBuffer is null && TryCreateSkinVertexBuffer(device, 1u) == false)
@@ -406,6 +396,45 @@ public sealed class SkinningPass
 			return false;
 		}
 
+		return true;
+	}
+
+	/// <summary>
+	/// Grows the skinned instance table, which is indexed by mesh handle, to hold <paramref name="meshSlotCount"/>
+	/// slots. The replacement is filled from the CPU copy, and the replaced table is retired since frames in
+	/// flight read it.
+	/// </summary>
+	private bool EnsureSkinnedInstanceCapacity(IGfxDevice device, int meshSlotCount)
+	{
+		if (_skinnedInstanceBuffer is not null && meshSlotCount <= _instanceShadow.Length)
+		{
+			return true;
+		}
+
+		var capacity = GpuDrawResources.GrowCapacity(
+			_instanceShadow.Length,
+			meshSlotCount,
+			GpuDrawResources.InitialMeshCapacity,
+			GpuDrawResources.MaxMeshCount);
+		var buffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)capacity * (ulong)Marshal.SizeOf<GpuSkinnedInstanceData>(),
+			BufferUsage.Structured,
+			BufferFlags.AllowShaderResource,
+			"SkinnedInstanceBuffer"));
+		if (buffer is not IWritableGpuBuffer writableInstances)
+		{
+			return false;
+		}
+
+		Array.Resize(ref _instanceShadow, capacity);
+		writableInstances.Write<GpuSkinnedInstanceData>(_instanceShadow);
+		var previousBuffer = _skinnedInstanceBuffer;
+		if (previousBuffer is not null)
+		{
+			device.Retire(() => (previousBuffer as IDisposable)?.Dispose(), "SkinnedInstanceBuffer");
+		}
+
+		_skinnedInstanceBuffer = buffer;
 		return true;
 	}
 
@@ -469,7 +498,7 @@ public sealed class SkinningPass
 		if (_skinnedInstanceBuffer is not IWritableGpuBuffer ||
 		    drawDatabase.TryGetMeshHandle(instance, out var meshHandle) == false ||
 		    meshHandle.IsValid == false ||
-		    meshHandle.Index >= GpuDrawResources.MaxMeshCount)
+		    meshHandle.Index >= _instanceShadow.Length)
 		{
 			return;
 		}

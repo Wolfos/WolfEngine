@@ -1798,6 +1798,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Graphics.SrvT16].Anonymous.Descriptor = new RootDescriptor(16, 0);
 		rootParameters[D3D12RootBindings.Graphics.SrvT16].ShaderVisibility = ShaderVisibility.All;
 
+		rootParameters[D3D12RootBindings.Graphics.SrvT9].ParameterType = RootParameterType.TypeSrv;
+		rootParameters[D3D12RootBindings.Graphics.SrvT9].Anonymous.Descriptor = new RootDescriptor(9, 0);
+		rootParameters[D3D12RootBindings.Graphics.SrvT9].ShaderVisibility = ShaderVisibility.All;
+
 		rootParameters[D3D12RootBindings.Graphics.CbvB17].ParameterType = RootParameterType.TypeCbv;
 		rootParameters[D3D12RootBindings.Graphics.CbvB17].Anonymous.Descriptor = new RootDescriptor(17, 0);
 		rootParameters[D3D12RootBindings.Graphics.CbvB17].ShaderVisibility = ShaderVisibility.All;

@@ -69,7 +69,7 @@ public sealed class ShadowIndexBuffersTests
     [Test]
     public void TerrainAlwaysUsesOriginalIndicesAndCutoutsKeepUvs()
     {
-        var resources = new SharedDrawIndirectEncodeResources(null, null, null, 0, null, MeshIndexStream.ShadowOpaque);
+        var resources = new SharedDrawIndirectEncodeResources(null, null, null, 0, null, null, MeshIndexStream.ShadowOpaque);
         foreach (var lane in GpuDrawExecutionLanes.Definitions)
         {
             var expected = lane.DrawKind != GpuDrawKind.Mesh ? MeshIndexStream.Main

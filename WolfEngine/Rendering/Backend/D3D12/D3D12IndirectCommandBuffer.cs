@@ -11,7 +11,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 {
 	/// <summary>
 	/// Must match the indirect command signature built in <see cref="D3D12Device"/>: one dword of root
-	/// constants carrying the draw index, then the draw arguments. The buffers a draw reads are bound
+	/// constants carrying the draw index (the batch index), then the draw arguments. The buffers a draw reads are bound
 	/// once per pass instead of per command, which is what keeps this record down to 24 bytes.
 	/// </summary>
 	[StructLayout(LayoutKind.Sequential)]
@@ -142,6 +142,10 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		(uint)(Marshal.OffsetOf<CommandRecord>(nameof(CommandRecord.DrawArguments)) +
 		       Marshal.OffsetOf<DrawIndexedArguments>(nameof(DrawIndexedArguments.IndexCountPerInstance)));
 
+	public uint RecordInstanceCountOffsetInBytes =>
+		(uint)(Marshal.OffsetOf<CommandRecord>(nameof(CommandRecord.DrawArguments)) +
+		       Marshal.OffsetOf<DrawIndexedArguments>(nameof(DrawIndexedArguments.InstanceCount)));
+
 	internal D3D12Buffer? CompactedBuffer => _compactedBuffer;
 
 	internal ulong ArgumentStride => _recordStride;
@@ -163,6 +167,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		D3D12Buffer materialGenerationBuffer,
 		ulong drawArgsBaseOffsetBytes,
 		uint drawArgsCommandIndex,
+		uint instanceCount,
 		GraphicsPassBindingSet passBindings,
 		in SharedDrawPerDrawBindings perDrawBindings,
 		MeshIndexStream indexStream = MeshIndexStream.Main)
@@ -209,7 +214,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			DrawArguments = new DrawIndexedArguments
 			{
 				IndexCountPerInstance = mesh.IndexCount,
-				InstanceCount = 1,
+				InstanceCount = instanceCount,
 				StartIndexLocation = checked((uint)(indexOffsetBytes / sizeof(uint))),
 				BaseVertexLocation = mesh.PackedBaseVertex,
 				StartInstanceLocation = 0

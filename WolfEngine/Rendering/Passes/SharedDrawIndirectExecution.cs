@@ -65,8 +65,6 @@ internal static class SharedDrawIndirectExecution
 		IGfxCommandList commandList,
 		ReadOnlySpan<DrawRecordPage> pages,
 		IGfxBuffer executionRangeBuffer,
-		int slotIndex,
-		int executionLaneIndex,
 		uint commandUpperBound)
 	{
 		for (var i = 0; i < pages.Length; i++)
@@ -77,10 +75,7 @@ internal static class SharedDrawIndirectExecution
 				continue;
 			}
 
-			var rangeIndex = DrawRecordSet.GetCompactedExecutionRangeIndex(
-				slotIndex,
-				executionLaneIndex,
-				page.PageIndex);
+			var rangeIndex = page.CompactedExecutionRangeIndex;
 			commandList.ExecuteCompactedIndirectCommandBuffer(
 				page.CommandBuffer,
 				executionRangeBuffer,

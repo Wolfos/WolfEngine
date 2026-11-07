@@ -83,6 +83,8 @@ public struct GBufferPassConfig
 
 	public IGfxBuffer? DrawArgsBuffer { get; set; }
 
+	public IGfxBuffer? VisibleInstanceBuffer { get; set; }
+
 	public IGfxBuffer? CameraBuffer { get; set; }
 
 	public required ShaderConstantBufferLayout CameraLayout { get; init; }

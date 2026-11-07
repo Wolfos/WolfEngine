@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
@@ -8,11 +9,26 @@ namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
 [SupportedOSPlatform("ios")]
-internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, IDisposable
+internal sealed unsafe class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, IDisposable
 {
+	/// <summary>
+	/// Per command, what compaction needs to issue the command's draw again with the visible instance count.
+	/// Mirrors <c>IndirectDrawGeometry</c> in gpu_draw_compact_icb.metal.
+	/// </summary>
+	[StructLayout(LayoutKind.Sequential)]
+	internal struct CompactionDrawGeometry
+	{
+		public uint IndexCount;
+		public uint IndexOffsetElements;
+	}
+
 	private readonly Dictionary<uint, CommandBufferReferences> _commandReferences = new();
 	private readonly Dictionary<nint, BufferRefEntry> _bufferRefsByPointer = new();
 	private readonly List<MTLBuffer> _referencedBuffers = new();
+	// The index buffer every encoded command draws from, and how many commands do. Compaction binds a single
+	// index buffer per page, so commands that disagree on it cannot be compacted.
+	private MTLBuffer _indexBuffer;
+	private int _indexBufferCommandCount;
 
 	private readonly struct BufferRefEntry
 	{
@@ -39,6 +55,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			MTLBuffer materialBuffer,
 			MTLBuffer materialGenerationBuffer,
 			MTLBuffer drawArgsBuffer,
+			MTLBuffer visibleInstanceBuffer,
 			MTLBuffer[] passBuffers,
 			MetalBuffer vertexBufferOwner,
 			MetalBuffer indexBufferOwner,
@@ -46,6 +63,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			MetalBuffer materialBufferOwner,
 			MetalBuffer materialGenerationBufferOwner,
 			MetalBuffer drawArgsBufferOwner,
+			MetalBuffer visibleInstanceBufferOwner,
 			MetalBuffer[] passBufferOwners,
 			MTLBuffer bindlessCountBuffer,
 			MTLBuffer bindlessTextureBuffer,
@@ -58,6 +76,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			MaterialBuffer = materialBuffer;
 			MaterialGenerationBuffer = materialGenerationBuffer;
 			DrawArgsBuffer = drawArgsBuffer;
+			VisibleInstanceBuffer = visibleInstanceBuffer;
 			PassBuffers = passBuffers;
 			VertexBufferOwner = vertexBufferOwner;
 			IndexBufferOwner = indexBufferOwner;
@@ -65,6 +84,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			MaterialBufferOwner = materialBufferOwner;
 			MaterialGenerationBufferOwner = materialGenerationBufferOwner;
 			DrawArgsBufferOwner = drawArgsBufferOwner;
+			VisibleInstanceBufferOwner = visibleInstanceBufferOwner;
 			PassBufferOwners = passBufferOwners;
 			BindlessCountBuffer = bindlessCountBuffer;
 			BindlessTextureBuffer = bindlessTextureBuffer;
@@ -78,6 +98,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		public MTLBuffer MaterialBuffer { get; }
 		public MTLBuffer MaterialGenerationBuffer { get; }
 		public MTLBuffer DrawArgsBuffer { get; }
+		public MTLBuffer VisibleInstanceBuffer { get; }
 		public MTLBuffer[] PassBuffers { get; }
 		public MetalBuffer VertexBufferOwner { get; }
 		public MetalBuffer IndexBufferOwner { get; }
@@ -85,6 +106,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		public MetalBuffer MaterialBufferOwner { get; }
 		public MetalBuffer MaterialGenerationBufferOwner { get; }
 		public MetalBuffer DrawArgsBufferOwner { get; }
+		public MetalBuffer VisibleInstanceBufferOwner { get; }
 		public MetalBuffer[] PassBufferOwners { get; }
 		public MTLBuffer BindlessCountBuffer { get; }
 		public MTLBuffer BindlessTextureBuffer { get; }
@@ -97,16 +119,33 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		in IndirectCommandBufferDescriptor descriptor,
 		MTLIndirectCommandBuffer buffer,
 		MTLIndirectCommandBuffer compactedBuffer = default,
-		MTLBuffer compactionArguments = default)
+		MTLBuffer compactionArguments = default,
+		MTLBuffer compactionGeometry = default)
 	{
 		Name = name;
 		Descriptor = descriptor;
 		Buffer = buffer;
 		CompactedBuffer = compactedBuffer;
 		CompactionArguments = compactionArguments;
+		CompactionGeometry = compactionGeometry;
 		GpuMemoryCensus.Track(this, "Indirect command buffer", buffer.NativePtr, name);
 		GpuMemoryCensus.Track(this, "Indirect command buffer (compacted)", compactedBuffer.NativePtr, name);
 		GpuMemoryCensus.Track(this, "Indirect compaction arguments", compactionArguments.NativePtr, name);
+		GpuMemoryCensus.Track(this, "Indirect compaction geometry", compactionGeometry.NativePtr, name);
+	}
+
+	/// <summary>Creates the zeroed per-command geometry table that compaction issues draws from.</summary>
+	internal static MTLBuffer CreateCompactionGeometryBuffer(MTLDevice device, uint commandCapacity)
+	{
+		var sizeInBytes = (ulong)commandCapacity * (ulong)sizeof(CompactionDrawGeometry);
+		var buffer = device.NewBuffer(sizeInBytes, MTLResourceOptions.ResourceStorageModeShared);
+		if (buffer.NativePtr == IntPtr.Zero)
+		{
+			return default;
+		}
+
+		new Span<byte>(buffer.Contents.ToPointer(), checked((int)sizeInBytes)).Clear();
+		return buffer;
 	}
 
 	public string? Name { get; }
@@ -128,8 +167,19 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	/// </summary>
 	internal MTLBuffer CompactionArguments { get; }
 
+	/// <summary>
+	/// <see cref="CompactionDrawGeometry"/> per command. Compaction cannot patch the instance count of a copied
+	/// command, so it issues the draw again from this, with the instance count culling left visible.
+	/// </summary>
+	internal MTLBuffer CompactionGeometry { get; }
+
+	/// <summary>The index buffer every encoded command draws from, or null-valued while none is encoded.</summary>
+	internal MTLBuffer CompactionIndexBuffer => _indexBufferCommandCount > 0 ? _indexBuffer : default;
+
 	public IndirectCompactionKind CompactionKind =>
-		CompactedBuffer.NativePtr != IntPtr.Zero && CompactionArguments.NativePtr != IntPtr.Zero
+		CompactedBuffer.NativePtr != IntPtr.Zero &&
+		CompactionArguments.NativePtr != IntPtr.Zero &&
+		CompactionGeometry.NativePtr != IntPtr.Zero
 			? IndirectCompactionKind.NativeCommands
 			: IndirectCompactionKind.None;
 
@@ -137,9 +187,11 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	{
 		ValidateCommandIndex(commandIndex);
 		Buffer.Reset(new NSRange { location = commandIndex, length = 1 });
+		WriteCompactionGeometry(commandIndex, default);
 		if (_commandReferences.TryGetValue(commandIndex, out var refs))
 		{
 			RemoveBufferRefs(in refs);
+			ReleaseIndexBuffer();
 			_commandReferences.Remove(commandIndex);
 		}
 	}
@@ -153,11 +205,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		uint indexCount,
 		ulong indexBufferOffsetBytes,
 		int baseVertex,
+		uint instanceCount,
 		ulong drawArgsOffsetBytes,
 		MetalBuffer instanceBuffer,
 		MetalBuffer materialBuffer,
 		MetalBuffer materialGenerationBuffer,
 		MetalBuffer drawArgsBuffer,
+		MetalBuffer visibleInstanceBuffer,
 		GraphicsPassBindingSet passBindings,
 		in SharedDrawPerDrawBindings perDrawBindings,
 		MTLBuffer bindlessCountBuffer,
@@ -166,10 +220,20 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		MTLBuffer bindlessSamplerBuffer)
 	{
 		ValidateCommandIndex(commandIndex);
+		if (indexFormat != IndexFormat.UInt32 || indexBufferOffsetBytes % sizeof(uint) != 0)
+		{
+			throw new InvalidOperationException(
+				"Compaction re-issues draws from 32-bit indices, so indirect draws must use aligned 32-bit indices.");
+		}
+
 		if (_commandReferences.TryGetValue(commandIndex, out var previousRefs))
 		{
 			RemoveBufferRefs(in previousRefs);
+			ReleaseIndexBuffer();
+			_commandReferences.Remove(commandIndex);
 		}
+
+		AcquireIndexBuffer(indexBuffer.Buffer);
 
 		// Not disposed: the command is owned by the indirect command buffer and returned autoreleased.
 		var command = Buffer.IndirectRenderCommand(commandIndex);
@@ -179,6 +243,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		command.SetVertexBuffer(materialBuffer.Buffer, 0, perDrawBindings.MaterialRegisterIndex);
 		command.SetVertexBuffer(materialGenerationBuffer.Buffer, 0, perDrawBindings.MaterialGenerationRegisterIndex);
 		command.SetVertexBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, perDrawBindings.DrawArgsRegisterIndex);
+		command.SetVertexBuffer(visibleInstanceBuffer.Buffer, 0, perDrawBindings.VisibleInstanceRegisterIndex);
 		command.SetFragmentBuffer(instanceBuffer.Buffer, 0, perDrawBindings.InstanceRegisterIndex);
 		command.SetFragmentBuffer(materialBuffer.Buffer, 0, perDrawBindings.MaterialRegisterIndex);
 		command.SetFragmentBuffer(materialGenerationBuffer.Buffer, 0, perDrawBindings.MaterialGenerationRegisterIndex);
@@ -234,9 +299,16 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			metalIndexType,
 			indexBuffer.Buffer,
 			indexBufferOffsetBytes,
-			1,
+			instanceCount,
 			baseVertex,
 			0);
+		WriteCompactionGeometry(
+			commandIndex,
+			new CompactionDrawGeometry
+			{
+				IndexCount = indexCount,
+				IndexOffsetElements = checked((uint)(indexBufferOffsetBytes / sizeof(uint)))
+			});
 
 		_commandReferences[commandIndex] = new CommandBufferReferences(
 			vertexBuffer.Buffer,
@@ -245,6 +317,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			materialBuffer.Buffer,
 			materialGenerationBuffer.Buffer,
 			drawArgsBuffer.Buffer,
+			visibleInstanceBuffer.Buffer,
 			passBuffers,
 			vertexBuffer,
 			indexBuffer,
@@ -252,6 +325,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			materialBuffer,
 			materialGenerationBuffer,
 			drawArgsBuffer,
+			visibleInstanceBuffer,
 			passBufferOwners,
 			bindlessCountBuffer,
 			bindlessTextureBuffer,
@@ -314,6 +388,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			AddBuffer(refs.MaterialBuffer, destination, seenPointers);
 			AddBuffer(refs.MaterialGenerationBuffer, destination, seenPointers);
 			AddBuffer(refs.DrawArgsBuffer, destination, seenPointers);
+			AddBuffer(refs.VisibleInstanceBuffer, destination, seenPointers);
 			foreach (var passBuffer in refs.PassBuffers)
 				AddBuffer(passBuffer, destination, seenPointers);
 			AddBuffer(refs.BindlessCountBuffer, destination, seenPointers);
@@ -347,6 +422,43 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		{
 			CompactionArguments.Dispose();
 		}
+
+		if (CompactionGeometry.NativePtr != IntPtr.Zero)
+		{
+			CompactionGeometry.Dispose();
+		}
+	}
+
+	private void WriteCompactionGeometry(uint commandIndex, CompactionDrawGeometry geometry)
+	{
+		if (CompactionGeometry.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		((CompactionDrawGeometry*)CompactionGeometry.Contents.ToPointer())[commandIndex] = geometry;
+	}
+
+	private void AcquireIndexBuffer(MTLBuffer indexBuffer)
+	{
+		if (_indexBufferCommandCount > 0 && _indexBuffer.NativePtr != indexBuffer.NativePtr)
+		{
+			throw new InvalidOperationException(
+				$"Indirect command buffer '{Name ?? "<unnamed>"}' would draw from two index buffers, but compaction " +
+				"binds one per page. Every shared draw must come from the packed index buffer.");
+		}
+
+		_indexBuffer = indexBuffer;
+		_indexBufferCommandCount++;
+	}
+
+	private void ReleaseIndexBuffer()
+	{
+		_indexBufferCommandCount--;
+		if (_indexBufferCommandCount == 0)
+		{
+			_indexBuffer = default;
+		}
 	}
 
 	private void ValidateCommandIndex(uint commandIndex)
@@ -378,6 +490,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		AddBufferRef(refs.MaterialBuffer, refs.MaterialBufferOwner);
 		AddBufferRef(refs.MaterialGenerationBuffer, refs.MaterialGenerationBufferOwner);
 		AddBufferRef(refs.DrawArgsBuffer, refs.DrawArgsBufferOwner);
+		AddBufferRef(refs.VisibleInstanceBuffer, refs.VisibleInstanceBufferOwner);
 		for (var i = 0; i < refs.PassBuffers.Length; i++)
 			AddBufferRef(refs.PassBuffers[i], refs.PassBufferOwners[i]);
 		AddBufferRef(refs.BindlessCountBuffer);
@@ -394,6 +507,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		RemoveBufferRef(refs.MaterialBuffer);
 		RemoveBufferRef(refs.MaterialGenerationBuffer);
 		RemoveBufferRef(refs.DrawArgsBuffer);
+		RemoveBufferRef(refs.VisibleInstanceBuffer);
 		foreach (var passBuffer in refs.PassBuffers)
 			RemoveBufferRef(passBuffer);
 		RemoveBufferRef(refs.BindlessCountBuffer);

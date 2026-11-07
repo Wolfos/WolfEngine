@@ -11,8 +11,8 @@ import "../Terrain/terrain_layer_blend.slang";
 // Deliberately declares no registers. Each pass binds the scene tables to its own registers and
 // hands them over as an RtSceneTables value.
 
-static const uint RT_MAX_INSTANCE_COUNT = 65535u;
-static const uint RT_MAX_MATERIAL_COUNT = 65535u;
+static const uint RT_MAX_INSTANCE_COUNT = 1048576u;
+static const uint RT_MAX_MATERIAL_COUNT = 1048576u;
 static const uint RT_DRAW_KIND_TERRAIN = 2u;
 
 struct RtSceneTables

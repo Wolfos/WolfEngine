@@ -6,13 +6,15 @@ import "../Common/normal_decode.slang";
 import "../Animation/skinning_common.slang";
 #endif
 
-#define WOLF_MAX_INSTANCE_COUNT 65535
-#define WOLF_MAX_MATERIAL_COUNT 65535
+#define WOLF_MAX_INSTANCE_COUNT 1048576
+#define WOLF_MAX_MATERIAL_COUNT 1048576
 
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
+// Instance ids of each batch's visible members, from the batch's draw args start onwards.
+StructuredBuffer<uint> g_VisibleInstances : register(t9);
 
 #ifdef WOLF_GBUFFER_SKINNED
 // Rebuilds skinned vertices' previous positions for motion vectors.
@@ -105,7 +107,15 @@ VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
     GpuDrawArgs drawArgs = g_DrawArgsTable[drawIndex];
-    if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
+    // A record executed without compaction draws its batch's full capacity; instances past the visible count
+    // are discarded here.
+    uint instanceId = 0;
+    if (input.instanceId < drawArgs.instanceCount)
+    {
+        instanceId = g_VisibleInstances[drawArgs.startInstance + input.instanceId];
+    }
+
+    if (instanceId == 0 || instanceId >= WOLF_MAX_INSTANCE_COUNT)
     {
         // Emit a guaranteed clipped position for inactive commands.
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);
@@ -118,7 +128,6 @@ VSOutput vertexShader(VSInput input)
         return output;
     }
 
-    uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;

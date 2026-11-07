@@ -1,3 +1,4 @@
+using Moq;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
@@ -10,17 +11,18 @@ public sealed class GpuDrawBucketHardeningTests
 	[Test]
 	public void ShadowResourceOffsets_AreDisjointAcrossAllCascadesAndLanes()
 	{
-		var drawArgsStride = GpuDrawResources.GetShadowDrawArgsOffsetBytes(1)
-		                     - GpuDrawResources.GetShadowDrawArgsOffsetBytes(0);
+		var resources = CreateResources();
+		var drawArgsStride = resources.GetShadowDrawArgsOffsetBytes(1)
+		                     - resources.GetShadowDrawArgsOffsetBytes(0);
 		Assert.That(drawArgsStride, Is.GreaterThan(0));
 
 		for (var cascadeIndex = 0; cascadeIndex < GpuDrawResources.MaxShadowViewCount; cascadeIndex++)
 		{
 			Assert.That(
-				GpuDrawResources.GetShadowDrawArgsElementOffset(cascadeIndex),
-				Is.EqualTo(cascadeIndex * GpuDrawResources.MaxDrawCount));
+				resources.GetShadowDrawArgsElementOffset(cascadeIndex),
+				Is.EqualTo(cascadeIndex * resources.InstanceCapacity));
 			Assert.That(
-				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
+				resources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
 				Is.EqualTo((ulong)cascadeIndex * drawArgsStride));
 
 			for (var laneIndex = 0; laneIndex < GpuDrawExecutionLanes.ExecutionLaneCount; laneIndex++)
@@ -40,15 +42,82 @@ public sealed class GpuDrawBucketHardeningTests
 	[Test]
 	public void ShadowResourceOffsets_RejectOutOfRangeIndices()
 	{
+		var resources = CreateResources();
 		Assert.Throws<ArgumentOutOfRangeException>(
-			() => GpuDrawResources.GetShadowDrawArgsElementOffset(-1));
+			() => resources.GetShadowDrawArgsElementOffset(-1));
 		Assert.Throws<ArgumentOutOfRangeException>(
-			() => GpuDrawResources.GetShadowDrawArgsElementOffset(GpuDrawResources.MaxShadowViewCount));
+			() => resources.GetShadowDrawArgsElementOffset(GpuDrawResources.MaxShadowViewCount));
 		Assert.Throws<ArgumentOutOfRangeException>(
 			() => GpuDrawResources.GetShadowLaneElementOffset(0, -1));
 		Assert.Throws<ArgumentOutOfRangeException>(
 			() => GpuDrawResources.GetShadowLaneElementOffset(0, GpuDrawExecutionLanes.ExecutionLaneCount));
 	}
+
+	[Test]
+	public void ShadowDrawArgsSlices_FollowTheInstanceCapacity_WhenTheTablesGrow()
+	{
+		var resources = CreateResources();
+		var device = CreateDevice();
+
+		resources.EnsureTableCapacity(device, GpuDrawResources.InitialInstanceCapacity * 3, 1, 1);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(resources.InstanceCapacity, Is.EqualTo(GpuDrawResources.InitialInstanceCapacity * 4));
+			Assert.That(resources.GetShadowDrawArgsElementOffset(2), Is.EqualTo(2 * resources.InstanceCapacity));
+			Assert.That(
+				resources.ShadowDrawArgsBuffer!.Descriptor.SizeInBytes,
+				Is.EqualTo((ulong)(GpuDrawResources.MaxShadowViewCount * resources.InstanceCapacity) * 32UL));
+		});
+	}
+
+	[Test]
+	public void EnsureTableCapacity_ReplacesOnlyTheTablesThatGrow()
+	{
+		var resources = CreateResources();
+		var device = CreateDevice();
+		var instances = resources.InstanceBuffer;
+		var meshes = resources.MeshBuffer;
+		var generation = resources.TableGeneration;
+
+		Assert.That(resources.EnsureTableCapacity(device, 10, 10, 10), Is.False, "everything still fits");
+		Assert.That(resources.TableGeneration, Is.EqualTo(generation));
+
+		Assert.That(resources.EnsureTableCapacity(device, 1, GpuDrawResources.InitialMeshCapacity + 1, 1), Is.True);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(resources.InstanceBuffer, Is.SameAs(instances));
+			Assert.That(resources.MeshBuffer, Is.Not.SameAs(meshes));
+			Assert.That(resources.MeshCapacity, Is.EqualTo(GpuDrawResources.InitialMeshCapacity * 2));
+			Assert.That(resources.TableGeneration, Is.GreaterThan(generation));
+			Assert.That(resources.IndirectBindingVersion, Is.GreaterThan(1UL), "a replacement re-encodes every record");
+		});
+	}
+
+	private static GpuDrawResources CreateResources()
+	{
+		var resources = new GpuDrawResources(new ShaderCompiler());
+		resources.EnsureTableCapacity(CreateDevice(), 1, 1, 1);
+		return resources;
+	}
+
+	/// <summary>A device whose buffers report the descriptor they were created with.</summary>
+	internal static IGfxDevice CreateDevice()
+	{
+		var device = new Mock<IGfxDevice>();
+		device
+			.Setup(d => d.CreateBuffer(in It.Ref<BufferDescriptor>.IsAny))
+			.Returns(new CreateBufferCallback((in BufferDescriptor descriptor) =>
+			{
+				var buffer = new Mock<IGfxBuffer>();
+				buffer.SetupGet(b => b.Descriptor).Returns(descriptor);
+				return buffer.Object;
+			}));
+		return device.Object;
+	}
+
+	private delegate IGfxBuffer CreateBufferCallback(in BufferDescriptor descriptor);
 
 	[Test]
 	public void Registry_DefaultBucketsExposeStableIdsAndAlphaModeMappings()

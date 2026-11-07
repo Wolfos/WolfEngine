@@ -222,7 +222,7 @@ public sealed class DdgiPass
 			ProbeUpdateFrames = probeUpdateFrames,
 			ProbeUpdateFrameIndex = probeUpdateFrameIndex,
 			ActiveProbeCount = activeProbeCount,
-			ActiveDrawCommandUpperBound = gpuDrawResources.ActiveDrawCommandUpperBound,
+			ActiveInstanceUpperBound = gpuDrawResources.ActiveInstanceUpperBound,
 			MaxRayDistance = DdgiUtilities.GetMaxRayDistance(config),
 			NormalBias = Math.Max(config.NormalBias, 0.0f),
 			ViewBias = Math.Max(config.ViewBias, 0.0f),
@@ -264,7 +264,9 @@ public sealed class DdgiPass
 		WriteSettingsConstants(_classifyScatterSettingsWriter, commandList, config);
 		commandList.SetComputeReadOnlyBuffer(2, config.DrawCommandBuffer);
 		commandList.SetComputeReadOnlyBuffer(3, config.InstanceBuffer);
-		commandList.Dispatch(Math.Max(config.ActiveDrawCommandUpperBound, 1u), 1u, 1u);
+		var (scatterX, scatterY, scatterZ) =
+			DdgiUtilities.GetActivityScatterDispatchGroupCount(config.ActiveInstanceUpperBound);
+		commandList.Dispatch(scatterX, scatterY, scatterZ);
 		commandList.SynchronizeUnorderedAccess(config.ProbeActivityMarksTexture);
 
 		commandList.BindPipeline(config.ClassifyPipeline);
@@ -464,7 +466,7 @@ public sealed class DdgiPass
 		settingsWriter.SetUInt("frameIndex", config.FrameIndex);
 		settingsWriter.SetUInt("historyValid", config.HistoryValid ? 1u : 0u);
 		settingsWriter.SetUInt("sidecarHitShadingAvailable", config.SidecarHitShadingAvailable ? 1u : 0u);
-		settingsWriter.SetUInt("activeDrawCommandUpperBound", config.ActiveDrawCommandUpperBound);
+		settingsWriter.SetUInt("activeInstanceUpperBound", config.ActiveInstanceUpperBound);
 		settingsWriter.SetUInt(
 			"debugFirstProbeRelocationReadback",
 			config.DebugFirstProbeRelocationReadback ? 1u : 0u);

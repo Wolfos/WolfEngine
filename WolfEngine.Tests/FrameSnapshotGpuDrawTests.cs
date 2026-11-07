@@ -181,7 +181,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		consumedSnapshotA.GpuDrawDatabase.CollectDrawEntries(entries);
 
 		Assert.That(entries, Has.Count.EqualTo(1));
-		Assert.That(entries[0].DrawHandle.Index, Is.EqualTo(1));
+		Assert.That(entries[0].InstanceHandle.Index, Is.EqualTo(1));
 		Assert.That(entries[0].DrawKind, Is.EqualTo(GpuDrawKind.Mesh));
 		Assert.That(entries[0].World.Translation.X, Is.EqualTo(1.0f).Within(0.0001f));
 	}
@@ -210,14 +210,14 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
-	public void GpuDrawDatabase_ResetForSnapshotWrite_DropsBacklogLargerThanTheGpuTables()
+	public void GpuDrawDatabase_ResetForSnapshotWrite_DropsBacklogPastTheRetainedLimit()
 	{
 		var database = new GpuDrawDatabase();
 		var mesh = CreateTestMesh();
 		var material = new Material("backlog-shader");
 		var entity = new Entity(1, 1);
 		var updates = new List<GpuDrawUpdate>();
-		for (var i = 0; i <= GpuDrawResources.MaxDrawCount; i++)
+		for (var i = 0; i <= GpuDrawDatabase.MaxRetainedUpdateCount; i++)
 		{
 			WriteEntity(database, entity, mesh, material, i);
 		}
@@ -751,17 +751,16 @@ public sealed class FrameSnapshotGpuDrawTests
 		second.ConsumeUpdates(updates);
 		var secondAdd = updates.Single(update => update.Type == GpuDrawUpdateType.Add);
 
-		Assert.That(secondAdd.DrawHandle, Is.EqualTo(firstAdd.DrawHandle));
 		Assert.That(secondAdd.InstanceHandle, Is.EqualTo(firstAdd.InstanceHandle));
 		Assert.That(secondAdd.MeshHandle, Is.EqualTo(firstAdd.MeshHandle));
 		Assert.That(secondAdd.MaterialHandle, Is.EqualTo(firstAdd.MaterialHandle));
-		Assert.That(first.IsCurrentDrawHandle(firstAdd.DrawHandle), Is.True);
-		Assert.That(second.IsCurrentDrawHandle(firstAdd.DrawHandle), Is.True);
-		Assert.That(second.GetActiveDrawCommandUpperBound(), Is.EqualTo(first.GetActiveDrawCommandUpperBound()));
+		Assert.That(first.IsCurrentInstanceHandle(firstAdd.InstanceHandle), Is.True);
+		Assert.That(second.IsCurrentInstanceHandle(firstAdd.InstanceHandle), Is.True);
+		Assert.That(second.GetActiveInstanceUpperBound(), Is.EqualTo(first.GetActiveInstanceUpperBound()));
 	}
 
 	[Test]
-	public void GpuDrawDatabase_SharedHandles_DrawStaysCurrentUntilEveryDatabaseRemovesIt()
+	public void GpuDrawDatabase_SharedHandles_InstanceStaysCurrentUntilEveryDatabaseRemovesIt()
 	{
 		var history = new GpuDrawTransformHistory();
 		var handles = new GpuDrawHandleRegistry();
@@ -779,17 +778,17 @@ public sealed class FrameSnapshotGpuDrawTests
 			database.ConsumeUpdates(updates);
 		}
 
-		var drawHandle = updates.Single().DrawHandle;
+		var instanceHandle = updates.Single().InstanceHandle;
 
 		first.BeginSync();
 		first.RemovePersistentMesh(entity);
 		first.EndSync();
-		Assert.That(first.IsCurrentDrawHandle(drawHandle), Is.True);
+		Assert.That(first.IsCurrentInstanceHandle(instanceHandle), Is.True);
 
 		second.BeginSync();
 		second.RemovePersistentMesh(entity);
 		second.EndSync();
-		Assert.That(second.IsCurrentDrawHandle(drawHandle), Is.False);
+		Assert.That(second.IsCurrentInstanceHandle(instanceHandle), Is.False);
 	}
 
 	[Test]
@@ -835,7 +834,7 @@ public sealed class FrameSnapshotGpuDrawTests
 
 		database.CollectDrawEntries(entries);
 		Assert.That(entries, Has.Count.EqualTo(2));
-		Assert.That(entries.Select(entry => entry.DrawHandle.Index).Distinct().Count(), Is.EqualTo(2));
+		Assert.That(entries.Select(entry => entry.InstanceHandle.Index).Distinct().Count(), Is.EqualTo(2));
 		Assert.That(entries.Select(entry => entry.Mesh), Is.EquivalentTo(new[] { firstMesh, secondMesh }));
 	}
 
@@ -861,13 +860,13 @@ public sealed class FrameSnapshotGpuDrawTests
 
 		var secondEntries = new List<GpuDrawEntry>();
 		secondView.CollectDrawEntries(secondEntries);
-		var laterHandle = secondEntries.Single().DrawHandle;
-		Assert.That(firstView.IsCurrentDrawHandle(laterHandle), Is.False,
+		var laterHandle = secondEntries.Single().InstanceHandle;
+		Assert.That(firstView.IsCurrentInstanceHandle(laterHandle), Is.False,
 			"the early view copied generations before the later view allocated its slot");
 
 		firstView.RefreshSharedHandleState();
 
-		Assert.That(firstView.IsCurrentDrawHandle(laterHandle), Is.True);
+		Assert.That(firstView.IsCurrentInstanceHandle(laterHandle), Is.True);
 	}
 
 	[Test]
@@ -1016,7 +1015,6 @@ public sealed class FrameSnapshotGpuDrawTests
 			GpuDrawUpdateType.Add,
 			GpuDrawUpdateType.Add
 		}));
-		Assert.That(updates[0].DrawHandle, Is.Not.EqualTo(updates[1].DrawHandle));
 		Assert.That(updates[0].InstanceHandle, Is.Not.EqualTo(updates[1].InstanceHandle));
 
 		var entries = new List<GpuDrawEntry>();
@@ -1049,7 +1047,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(updates, Has.Count.EqualTo(2));
 		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.Terrain), Is.True);
 		Assert.That(updates.All(update => update.Type == GpuDrawUpdateType.Add), Is.True);
-		Assert.That(updates[0].DrawHandle, Is.Not.EqualTo(updates[1].DrawHandle));
+		Assert.That(updates[0].InstanceHandle, Is.Not.EqualTo(updates[1].InstanceHandle));
 		Assert.That(updates[0].MaterialHandle, Is.EqualTo(updates[1].MaterialHandle));
 
 		var entries = new List<GpuDrawEntry>();
@@ -1078,7 +1076,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		database.TouchTerrainChunk(entity, 0, mesh, material, bounds, CreateTerrainInstanceData(), initialSurface, Matrix4x4.Identity);
 		database.EndSync();
 		database.ConsumeUpdates(updates);
-		var initialDrawHandle = updates[0].DrawHandle;
+		var initialInstanceHandle = updates[0].InstanceHandle;
 		var initialMaterialHandle = updates[0].MaterialHandle;
 
 		database.BeginSync();
@@ -1087,7 +1085,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		database.ConsumeUpdates(updates);
 
 		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.UpdateTransform }));
-		Assert.That(updates[0].DrawHandle, Is.EqualTo(initialDrawHandle));
+		Assert.That(updates[0].InstanceHandle, Is.EqualTo(initialInstanceHandle));
 		Assert.That(updates[0].MaterialHandle, Is.EqualTo(initialMaterialHandle));
 
 		database.BeginSync();
@@ -1096,7 +1094,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		database.ConsumeUpdates(updates);
 
 		Assert.That(updates.Select(update => update.Type), Does.Contain(GpuDrawUpdateType.UpdateMaterial));
-		Assert.That(updates.All(update => update.DrawHandle.Equals(initialDrawHandle)), Is.True);
+		Assert.That(updates.All(update => update.InstanceHandle.Equals(initialInstanceHandle)), Is.True);
 		Assert.That(updates.All(update => update.MaterialHandle.Equals(initialMaterialHandle)), Is.True);
 		Assert.That(updates.Single(update => update.Type == GpuDrawUpdateType.UpdateMaterial).TerrainSurface!.Value.HeightBlendSharpness, Is.EqualTo(8.0f).Within(0.0001f));
 
@@ -1105,7 +1103,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		database.ConsumeUpdates(updates);
 
 		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Remove }));
-		Assert.That(updates[0].DrawHandle, Is.EqualTo(initialDrawHandle));
+		Assert.That(updates[0].InstanceHandle, Is.EqualTo(initialInstanceHandle));
 	}
 
 	[Test]
@@ -1113,6 +1111,7 @@ public sealed class FrameSnapshotGpuDrawTests
 	{
 		AssertGpuStructSizeIs16ByteAligned<GpuInstanceData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuMaterialData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuDrawBatchData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuTerrainMaterialData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuTerrainLayerData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuMeshData>();

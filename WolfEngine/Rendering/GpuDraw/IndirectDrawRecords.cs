@@ -18,7 +18,7 @@ public sealed class IndirectDrawRecords
 	private readonly IDrawRecordEncoder _encoder;
 	private readonly ILiveDrawSource _liveDraws;
 	private readonly IDrawRecordStalenessInputSource _stalenessInputs;
-	// Every tracked set, and when each was last prepared was last prepared, in frames counted by BeginFrame. A set idle for a full turn of the slot ring
+	// Every tracked set, and when each was last prepared, in frames counted by BeginFrame. A set idle for a full turn of the slot ring
 	// stops holding back replay-log compaction and re-encodes in full on its next use.
 	private readonly Dictionary<DrawRecordSet, long> _setLastUse = new();
 	private readonly List<StructuralChange> _replayLog = new();
@@ -35,7 +35,8 @@ public sealed class IndirectDrawRecords
 		GpuDrawUpdateType Type,
 		GpuDrawHandle DrawHandle,
 		GpuDrawExecutionKey ExecutionKey,
-		Mesh? Mesh);
+		Mesh? Mesh,
+		uint InstanceCount);
 
 	public IndirectDrawRecords(
 		IDrawRecordEncoder encoder,
@@ -72,17 +73,28 @@ public sealed class IndirectDrawRecords
 	}
 
 	/// <summary>
-	/// Records a draw being added, removed, or moved to another lane, mesh or material, for every set to replay the
+	/// Records a draw being added, removed, or changed in lane, mesh or instance count, for every set to replay the
 	/// next time it is prepared.
 	/// </summary>
+	/// <param name="instanceCount">
+	/// Instances the record draws when it executes without compaction. Compaction replaces it with the number
+	/// culling left visible.
+	/// </param>
 	public void RecordStructuralChange(
 		GpuDrawUpdateType type,
 		in GpuDrawHandle drawHandle,
 		in GpuDrawExecutionKey executionKey,
-		Mesh? mesh)
+		Mesh? mesh,
+		uint instanceCount)
 	{
 		_latestStructuralVersion++;
-		_replayLog.Add(new StructuralChange(_latestStructuralVersion, type, drawHandle, executionKey, mesh));
+		_replayLog.Add(new StructuralChange(
+			_latestStructuralVersion,
+			type,
+			drawHandle,
+			executionKey,
+			mesh,
+			instanceCount));
 	}
 
 	/// <summary>Brings one slot of a set up to date before its pass executes it.</summary>
@@ -181,22 +193,26 @@ public sealed class IndirectDrawRecords
 		IGfxDevice device,
 		in SharedDrawIndirectEncodeResources resources)
 	{
-		if (_liveDraws.IsCurrent(change.DrawHandle) == false)
-		{
-			return;
-		}
-
 		if (change.DrawHandle.Index == 0 || change.DrawHandle.Index >= GpuDrawResources.MaxDrawCount)
 		{
 			return;
 		}
 
+		// Changes replay in the order they were recorded, so a remove always applies: anything that reused the slot
+		// since comes later in the log. An add whose draw has changed since is skipped for the same reason, because
+		// a later change describes what the slot holds now.
 		var commandIndex = (uint)change.DrawHandle.Index;
 		if (change.Type == GpuDrawUpdateType.Remove ||
 		    GpuDrawClassification.SupportsMeshBackedGeometry(change.ExecutionKey.DrawKind) == false ||
-		    change.Mesh is null)
+		    change.Mesh is null ||
+		    change.InstanceCount == 0)
 		{
 			ResetCommandInEveryLane(set, slotIndex, commandIndex);
+			return;
+		}
+
+		if (_liveDraws.IsCurrent(change.DrawHandle) == false)
+		{
 			return;
 		}
 
@@ -205,6 +221,7 @@ public sealed class IndirectDrawRecords
 			commandIndex,
 			change.ExecutionKey,
 			change.Mesh,
+			change.InstanceCount,
 			set,
 			slotIndex,
 			device,
@@ -240,6 +257,7 @@ public sealed class IndirectDrawRecords
 				draw.DrawIndex,
 				draw.ExecutionKey,
 				draw.Mesh,
+				draw.InstanceCount,
 				set,
 				slotIndex,
 				device,
@@ -321,6 +339,7 @@ public sealed class IndirectDrawRecords
 		uint commandIndex,
 		GpuDrawExecutionKey executionKey,
 		Mesh mesh,
+		uint instanceCount,
 		DrawRecordSet set,
 		int slotIndex,
 		IGfxDevice device,
@@ -348,6 +367,7 @@ public sealed class IndirectDrawRecords
 			    pageCommandIndex,
 			    commandIndex,
 			    mesh,
+			    instanceCount,
 			    laneResources,
 			    passBindings,
 			    perDrawBindings) == false)

@@ -22,6 +22,17 @@ public static class DdgiUtilities
 	private const float VisibilityVarianceFloor = 0.000001f;
 	private const float MaxProbeRelocationDistanceFactor = 0.45f;
 	private const float RelocationMinimumTolerance = 0.001f;
+	// Mirrored by DDGI_ACTIVITY_SCATTER_ROW_WIDTH in ddgi_classify.compute.slang. Stays within D3D12's baseline limit.
+	internal const uint ActivityScatterRowWidth = 65535;
+
+	internal static (uint X, uint Y, uint Z) GetActivityScatterDispatchGroupCount(uint instanceUpperBound)
+	{
+		var groupCount = Math.Max(instanceUpperBound, 1u);
+		var x = Math.Min(groupCount, ActivityScatterRowWidth);
+		var y = ((groupCount - 1u) / ActivityScatterRowWidth) + 1u;
+
+		return (x, y, 1u);
+	}
 
 	public static bool IsRayTracedDdgiEnabled(RenderConfig config)
 	{

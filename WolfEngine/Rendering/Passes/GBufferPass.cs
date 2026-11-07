@@ -60,6 +60,7 @@ public static class GBufferPass
 		if (config.InstanceBuffer is null ||
 		    config.MaterialBuffer is null ||
 		    config.DrawArgsBuffer is null ||
+		    config.VisibleInstanceBuffer is null ||
 		    config.CameraBuffer is null)
 		{
 			commandList.EndPass();
@@ -89,6 +90,7 @@ public static class GBufferPass
 				commandList.BindConstantBuffer(bucket.BufferBindings.InstanceRegisterIndex, config.InstanceBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.MaterialRegisterIndex, config.MaterialBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.DrawArgsRegisterIndex, config.DrawArgsBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.VisibleInstanceRegisterIndex, config.VisibleInstanceBuffer);
 				if (config.MaterialGenerationBuffer is not null)
 				{
 					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
@@ -99,8 +101,6 @@ public static class GBufferPass
 						commandList,
 						bucket.IndirectCommandPages.Span,
 						executionRangeBuffer,
-						config.IndirectCommandSlot,
-						bucket.ExecutionIndex,
 						config.FallbackMaxCommandCount);
 				}
 				else

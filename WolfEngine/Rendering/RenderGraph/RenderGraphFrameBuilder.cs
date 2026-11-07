@@ -2537,7 +2537,7 @@ internal sealed class RenderGraphFrameBuilder
 				_shadowMapPass.GetIndirectCommandSet(cascadeIndex, _gpuDrawResources.ActiveViewIndex),
 				DrawPassParticipation.ShadowCaster,
 				_gpuDrawResources.ShadowDrawArgsBuffer,
-				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
+				_gpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
 				lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane));
 			_shadowMapPass.SetCompactedExecution(cascadeIndex, compacted);
 		}
@@ -2551,8 +2551,9 @@ internal sealed class RenderGraphFrameBuilder
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(
 				_gpuDrawResources,
 				_gpuDrawResources.ShadowDrawArgsBuffer,
-				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
-				_view.FrameResources.Config.ShadowMaps.WeldShadowVertices ? MeshIndexStream.ShadowOpaque : MeshIndexStream.Main));
+				_gpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
+				_view.FrameResources.Config.ShadowMaps.WeldShadowVertices ? MeshIndexStream.ShadowOpaque : MeshIndexStream.Main,
+				_gpuDrawResources.ShadowVisibleInstanceBuffer));
 	}
 
 	private void ExecuteShadowMap(RenderGraphContext context)
@@ -2643,6 +2644,7 @@ internal sealed class RenderGraphFrameBuilder
 			TerrainMaterialBuffer = _gpuDrawResources.TerrainMaterialBuffer,
 			TerrainLayerBuffer = _gpuDrawResources.TerrainLayerBuffer,
 			DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
+			VisibleInstanceBuffer = _gpuDrawResources.VisibleInstanceBuffer,
 			DrawCountPerBucketBuffer = _gpuDrawResources.DrawCountPerBucketBuffer,
 			DrawExecutionRangePerBucketBuffer = _gpuDrawResources.DrawExecutionRangePerBucketBuffer,
 			MaterialGenerationBuffer = _gpuDrawResources.MaterialGenerationBuffer,

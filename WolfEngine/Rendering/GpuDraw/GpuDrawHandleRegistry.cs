@@ -7,8 +7,8 @@ namespace WolfEngine.Rendering;
 /// The instance, mesh, material and generation tables on the GPU are shared between the snapshots, so a
 /// slot has to mean the same draw or resource whichever database wrote it last. The databases do not see
 /// identical histories: an entity created and destroyed between two snapshots only ever reaches one of
-/// them. Allocating per database let the two hand the same slot to different draws, so slots are allocated
-/// here instead, keyed by draw and by resource, and released once no database references them.
+/// them. Allocating per database let the two hand the same slot to different records, so slots are allocated
+/// here instead, keyed by record and by resource, and released once no database references them.
 /// <para>
 /// Only the thread that builds frames touches this. Each database copies the state the render thread needs
 /// when it finishes syncing.
@@ -16,65 +16,69 @@ namespace WolfEngine.Rendering;
 /// </remarks>
 internal sealed class GpuDrawHandleRegistry
 {
-	private readonly GpuDrawHandlePool _drawHandlePool = new(GpuDrawResources.MaxDrawCount - 1);
 	private readonly GpuDrawHandlePool _instanceHandlePool = new(GpuDrawResources.MaxInstanceCount - 1);
 	private readonly GpuDrawHandlePool _meshHandlePool = new(GpuDrawResources.MaxMeshCount - 1);
 	private readonly GpuDrawHandlePool _materialHandlePool = new(GpuDrawResources.MaxMaterialCount - 1);
-	private readonly Dictionary<GpuDrawDatabase.DrawRecordKey, DrawSlot> _drawSlots = new();
+	private readonly Dictionary<GpuDrawDatabase.DrawRecordKey, InstanceSlot> _instanceSlots = new();
 	private readonly Dictionary<Mesh, ResourceSlot> _meshSlots = new(ReferenceEqualityComparer.Instance);
 	private readonly Dictionary<Material, ResourceSlot> _materialSlots = new(ReferenceEqualityComparer.Instance);
-	private int _maxDrawIndex;
-	private bool _maxDrawIndexDirty;
+	private int _maxInstanceIndex;
+	private bool _maxInstanceIndexDirty;
 
-	/// <summary>Changes whenever a generation table or the active draw range changes.</summary>
+	/// <summary>Changes whenever a generation table or the active instance range changes.</summary>
 	public int Version { get; private set; }
 
-	public void AcquireDraw(in GpuDrawDatabase.DrawRecordKey key, out GpuDrawHandle drawHandle, out GpuDrawHandle instanceHandle)
+	/// <returns>
+	/// The instance slot every database shares for <paramref name="key"/>, or <see cref="GpuDrawHandle.Invalid"/>
+	/// when the instance table is full. A database that got an invalid handle must not release the key.
+	/// </returns>
+	public GpuDrawHandle AcquireInstance(in GpuDrawDatabase.DrawRecordKey key)
 	{
-		if (_drawSlots.TryGetValue(key, out var slot))
+		if (_instanceSlots.TryGetValue(key, out var slot))
 		{
 			slot.RefCount++;
+			_instanceSlots[key] = slot;
+			return slot.InstanceHandle;
 		}
-		else
+
+		if (_instanceHandlePool.TryAcquire(out var instanceHandle) == false)
 		{
-			slot = new DrawSlot
-			{
-				DrawHandle = _drawHandlePool.Acquire(),
-				InstanceHandle = _instanceHandlePool.Acquire(),
-				RefCount = 1
-			};
-			if (slot.DrawHandle.Index > _maxDrawIndex)
-			{
-				_maxDrawIndex = slot.DrawHandle.Index;
-			}
-
-			Version++;
+			return GpuDrawHandle.Invalid;
 		}
 
-		_drawSlots[key] = slot;
-		drawHandle = slot.DrawHandle;
-		instanceHandle = slot.InstanceHandle;
+		slot = new InstanceSlot
+		{
+			InstanceHandle = instanceHandle,
+			RefCount = 1
+		};
+		if (instanceHandle.Index > _maxInstanceIndex)
+		{
+			_maxInstanceIndex = instanceHandle.Index;
+		}
+
+		_instanceSlots[key] = slot;
+		Version++;
+		return instanceHandle;
 	}
 
-	public void ReleaseDraw(in GpuDrawDatabase.DrawRecordKey key)
+	public void ReleaseInstance(in GpuDrawDatabase.DrawRecordKey key)
 	{
-		if (_drawSlots.TryGetValue(key, out var slot) == false)
+		if (_instanceSlots.TryGetValue(key, out var slot) == false)
 		{
 			return;
 		}
 
 		if (--slot.RefCount > 0)
 		{
-			_drawSlots[key] = slot;
+			_instanceSlots[key] = slot;
 			return;
 		}
 
-		_drawSlots.Remove(key);
-		_drawHandlePool.Release(slot.DrawHandle);
+		_instanceSlots.Remove(key);
 		_instanceHandlePool.Release(slot.InstanceHandle);
-		if (slot.DrawHandle.Index == _maxDrawIndex)
+		if (slot.InstanceHandle.Index == _maxInstanceIndex)
 		{
-			_maxDrawIndexDirty = true;
+			_maxInstanceIndexDirty = true;
 		}
 
 		Version++;
@@ -88,40 +92,39 @@ internal sealed class GpuDrawHandleRegistry
 
 	public void ReleaseMaterial(Material material) => ReleaseResource(_materialSlots, _materialHandlePool, material);
 
-	public uint GetActiveDrawCommandUpperBound()
+	/// <summary>One past the highest instance index in use, so per-instance dispatches can stop there.</summary>
+	public uint GetActiveInstanceUpperBound()
 	{
-		if (_drawSlots.Count == 0)
+		if (_instanceSlots.Count == 0)
 		{
-			_maxDrawIndex = 0;
-			_maxDrawIndexDirty = false;
+			_maxInstanceIndex = 0;
+			_maxInstanceIndexDirty = false;
 			return 1;
 		}
 
-		if (_maxDrawIndexDirty)
+		if (_maxInstanceIndexDirty)
 		{
-			var maxDrawIndex = 0;
-			foreach (var slot in _drawSlots.Values)
+			var maxInstanceIndex = 0;
+			foreach (var slot in _instanceSlots.Values)
 			{
-				if (slot.DrawHandle.Index > maxDrawIndex)
+				if (slot.InstanceHandle.Index > maxInstanceIndex)
 				{
-					maxDrawIndex = slot.DrawHandle.Index;
+					maxInstanceIndex = slot.InstanceHandle.Index;
 				}
 			}
 
-			_maxDrawIndex = maxDrawIndex;
-			_maxDrawIndexDirty = false;
+			_maxInstanceIndex = maxInstanceIndex;
+			_maxInstanceIndexDirty = false;
 		}
 
-		return (uint)(_maxDrawIndex + 1);
+		return (uint)(_maxInstanceIndex + 1);
 	}
 
 	public void CopyGenerationTables(
-		List<uint> drawGenerations,
 		List<uint> instanceGenerations,
 		List<uint> meshGenerations,
 		List<uint> materialGenerations)
 	{
-		_drawHandlePool.WriteGenerations(drawGenerations);
 		_instanceHandlePool.WriteGenerations(instanceGenerations);
 		_meshHandlePool.WriteGenerations(meshGenerations);
 		_materialHandlePool.WriteGenerations(materialGenerations);
@@ -163,9 +166,8 @@ internal sealed class GpuDrawHandleRegistry
 		Version++;
 	}
 
-	private struct DrawSlot
+	private struct InstanceSlot
 	{
-		public GpuDrawHandle DrawHandle;
 		public GpuDrawHandle InstanceHandle;
 		// Number of databases holding a record for this key.
 		public int RefCount;

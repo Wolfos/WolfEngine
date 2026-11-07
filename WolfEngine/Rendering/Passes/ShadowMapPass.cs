@@ -223,10 +223,11 @@ public sealed class ShadowMapPass
 			TerrainMaterialBuffer = gpuDrawResources.TerrainMaterialBuffer,
 			TerrainLayerBuffer = gpuDrawResources.TerrainLayerBuffer,
 			DrawArgsBuffer = gpuDrawResources.ShadowDrawArgsBuffer,
+			VisibleInstanceBuffer = gpuDrawResources.ShadowVisibleInstanceBuffer,
 			CameraBuffer = gpuDrawResources.ShadowCameraBuffer,
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
 			DrawExecutionRangePerBucketBuffer = gpuDrawResources.ShadowDrawExecutionRangePerBucketBuffer,
-			DrawArgsBaseOffsetBytes = GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
+			DrawArgsBaseOffsetBytes = gpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
 			Buckets = buckets.ToArray(),
 			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound,
 			IndirectCommandSlot = activeIndirectSlot,
@@ -256,6 +257,7 @@ public sealed class ShadowMapPass
 		    config.InstanceBuffer is null ||
 		    config.MaterialBuffer is null ||
 		    config.DrawArgsBuffer is null ||
+		    config.VisibleInstanceBuffer is null ||
 		    config.CameraBuffer is null)
 		{
 			commandList.EndPass();
@@ -289,6 +291,9 @@ public sealed class ShadowMapPass
 					bucket.BufferBindings.DrawArgsRegisterIndex,
 					config.DrawArgsBuffer,
 					config.DrawArgsBaseOffsetBytes);
+				commandList.BindConstantBuffer(
+					bucket.BufferBindings.VisibleInstanceRegisterIndex,
+					config.VisibleInstanceBuffer);
 				if (config.MaterialGenerationBuffer is not null)
 				{
 					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
@@ -313,8 +318,6 @@ public sealed class ShadowMapPass
 						commandList,
 						bucket.IndirectCommandPages.Span,
 						executionRangeBuffer,
-						config.IndirectCommandSlot,
-						bucket.ExecutionIndex,
 						config.FallbackMaxCommandCount);
 				}
 				else

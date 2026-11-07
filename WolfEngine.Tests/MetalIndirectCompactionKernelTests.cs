@@ -28,9 +28,15 @@ public class MetalIndirectCompactionKernelTests
 	}
 
 	[Test]
-	public void GpuDrawCommand_MatchesTheKernelsDeclaration()
+	public void GpuDrawBatchData_MatchesTheKernelsDeclaration()
 	{
-		AssertUintFieldsMatch<GpuDrawCommand>("GpuDrawCommand");
+		AssertUintFieldsMatch<GpuDrawBatchData>("GpuDrawBatchData");
+	}
+
+	[Test]
+	public void CompactionDrawGeometry_MatchesTheKernelsDeclaration()
+	{
+		AssertUintFieldsMatch<Rendering.Backend.Metal.MetalIndirectCommandBuffer.CompactionDrawGeometry>("IndirectDrawGeometry");
 	}
 
 	[Test]
@@ -39,31 +45,23 @@ public class MetalIndirectCompactionKernelTests
 		AssertUintFieldsMatch<GpuDrawArgs>("GpuDrawArgs");
 	}
 
-	[Test]
-	public void TheDrawFlagsTheKernelTests_MatchTheOnesTheEngineEncodes()
-	{
-		var source = ReadKernelSource();
-		Assert.Multiple(() =>
-		{
-			Assert.That(ReadUintConstant(source, "kDrawFlagActive"), Is.EqualTo(GpuDrawFlags.Active));
-			Assert.That(ReadUintConstant(source, "kDrawFlagBucketShift"), Is.EqualTo((uint)GpuDrawFlags.BucketShift));
-			Assert.That(ReadUintConstant(source, "kDrawFlagBucketMask"), Is.EqualTo(GpuDrawFlags.BucketMask));
-		});
-	}
-
 	/// <summary>
 	/// The visibility rules are shared with the record-copy kernel, so a change to one that misses the
-	/// other silently gives Metal and Direct3D12 different sets of visible draws.
+	/// other silently gives Metal and Direct3D12 different sets of visible draws, or different instance counts.
 	/// </summary>
 	[Test]
 	public void TheVisibilityRules_StayInStepWithTheSharedRecordCopyKernel()
 	{
 		var slang = File.ReadAllText(Path.Combine(ResolveShaderDirectory(), "GpuDraw", "gpu_draw_compact.compute.slang"));
+		var metal = ReadKernelSource();
 		Assert.Multiple(() =>
 		{
-			Assert.That(ReadUintConstant(slang, "DRAW_FLAG_ACTIVE"), Is.EqualTo(GpuDrawFlags.Active));
-			Assert.That(ReadUintConstant(slang, "DRAW_FLAG_BUCKET_SHIFT"), Is.EqualTo((uint)GpuDrawFlags.BucketShift));
-			Assert.That(ReadUintConstant(slang, "DRAW_FLAG_BUCKET_MASK"), Is.EqualTo(GpuDrawFlags.BucketMask));
+			Assert.That(slang, Does.Contain("batch.capacity == 0"), "The record-copy kernel no longer skips empty batches.");
+			Assert.That(metal, Does.Contain("batch.capacity == 0u"), "The Metal kernel no longer skips empty batches.");
+			Assert.That(slang, Does.Contain("batch.laneIndex != laneIndex"), "The record-copy kernel no longer emits from the batch's lane only.");
+			Assert.That(metal, Does.Contain("batch.laneIndex != params.laneIndex"), "The Metal kernel no longer emits from the batch's lane only.");
+			Assert.That(slang, Does.Contain("min(g_DrawArgs[drawId].instanceCount, batch.capacity)"), "The record-copy kernel no longer clamps the visible count.");
+			Assert.That(metal, Does.Contain("min(drawArgs[drawId].instanceCount, batch.capacity)"), "The Metal kernel no longer clamps the visible count.");
 		});
 	}
 

@@ -2,8 +2,11 @@ using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering;
 
-/// <summary>One draw that is live in the shared draw tables, as draw records need it.</summary>
-public readonly record struct LiveDraw(uint DrawIndex, GpuDrawExecutionKey ExecutionKey, Mesh Mesh);
+/// <summary>
+/// One draw that is live in the shared draw tables, as draw records need it: a batch of
+/// <paramref name="InstanceCount"/> instances of one mesh in one lane.
+/// </summary>
+public readonly record struct LiveDraw(uint DrawIndex, GpuDrawExecutionKey ExecutionKey, Mesh Mesh, uint InstanceCount);
 
 /// <summary>
 /// The draws that are live in the shared draw tables this frame, across every view's draw database. Draw records

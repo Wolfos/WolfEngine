@@ -10,11 +10,24 @@ public sealed class GpuDrawResources : IDisposable
 {
 	public const int IndirectCommandBufferSlotCount = 4;
 	public const int MaxFramesInFlight = 4;
-	public const int MaxDrawCount = 65535;
-	public const int MaxInstanceCount = 65535;
-	public const int MaxMaterialCount = 65535;
-	public const int MaxMeshCount = 65535;
-	public const int MaxTerrainLayerCount = MaxMaterialCount * 16;
+	/// <summary>
+	/// The most slots a table can grow to, including the reserved slot zero: every index a <see cref="GpuDrawHandle"/>
+	/// can name. Tables start at their initial capacity and double as the slots in use outgrow them.
+	/// </summary>
+	public const int MaxInstanceCount = GpuDrawHandle.MaxIndex + 1;
+	public const int MaxMaterialCount = GpuDrawHandle.MaxIndex + 1;
+	public const int MaxMeshCount = GpuDrawHandle.MaxIndex + 1;
+
+	/// <summary>
+	/// Batches, and so draw records. A batch needs a member and its index is the lowest free one, so there are never
+	/// more batch slots in use than instance slots; batch tables are sized by <see cref="InstanceCapacity"/>.
+	/// </summary>
+	public const int MaxDrawCount = MaxInstanceCount;
+
+	public const int InitialInstanceCapacity = 16384;
+	public const int InitialMeshCapacity = 4096;
+	public const int InitialMaterialCapacity = 4096;
+	public const int MaxTerrainLayerCount = 65535 * 16;
 	/// <summary>
 	/// The layer table starts with room for a few dozen terrain materials and doubles when an allocation needs
 	/// more, up to <see cref="MaxTerrainLayerCount"/>.
@@ -34,11 +47,39 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? DrawCommandBuffer { get; private set; }
 	public IGfxBuffer? DrawArgsBuffer { get; private set; }
 	public IGfxBuffer? ShadowDrawArgsBuffer { get; private set; }
-	public IGfxBuffer? DrawGenerationBuffer => _drawGenerationBuffers[_activeFrameSlot];
+	/// <summary>
+	/// Every view's visible instances, written by culling at each batch's visible offset and read by the vertex
+	/// shaders through the draw args.
+	/// </summary>
+	public IGfxBuffer? VisibleInstanceBuffer { get; private set; }
+
+	/// <summary>One <see cref="InstanceCapacity"/> slice per shadow view, the way the shadow draw args are laid out.</summary>
+	public IGfxBuffer? ShadowVisibleInstanceBuffer { get; private set; }
+
+	/// <summary>The batch table, uploaded per frame slot whenever batch membership changes.</summary>
+	public IGfxBuffer? BatchBuffer => _batchBuffers[_activeFrameSlot];
 	public IGfxBuffer? InstanceGenerationBuffer => _instanceGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? MaterialGenerationBuffer => _materialGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? MeshGenerationBuffer => _meshGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? DiagnosticsCounterBuffer { get; private set; }
+
+	/// <summary>
+	/// Slots in the instance-indexed tables, which also bounds the batch-indexed ones: draw args, batches, and each
+	/// view's visible instance list. Zero until the tables are first created.
+	/// </summary>
+	public int InstanceCapacity { get; private set; }
+
+	/// <summary>Slots in the mesh table and the mesh generations.</summary>
+	public int MeshCapacity { get; private set; }
+
+	/// <summary>Slots in the material and terrain material tables and the material generations.</summary>
+	public int MaterialCapacity { get; private set; }
+
+	/// <summary>
+	/// Raised whenever a table is replaced by a larger one. Replacements start empty, so anything written into a
+	/// table only when it changes, such as the batch table, has to be written again.
+	/// </summary>
+	public ulong TableGeneration { get; private set; }
 	private readonly IGfxBuffer?[] _instanceUpdateBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _meshUpdateBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _materialUpdateBuffers = new IGfxBuffer?[MaxFramesInFlight];
@@ -54,11 +95,14 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxBuffer?[] _shadowDrawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _shadowDrawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
-	private readonly IGfxBuffer?[] _drawGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _batchBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _instanceGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _materialGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _meshGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private int _activeFrameSlot;
+	private IGfxBuffer? _skinVertexBuffer;
+	private IGfxBuffer? _boneMatrixBuffer;
+	private IGfxBuffer? _skinnedInstanceBuffer;
 	private int _activeIndirectCommandSlot;
 	private GraphicsBackendKind? _constantBufferLayoutBackend;
 	private ShaderConstantBufferLayout? _gBufferCameraLayout;
@@ -71,7 +115,12 @@ public sealed class GpuDrawResources : IDisposable
 	private ClusteredLightingFrameLayout _clusteredLightingLayout;
 	private ulong _indirectBindingVersion = 1;
 	private bool _pendingBindingInvalidation;
+
+	/// <summary>One past the highest live batch index: draw records and per-batch dispatches stop here.</summary>
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
+
+	/// <summary>One past the highest live instance index: per-instance dispatches stop here.</summary>
+	public uint ActiveInstanceUpperBound { get; set; } = 1;
 
 	/// <summary>
 	/// The packed streams every mesh is suballocated from. Shared draws address them through the base
@@ -82,9 +131,36 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? PackedMeshIndexBuffer { get; set; }
 	public uint PackedMeshVertexStride { get; set; }
 
-	public IGfxBuffer? SkinVertexBuffer { get; set; }
-	public IGfxBuffer? BoneMatrixBuffer { get; set; }
-	public IGfxBuffer? SkinnedInstanceBuffer { get; set; }
+	// Skinning grows these, and Metal draw records capture their addresses, so publishing a replacement changes
+	// the binding version like any other growth here.
+	public IGfxBuffer? SkinVertexBuffer
+	{
+		get => _skinVertexBuffer;
+		set => _skinVertexBuffer = PublishSkinningBuffer(_skinVertexBuffer, value, "Skin vertex buffer growth");
+	}
+
+	public IGfxBuffer? BoneMatrixBuffer
+	{
+		get => _boneMatrixBuffer;
+		set => _boneMatrixBuffer = PublishSkinningBuffer(_boneMatrixBuffer, value, "Bone matrix buffer growth");
+	}
+
+	public IGfxBuffer? SkinnedInstanceBuffer
+	{
+		get => _skinnedInstanceBuffer;
+		set => _skinnedInstanceBuffer = PublishSkinningBuffer(_skinnedInstanceBuffer, value, "Skinned instance table growth");
+	}
+
+	private IGfxBuffer? PublishSkinningBuffer(IGfxBuffer? current, IGfxBuffer? replacement, string reason)
+	{
+		if (current is not null && ReferenceEquals(current, replacement) == false)
+		{
+			_pendingBindingInvalidation = true;
+			CommitBindingInvalidation(reason);
+		}
+
+		return replacement;
+	}
 
 	/// <summary>
 	/// Publishes a single binding-version change if any buffer in the batch just completed was replaced.
@@ -303,23 +379,10 @@ public sealed class GpuDrawResources : IDisposable
 
 		EnsureConstantBufferLayouts(device.BackendKind);
 
-		InstanceBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxInstanceCount * Marshal.SizeOf<GpuInstanceData>()),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-			name: "InstanceBuffer"));
-
-		MaterialBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxMaterialCount * Marshal.SizeOf<GpuMaterialData>()),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-			name: "MaterialBuffer"));
-
-		TerrainMaterialBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxMaterialCount * Marshal.SizeOf<GpuTerrainMaterialData>()),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-			name: "TerrainMaterialBuffer"));
+		if (InstanceBuffer is null)
+		{
+			EnsureTableCapacity(device, InitialInstanceCapacity, InitialMeshCapacity, InitialMaterialCapacity);
+		}
 
 		if (TerrainLayerBuffer is null)
 		{
@@ -330,28 +393,6 @@ public sealed class GpuDrawResources : IDisposable
 				name: "TerrainLayerBuffer"));
 			TerrainLayerCapacity = InitialTerrainLayerCapacity;
 		}
-
-		MeshBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxMeshCount * Marshal.SizeOf<GpuMeshData>()),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-		DrawCommandBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawCommand>()),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-		DrawArgsBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawArgs>()),
-			BufferUsage.Indirect,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-			name: "DrawArgsBuffer"));
-
-		ShadowDrawArgsBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxShadowViewCount * MaxDrawCount * Marshal.SizeOf<GpuDrawArgs>()),
-			BufferUsage.Indirect,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-			name: "ShadowDrawArgsBuffer"));
 
 		DiagnosticsCounterBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(HardeningCounterCount * sizeof(uint)),
@@ -409,28 +450,213 @@ public sealed class GpuDrawResources : IDisposable
 				(ulong)(MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount * 2 * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-			_drawGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)((MaxDrawCount + 1) * sizeof(uint)),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-			_instanceGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)((MaxInstanceCount + 1) * sizeof(uint)),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-			_materialGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)((MaxMaterialCount + 1) * sizeof(uint)),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-				name: $"MaterialGenerationBuffer[{i}]"));
-
-			_meshGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)((MaxMeshCount + 1) * sizeof(uint)),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 		}
+	}
+
+	/// <summary>
+	/// Grows the shared draw tables so each holds at least the given number of slots, doubling from its current
+	/// capacity up to its maximum. Replacements start empty and change the binding version, so the next staleness
+	/// check re-uploads the whole GPU draw state and re-encodes every draw record.
+	/// </summary>
+	/// <returns>True when any table was replaced.</returns>
+	public bool EnsureTableCapacity(IGfxDevice device, int instanceSlots, int meshSlots, int materialSlots)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+
+		var instanceCapacity = GrowCapacity(
+			InstanceCapacity,
+			instanceSlots,
+			InitialInstanceCapacity,
+			MaxInstanceCount);
+		var meshCapacity = GrowCapacity(
+			MeshCapacity,
+			meshSlots,
+			InitialMeshCapacity,
+			MaxMeshCount);
+		var materialCapacity = GrowCapacity(
+			MaterialCapacity,
+			materialSlots,
+			InitialMaterialCapacity,
+			MaxMaterialCount);
+		var grew = false;
+
+		if (instanceCapacity != InstanceCapacity)
+		{
+			InstanceCapacity = instanceCapacity;
+			InstanceBuffer = ReplaceTable(
+				device,
+				InstanceBuffer,
+				instanceCapacity,
+				Marshal.SizeOf<GpuInstanceData>(),
+				BufferUsage.Structured,
+				"InstanceBuffer");
+			DrawCommandBuffer = ReplaceTable(
+				device,
+				DrawCommandBuffer,
+				instanceCapacity,
+				Marshal.SizeOf<GpuDrawCommand>(),
+				BufferUsage.Structured,
+				"DrawCommandBuffer");
+			DrawArgsBuffer = ReplaceTable(
+				device,
+				DrawArgsBuffer,
+				instanceCapacity,
+				Marshal.SizeOf<GpuDrawArgs>(),
+				BufferUsage.Indirect,
+				"DrawArgsBuffer");
+			ShadowDrawArgsBuffer = ReplaceTable(
+				device,
+				ShadowDrawArgsBuffer,
+				MaxShadowViewCount * instanceCapacity,
+				Marshal.SizeOf<GpuDrawArgs>(),
+				BufferUsage.Indirect,
+				"ShadowDrawArgsBuffer");
+			VisibleInstanceBuffer = ReplaceTable(
+				device,
+				VisibleInstanceBuffer,
+				instanceCapacity,
+				sizeof(uint),
+				BufferUsage.Structured,
+				"VisibleInstanceBuffer");
+			ShadowVisibleInstanceBuffer = ReplaceTable(
+				device,
+				ShadowVisibleInstanceBuffer,
+				MaxShadowViewCount * instanceCapacity,
+				sizeof(uint),
+				BufferUsage.Structured,
+				"ShadowVisibleInstanceBuffer");
+			for (var i = 0; i < MaxFramesInFlight; i++)
+			{
+				_batchBuffers[i] = ReplaceTable(
+					device,
+					_batchBuffers[i],
+					instanceCapacity,
+					Marshal.SizeOf<GpuDrawBatchData>(),
+					BufferUsage.Structured,
+					$"BatchBuffer[{i}]");
+				_instanceGenerationBuffers[i] = ReplaceTable(
+					device,
+					_instanceGenerationBuffers[i],
+					instanceCapacity,
+					sizeof(uint),
+					BufferUsage.Structured,
+					$"InstanceGenerationBuffer[{i}]");
+			}
+
+			grew = true;
+		}
+
+		if (meshCapacity != MeshCapacity)
+		{
+			MeshCapacity = meshCapacity;
+			MeshBuffer = ReplaceTable(
+				device,
+				MeshBuffer,
+				meshCapacity,
+				Marshal.SizeOf<GpuMeshData>(),
+				BufferUsage.Structured,
+				"MeshBuffer");
+			for (var i = 0; i < MaxFramesInFlight; i++)
+			{
+				_meshGenerationBuffers[i] = ReplaceTable(
+					device,
+					_meshGenerationBuffers[i],
+					meshCapacity,
+					sizeof(uint),
+					BufferUsage.Structured,
+					$"MeshGenerationBuffer[{i}]");
+			}
+
+			grew = true;
+		}
+
+		if (materialCapacity != MaterialCapacity)
+		{
+			MaterialCapacity = materialCapacity;
+			MaterialBuffer = ReplaceTable(
+				device,
+				MaterialBuffer,
+				materialCapacity,
+				Marshal.SizeOf<GpuMaterialData>(),
+				BufferUsage.Structured,
+				"MaterialBuffer");
+			TerrainMaterialBuffer = ReplaceTable(
+				device,
+				TerrainMaterialBuffer,
+				materialCapacity,
+				Marshal.SizeOf<GpuTerrainMaterialData>(),
+				BufferUsage.Structured,
+				"TerrainMaterialBuffer");
+			for (var i = 0; i < MaxFramesInFlight; i++)
+			{
+				_materialGenerationBuffers[i] = ReplaceTable(
+					device,
+					_materialGenerationBuffers[i],
+					materialCapacity,
+					sizeof(uint),
+					BufferUsage.Structured,
+					$"MaterialGenerationBuffer[{i}]");
+			}
+
+			grew = true;
+		}
+
+		if (grew)
+		{
+			TableGeneration++;
+			CommitBindingInvalidation("Shared draw table growth");
+		}
+
+		return grew;
+	}
+
+	/// <summary>The capacity that holds <paramref name="required"/> slots, doubling from the current one.</summary>
+	internal static int GrowCapacity(int current, int required, int initial, int maximum)
+	{
+		var capacity = Math.Max(current, initial);
+		while (capacity < required && capacity < maximum)
+		{
+			capacity = (int)Math.Min((long)capacity * 2, maximum);
+		}
+
+		return Math.Min(capacity, maximum);
+	}
+
+	/// <summary>
+	/// Creates a table of <paramref name="elementCount"/> elements, retiring the one it replaces. The replacement
+	/// starts empty; the caller re-uploads its contents.
+	/// </summary>
+	private IGfxBuffer ReplaceTable(
+		IGfxDevice device,
+		IGfxBuffer? existing,
+		int elementCount,
+		int elementSizeInBytes,
+		BufferUsage usage,
+		string debugName)
+	{
+		var sizeInBytes = checked((ulong)elementCount * (ulong)elementSizeInBytes);
+		if (existing is not null)
+		{
+			// Frames still in flight hold this table's GPU address, bound directly and on Metal baked into draw
+			// records, so it is retired rather than destroyed.
+			if (existing is IDisposable disposable)
+			{
+				device.Retire(disposable, debugName);
+			}
+
+			_pendingBindingInvalidation = true;
+			if (GraphicsConfig.LogGpuDrawEvents)
+			{
+				Console.WriteLine(
+					$"[gpu draw] '{debugName}' grew {existing.Descriptor.SizeInBytes} -> {sizeInBytes} bytes.");
+			}
+		}
+
+		return device.CreateBuffer(new BufferDescriptor(
+			sizeInBytes,
+			usage,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: debugName));
 	}
 
 	/// <summary>
@@ -603,10 +829,10 @@ public sealed class GpuDrawResources : IDisposable
 		CommitBindingInvalidation("Fog volume capacity growth");
 	}
 
-	public IGfxBuffer? GetDrawGenerationBufferSlot(int frameSlot)
+	public IGfxBuffer? GetBatchBufferSlot(int frameSlot)
 	{
 		ValidateFrameSlot(frameSlot);
-		return _drawGenerationBuffers[frameSlot];
+		return _batchBuffers[frameSlot];
 	}
 
 	public IGfxBuffer? GetInstanceGenerationBufferSlot(int frameSlot)
@@ -627,13 +853,14 @@ public sealed class GpuDrawResources : IDisposable
 		return _materialGenerationBuffers[frameSlot];
 	}
 
-	public static int GetShadowDrawArgsElementOffset(int cascadeIndex)
+	/// <summary>Where a shadow cascade's draw args start, one <see cref="InstanceCapacity"/> slice per cascade.</summary>
+	public int GetShadowDrawArgsElementOffset(int cascadeIndex)
 	{
 		ValidateShadowCascadeIndex(cascadeIndex);
-		return cascadeIndex * MaxDrawCount;
+		return cascadeIndex * InstanceCapacity;
 	}
 
-	public static ulong GetShadowDrawArgsOffsetBytes(int cascadeIndex) =>
+	public ulong GetShadowDrawArgsOffsetBytes(int cascadeIndex) =>
 		(ulong)GetShadowDrawArgsElementOffset(cascadeIndex) * (ulong)Marshal.SizeOf<GpuDrawArgs>();
 
 	public static int GetShadowLaneElementOffset(int cascadeIndex, int executionLaneIndex)
@@ -663,6 +890,8 @@ public sealed class GpuDrawResources : IDisposable
 		(DrawCommandBuffer as IDisposable)?.Dispose();
 		(DrawArgsBuffer as IDisposable)?.Dispose();
 		(ShadowDrawArgsBuffer as IDisposable)?.Dispose();
+		(VisibleInstanceBuffer as IDisposable)?.Dispose();
+		(ShadowVisibleInstanceBuffer as IDisposable)?.Dispose();
 		(DiagnosticsCounterBuffer as IDisposable)?.Dispose();
 		foreach (var viewBuffers in _viewFrameBuffers)
 		{
@@ -699,7 +928,7 @@ public sealed class GpuDrawResources : IDisposable
 			(_shadowDrawCountPerBucketBuffers[i] as IDisposable)?.Dispose();
 			(_drawExecutionRangePerBucketBuffers[i] as IDisposable)?.Dispose();
 			(_shadowDrawExecutionRangePerBucketBuffers[i] as IDisposable)?.Dispose();
-			(_drawGenerationBuffers[i] as IDisposable)?.Dispose();
+			(_batchBuffers[i] as IDisposable)?.Dispose();
 			(_instanceGenerationBuffers[i] as IDisposable)?.Dispose();
 			(_materialGenerationBuffers[i] as IDisposable)?.Dispose();
 			(_meshGenerationBuffers[i] as IDisposable)?.Dispose();
@@ -718,7 +947,7 @@ public sealed class GpuDrawResources : IDisposable
 			_shadowDrawCountPerBucketBuffers[i] = null;
 			_drawExecutionRangePerBucketBuffers[i] = null;
 			_shadowDrawExecutionRangePerBucketBuffers[i] = null;
-			_drawGenerationBuffers[i] = null;
+			_batchBuffers[i] = null;
 			_instanceGenerationBuffers[i] = null;
 			_materialGenerationBuffers[i] = null;
 			_meshGenerationBuffers[i] = null;
@@ -728,6 +957,8 @@ public sealed class GpuDrawResources : IDisposable
 		TerrainLayerBuffer = null;
 		TerrainLayerCapacity = 0;
 		ShadowDrawArgsBuffer = null;
+		VisibleInstanceBuffer = null;
+		ShadowVisibleInstanceBuffer = null;
 	}
 
 	private static void ValidateFrameSlot(int frameSlot)

@@ -340,7 +340,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.IblBrdfLut) return ["IblBrdfCSMain"];
 		if (id == EngineShaderPrograms.IblIrradiance) return ["IblIrradianceCSMain"];
 		if (id == EngineShaderPrograms.IblPrefilter) return ["IblPrefilterCSMain"];
-		if (id == EngineShaderPrograms.GpuDrawCull) return ["CSCull"];
+		if (id == EngineShaderPrograms.GpuDrawCull) return ["CSPrepareBatchArgs", "CSCull"];
 		if (id == EngineShaderPrograms.GpuDrawCompact) return ["CSCompact"];
 		if (id == EngineShaderPrograms.AmbientOcclusionVbao) return ["AmbientOcclusionVisibilityBitmaskCS"];
 		if (id == EngineShaderPrograms.AmbientOcclusionRayTraced) return ["AmbientOcclusionRayTracedCS"];

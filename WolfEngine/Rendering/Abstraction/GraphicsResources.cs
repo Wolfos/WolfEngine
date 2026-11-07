@@ -101,6 +101,12 @@ public interface IGfxIndirectCommandBuffer : IGfxResource
 
 	/// <summary>Byte offset of the draw index count within a record, used to skip records that draw nothing.</summary>
 	uint RecordIndexCountOffsetInBytes => 0;
+
+	/// <summary>
+	/// Byte offset of the instance count within a record, which compaction overwrites with the number of
+	/// instances culling left visible.
+	/// </summary>
+	uint RecordInstanceCountOffsetInBytes => 0;
 }
 
 /// <summary>

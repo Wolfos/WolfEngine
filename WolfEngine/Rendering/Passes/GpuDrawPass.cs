@@ -14,7 +14,7 @@ public sealed class GpuDrawPass
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly IRenderer _renderer;
 	private readonly IndirectDrawRecords _records;
-	private readonly GpuDrawLiveDrawSource _liveDraws;
+	private readonly GpuDrawBatches _batches;
 	private readonly IDrawRecordStalenessInputSource _stalenessInputs;
 	private readonly IGpuDrawDiagnosticsSampler _diagnosticsSampler;
 	private DescriptorHandle _terrainLayerSampler = DescriptorHandle.Invalid;
@@ -25,6 +25,7 @@ public sealed class GpuDrawPass
 	private IGfxPipeline? _materialUpdatePipeline;
 	private IGfxPipeline? _terrainMaterialUpdatePipeline;
 	private IGfxPipeline? _terrainLayerUpdatePipeline;
+	private IGfxPipeline? _prepareBatchArgsPipeline;
 	private IGfxPipeline? _cullPipeline;
 	private IGfxPipeline? _compactPipeline;
 	private GraphicsBackendKind? _computeReflectionBackendKind;
@@ -33,6 +34,7 @@ public sealed class GpuDrawPass
 	private ReadOnlyMemory<byte> _materialUpdateShaderBytecode;
 	private ReadOnlyMemory<byte> _terrainMaterialUpdateShaderBytecode;
 	private ReadOnlyMemory<byte> _terrainLayerUpdateShaderBytecode;
+	private ReadOnlyMemory<byte> _prepareBatchArgsShaderBytecode;
 	private ReadOnlyMemory<byte> _cullShaderBytecode;
 	private ReadOnlyMemory<byte> _compactShaderBytecode;
 	private ComputeThreadGroupSize? _instanceUpdateThreadGroupSize;
@@ -40,6 +42,7 @@ public sealed class GpuDrawPass
 	private ComputeThreadGroupSize? _materialUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _terrainMaterialUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _terrainLayerUpdateThreadGroupSize;
+	private ComputeThreadGroupSize? _prepareBatchArgsThreadGroupSize;
 	private ComputeThreadGroupSize? _cullThreadGroupSize;
 	private ComputeThreadGroupSize? _compactThreadGroupSize;
 	private uint[]? _executionRangeReset;
@@ -70,10 +73,12 @@ public sealed class GpuDrawPass
 	private readonly Dictionary<uint, int> _terrainMaterialUpdateIndices = new();
 	private readonly List<GpuTerrainLayerUpdateData> _terrainLayerUpdateData = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
-	private readonly List<uint> _drawGenerations = new();
 	private readonly List<uint> _instanceGenerations = new();
 	private readonly List<uint> _meshGenerations = new();
 	private readonly List<uint> _materialGenerations = new();
+	// The batch table version each frame slot's batch buffer was last uploaded at.
+	private readonly ulong[] _uploadedBatchTableVersions = new ulong[GpuDrawResources.MaxFramesInFlight];
+	private ulong _uploadedTableGeneration;
 	private readonly uint[] _lastGpuDiagnosticCounters = new uint[GpuDrawResources.HardeningCounterCount];
 	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly SharedDrawGraphicsBufferBindings?[] _gbufferBufferBindings = new SharedDrawGraphicsBufferBindings?[GpuDrawExecutionLanes.ExecutionLaneCount];
@@ -113,7 +118,7 @@ public sealed class GpuDrawPass
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats, IRenderer renderer,
 		IndirectDrawRecords records,
-		GpuDrawLiveDrawSource liveDraws,
+		GpuDrawBatches batches,
 		IDrawRecordStalenessInputSource stalenessInputs,
 		IGpuDrawDiagnosticsSampler diagnosticsSampler)
 	{
@@ -123,7 +128,7 @@ public sealed class GpuDrawPass
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_records = records ?? throw new ArgumentNullException(nameof(records));
-		_liveDraws = liveDraws ?? throw new ArgumentNullException(nameof(liveDraws));
+		_batches = batches ?? throw new ArgumentNullException(nameof(batches));
 		_stalenessInputs = stalenessInputs ?? throw new ArgumentNullException(nameof(stalenessInputs));
 		_gbufferIndirectCommandSets = new PerViewIndirectCommandSets(
 			records,
@@ -152,7 +157,6 @@ public sealed class GpuDrawPass
 		}
 
 		_records.BeginFrame();
-		_liveDraws.SetSources(sources);
 
 		// Generation tables come from the shared handle registry and are identical in every source after the
 		// all-views refresh, so any source serves for the per-frame upload and the fallback handles.
@@ -167,6 +171,7 @@ public sealed class GpuDrawPass
 			_hardeningStats.ResetSubmissionDiagnostics();
 		}
 		EnsureGBufferPipelines(device);
+		EnsureTableCapacity(device, sources);
 
 		// Draw records check these again whenever they are encoded, because a buffer can be replaced while passes
 		// are still recording. GPU draw state is only re-uploaded here, so a replacement during recording is cured
@@ -183,14 +188,14 @@ public sealed class GpuDrawPass
 		_updateOwners.Clear();
 		_updateSources.Clear();
 		var updatesDropped = false;
-		var drawCommandUpperBound = 0u;
+		var instanceUpperBound = 0u;
 		for (var i = 0; i < sources.Length; i++)
 		{
 			var source = sources[i];
 			source.Database.ConsumeUpdates(_sourceUpdateScratch);
 			AppendFromSource(source, _sourceUpdateScratch);
 			updatesDropped |= source.Database.ConsumeDroppedUpdates();
-			drawCommandUpperBound = Math.Max(drawCommandUpperBound, source.Database.GetActiveDrawCommandUpperBound());
+			instanceUpperBound = Math.Max(instanceUpperBound, source.Database.GetActiveInstanceUpperBound());
 		}
 
 		UploadGenerationTables(drawDatabase);
@@ -214,7 +219,7 @@ public sealed class GpuDrawPass
 			}
 		}
 
-		if (updatesDropped || _updates.Count > GpuDrawResources.MaxDrawCount)
+		if (updatesDropped || _updates.Count > GpuDrawResources.MaxInstanceCount)
 		{
 			var droppedDeltaCount = _updates.Count;
 			_updates.Clear();
@@ -234,11 +239,11 @@ public sealed class GpuDrawPass
 			{
 				_loggedUpdateOverflowRecovery = true;
 				Console.WriteLine(
-					$"GpuDraw: update backlog overflow ({droppedDeltaCount} > {GpuDrawResources.MaxDrawCount}); switched to full-state refresh ({rebuiltCount} updates).");
+					$"GpuDraw: update backlog overflow ({droppedDeltaCount} > {GpuDrawResources.MaxInstanceCount}); switched to full-state refresh ({rebuiltCount} updates).");
 			}
 		}
 
-		_gpuDrawResources.ActiveDrawCommandUpperBound = drawCommandUpperBound;
+		_gpuDrawResources.ActiveInstanceUpperBound = Math.Max(instanceUpperBound, 1u);
 		// Republished every frame because capacity growth can replace the packed buffers underneath us.
 		_gpuDrawResources.PackedMeshVertexBuffer = _renderer.GetPackedMeshVertexBuffer();
 		_gpuDrawResources.PackedMeshIndexBuffer = _renderer.GetPackedMeshIndexBuffer();
@@ -264,31 +269,37 @@ public sealed class GpuDrawPass
 		// Per batch, so a repaint reports its suspects plus a few healthy draws for comparison.
 		_terrainLogHealthyBudget = 4;
 
-		var updateCount = Math.Min(_updates.Count, GpuDrawResources.MaxDrawCount);
+		var updateCount = _updates.Count;
 
 		for (var i = 0; i < updateCount; i++)
 		{
 			var update = _updates[i];
 			var ownerFlags = (uint)_updateOwners[i].Index << GpuDrawFlags.OwnerViewShift;
 			var updateDatabase = _updateSources[i];
-			var drawIdInRange = update.DrawIndex > 0 && update.DrawIndex < GpuDrawResources.MaxDrawCount;
-			if (drawIdInRange == false)
+			var instanceIdInRange =
+				update.InstanceHandle.IsValid &&
+				update.InstanceIndex > 0 &&
+				update.InstanceIndex < _gpuDrawResources.InstanceCapacity;
+			if (instanceIdInRange == false)
 			{
 				LogCapacityExceededOnce(in update);
 				continue;
 			}
 
+			if (ShouldApplyInstanceUpdate(update, updateDatabase, _batches) == false)
+			{
+				continue;
+			}
+
 			if (update.Type != GpuDrawUpdateType.Remove)
 			{
-				var instanceIdInRange =
-					update.InstanceIndex > 0 && update.InstanceIndex < GpuDrawResources.MaxInstanceCount;
-				var meshIdInRange = update.MeshIndex > 0 && update.MeshIndex < GpuDrawResources.MaxMeshCount;
+				var meshIdInRange = update.MeshIndex > 0 && update.MeshIndex < _gpuDrawResources.MeshCapacity;
 				var materialIdInRange =
-					update.MaterialIndex > 0 && update.MaterialIndex < GpuDrawResources.MaxMaterialCount;
-				if (instanceIdInRange == false || meshIdInRange == false || materialIdInRange == false)
+					update.MaterialIndex > 0 && update.MaterialIndex < _gpuDrawResources.MaterialCapacity;
+				if (meshIdInRange == false || materialIdInRange == false)
 				{
 					LogCapacityExceededOnce(in update);
-					update = GpuDrawUpdate.CreateRemove(update.DrawKind, update.DrawHandle, update.InstanceHandle);
+					update = GpuDrawUpdate.CreateRemove(update.DrawKind, update.InstanceHandle);
 				}
 			}
 
@@ -462,12 +473,19 @@ public sealed class GpuDrawPass
 				}
 			}
 
-			if (IsStructuralUpdateType(update.Type) &&
-			    updateDatabase.IsCurrentDrawHandle(update.DrawHandle) &&
-			    update.DrawIndex > 0 &&
-			    update.DrawIndex < GpuDrawResources.MaxDrawCount)
+			// Every update carries the instance's batch, because the update shader rewrites the whole command.
+			var batchIndex = 0u;
+			if (update.Type == GpuDrawUpdateType.Remove || drawFlags == 0u)
 			{
-				_records.RecordStructuralChange(update.Type, update.DrawHandle, executionKey, mesh);
+				_batches.Remove(update.InstanceHandle);
+			}
+			else if (mesh is not null)
+			{
+				batchIndex = _batches.Assign(update.InstanceHandle, executionKey, mesh);
+			}
+			else
+			{
+				batchIndex = _batches.GetBatchIndex(update.InstanceIndex);
 			}
 
 			if (materialResources is not null && GpuDrawClassification.SupportsTexturedPbrMaterialInterpretation(drawKind))
@@ -508,14 +526,14 @@ public sealed class GpuDrawPass
 				emissiveFactorIntensity = Vector4.Zero;
 			}
 
-			AddOrReplaceUpdate(_instanceUpdateData, _instanceUpdateIndices, update.DrawIndex, new GpuDrawInstanceUpdateData(
+			AddOrReplaceUpdate(_instanceUpdateData, _instanceUpdateIndices, update.InstanceIndex, new GpuDrawInstanceUpdateData(
 				update.PreviousWorld,
 				update.World,
 				update.BoundsCenterRadius,
 				update.TerrainInstanceData.ChunkOriginSize,
 				update.TerrainInstanceData.HeightmapUvScaleOffset,
 				(uint)update.Type,
-				update.DrawHandle.Value,
+				batchIndex,
 				update.InstanceHandle.Value,
 				(uint)drawKind,
 				update.MeshHandle.Value,
@@ -607,6 +625,10 @@ public sealed class GpuDrawPass
 
 		_gpuDrawResources.PackedMeshVertexBuffer = _renderer.GetPackedMeshVertexBuffer();
 		_gpuDrawResources.PackedMeshIndexBuffer = _renderer.GetPackedMeshIndexBuffer();
+
+		_batches.PublishStructuralChanges(_records);
+		_gpuDrawResources.ActiveDrawCommandUpperBound = _batches.ActiveBatchUpperBound;
+		UploadBatchTable(activeSlot);
 
 		if (_instanceUpdateData.Count == 0 &&
 		    _meshUpdateData.Count == 0 &&
@@ -708,6 +730,9 @@ public sealed class GpuDrawPass
 		var drawExecutionRangePerBucketBuffer = useShadowBuffers
 			? _gpuDrawResources.ShadowDrawExecutionRangePerBucketBuffer
 			: _gpuDrawResources.DrawExecutionRangePerBucketBuffer;
+		var visibleInstanceBuffer = useShadowBuffers
+			? _gpuDrawResources.ShadowVisibleInstanceBuffer
+			: _gpuDrawResources.VisibleInstanceBuffer;
 
 		var executionLaneCount = GpuDrawExecutionLanes.ExecutionLaneCount;
 		if ((uint)executionLaneCount > (DrawFlagBucketMask + 1))
@@ -737,12 +762,11 @@ public sealed class GpuDrawPass
 			WriteBuffer<uint>(drawExecutionRangePerBucketBuffer!, resetRanges, "DrawExecutionRangePerBucketBuffer");
 		}
 
-		var pipeline = EnsureCullPipeline(device);
+		var preparePipeline = EnsurePrepareBatchArgsPipeline(device);
+		var cullPipeline = EnsureCullPipeline(device);
 		var commandList = context.CommandList;
 		using (FrameProfiler.Instance.Measure("GpuDraw.Cull"))
 		{
-			commandList.BindPipeline(pipeline);
-
 			Span<Vector4> planes = stackalloc Vector4[6];
 			var cullParamsWriter = _cullParamsWriter
 			                       ?? throw new InvalidOperationException(
@@ -775,38 +799,72 @@ public sealed class GpuDrawPass
 					_gpuDrawResources.ActiveDrawCommandUpperBound));
 			cullParamsWriter.SetUInt("viewCount", (uint)outputViewCount);
 			cullParamsWriter.SetUInt("bucketCount", (uint)executionLaneCount);
-			cullParamsWriter.SetUInt("maxVisiblePerBucket", GpuDrawResources.MaxDrawCount);
+			cullParamsWriter.SetUInt("maxVisiblePerBucket", (uint)_gpuDrawResources.InstanceCapacity);
 			cullParamsWriter.SetUInt("fallbackMeshHandle", context.GpuDrawDatabase.FallbackMeshHandle.Value);
-			cullParamsWriter.SetUInt("outputDrawArgsStride", GpuDrawResources.MaxDrawCount);
+			cullParamsWriter.SetUInt("outputDrawArgsStride", (uint)_gpuDrawResources.InstanceCapacity);
 			cullParamsWriter.SetUInt("outputLaneStride", (uint)executionLaneCount);
 			cullParamsWriter.SetUInt("participatingLaneMask", BuildParticipatingLaneMask(participation));
 			cullParamsWriter.SetUInt("ownerViewIndex", (uint)context.View.Index);
+			cullParamsWriter.SetUInt("maxInstanceCount", _gpuDrawResources.ActiveInstanceUpperBound);
+			cullParamsWriter.SetUInt("visibleInstanceStride", (uint)_gpuDrawResources.InstanceCapacity);
+
+			// Every batch's args are reset to an empty slice of the visible list first, then each visible instance
+			// is appended to its batch. The appends count through the args the reset wrote, so it has to land first.
+			commandList.BindPipeline(preparePipeline);
 			commandList.SetComputeConstants(cullParamsWriter.RegisterIndex, cullParamsWriter.AsBytes());
+			BindCullBuffers(
+				commandList,
+				drawArgsBuffer!,
+				visibleInstanceBuffer!,
+				drawCountPerBucketBuffer!,
+				drawExecutionRangePerBucketBuffer!);
+			var prepareThreadGroupSize = _prepareBatchArgsThreadGroupSize
+			                             ?? throw new InvalidOperationException(
+				                             "GpuDraw batch args threadgroup size was not initialized.");
+			var (prepareGroupCountX, prepareGroupCountY, prepareGroupCountZ) =
+				prepareThreadGroupSize.GetDispatchGroupCount(_gpuDrawResources.ActiveDrawCommandUpperBound);
+			commandList.Dispatch(prepareGroupCountX, prepareGroupCountY, prepareGroupCountZ);
 
-			commandList.SetComputeBuffer(0, _gpuDrawResources.DrawCommandBuffer!);
-			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
-			commandList.SetComputeBuffer(2, _gpuDrawResources.MeshBuffer!);
-			commandList.SetComputeBuffer(3, drawArgsBuffer!);
-			if (GpuDrawDiagnosticsEnabled)
-			{
-				commandList.SetComputeBuffer(4, drawCountPerBucketBuffer!);
-				commandList.SetComputeBuffer(5, drawExecutionRangePerBucketBuffer!);
-			}
-			commandList.SetComputeBuffer(6, _gpuDrawResources.DrawGenerationBuffer!);
-			commandList.SetComputeBuffer(7, _gpuDrawResources.InstanceGenerationBuffer!);
+			commandList.SynchronizeUnorderedAccess(drawArgsBuffer!);
+
+			commandList.BindPipeline(cullPipeline);
+			commandList.SetComputeConstants(cullParamsWriter.RegisterIndex, cullParamsWriter.AsBytes());
+			BindCullBuffers(
+				commandList,
+				drawArgsBuffer!,
+				visibleInstanceBuffer!,
+				drawCountPerBucketBuffer!,
+				drawExecutionRangePerBucketBuffer!);
+			var cullThreadGroupSize = _cullThreadGroupSize
+			                          ?? throw new InvalidOperationException(
+				                          "GpuDraw cull threadgroup size was not initialized.");
+			var (cullGroupCountX, cullGroupCountY, cullGroupCountZ) =
+				cullThreadGroupSize.GetDispatchGroupCount(_gpuDrawResources.ActiveInstanceUpperBound);
+			commandList.Dispatch(cullGroupCountX, cullGroupCountY, cullGroupCountZ);
+		}
+	}
+
+	/// <summary>Binds what both cull entry points read and write; each declares only the part it uses.</summary>
+	private void BindCullBuffers(
+		IGfxCommandList commandList,
+		IGfxBuffer drawArgsBuffer,
+		IGfxBuffer visibleInstanceBuffer,
+		IGfxBuffer drawCountPerBucketBuffer,
+		IGfxBuffer drawExecutionRangePerBucketBuffer)
+	{
+		commandList.SetComputeBuffer(0, _gpuDrawResources.DrawCommandBuffer!);
+		commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
+		commandList.SetComputeBuffer(3, drawArgsBuffer);
+		commandList.SetComputeBuffer(6, visibleInstanceBuffer);
+		commandList.SetComputeBuffer(7, _gpuDrawResources.InstanceGenerationBuffer!);
+		commandList.SetComputeBuffer(11, _gpuDrawResources.BatchBuffer!);
+		if (GpuDrawDiagnosticsEnabled)
+		{
+			commandList.SetComputeBuffer(4, drawCountPerBucketBuffer);
+			commandList.SetComputeBuffer(5, drawExecutionRangePerBucketBuffer);
 			commandList.SetComputeBuffer(8, _gpuDrawResources.MeshGenerationBuffer!);
-			if (GpuDrawDiagnosticsEnabled)
-			{
-				commandList.SetComputeBuffer(9, _gpuDrawResources.MaterialGenerationBuffer!);
-				commandList.SetComputeBuffer(10, _gpuDrawResources.DiagnosticsCounterBuffer!);
-			}
-
-			var threadGroupSize = _cullThreadGroupSize
-			                      ?? throw new InvalidOperationException(
-				                      "GpuDraw cull threadgroup size was not initialized.");
-			var (groupCountX, groupCountY, groupCountZ) = threadGroupSize.GetDispatchGroupCount(
-				_gpuDrawResources.ActiveDrawCommandUpperBound);
-			commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
+			commandList.SetComputeBuffer(9, _gpuDrawResources.MaterialGenerationBuffer!);
+			commandList.SetComputeBuffer(10, _gpuDrawResources.DiagnosticsCounterBuffer!);
 		}
 	}
 
@@ -1014,7 +1072,6 @@ public sealed class GpuDrawPass
 				commandList.SetComputeBuffer(0, _gpuDrawResources.InstanceUpdateBuffer!);
 				commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
 				commandList.SetComputeBuffer(2, _gpuDrawResources.DrawCommandBuffer!);
-				commandList.SetComputeBuffer(3, _gpuDrawResources.DrawGenerationBuffer!);
 				commandList.SetComputeBuffer(4, _gpuDrawResources.InstanceGenerationBuffer!);
 				commandList.SetComputeBuffer(5, _gpuDrawResources.DiagnosticsCounterBuffer!);
 			});
@@ -1234,6 +1291,23 @@ public sealed class GpuDrawPass
 		return _terrainLayerUpdatePipeline;
 	}
 
+	private IGfxPipeline EnsurePrepareBatchArgsPipeline(IGfxDevice device)
+	{
+		if (_prepareBatchArgsPipeline is not null)
+		{
+			return _prepareBatchArgsPipeline;
+		}
+
+		EnsureComputeReflectionResources(device.BackendKind);
+		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSPrepareBatchArgs", default, default, default);
+		_prepareBatchArgsPipeline = device.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(
+				compute: _prepareBatchArgsShaderBytecode,
+				computeThreadGroupSize: _prepareBatchArgsThreadGroupSize));
+		return _prepareBatchArgsPipeline;
+	}
+
 	private IGfxPipeline EnsureCullPipeline(IGfxDevice device)
 	{
 		if (_cullPipeline is not null)
@@ -1272,7 +1346,7 @@ public sealed class GpuDrawPass
 		ArgumentNullException.ThrowIfNull(laneAvailable);
 
 		if (drawArgsBuffer is null ||
-		    _gpuDrawResources.DrawCommandBuffer is not { } drawCommandBuffer)
+		    _gpuDrawResources.BatchBuffer is not { } batchBuffer)
 		{
 			return false;
 		}
@@ -1311,7 +1385,7 @@ public sealed class GpuDrawPass
 			{
 				WriteBuffer<uint>(
 					executionRangeBuffer,
-					RentExecutionRangeReset(),
+					RentExecutionRangeReset(commandSet),
 					"SharedDrawCompactedExecutionRanges");
 				commandList.BindPipeline(EnsureCompactPipeline(device));
 			}
@@ -1337,17 +1411,14 @@ public sealed class GpuDrawPass
 						continue;
 					}
 
-					var rangeIndex = DrawRecordSet.GetCompactedExecutionRangeIndex(
-						activeSlot,
-						lane.ExecutionIndex,
-						page.PageIndex);
+					var rangeIndex = page.CompactedExecutionRangeIndex;
 					var request = new NativeIndirectCompactionRequest(
 						page.CommandBuffer,
 						executionRangeBuffer,
 						(uint)rangeIndex,
 						drawArgsBuffer,
 						drawArgsBaseOffsetBytes,
-						drawCommandBuffer,
+						batchBuffer,
 						page.PageStartCommandIndex,
 						page.PageCommandCapacity,
 						(uint)lane.ExecutionIndex,
@@ -1396,13 +1467,16 @@ public sealed class GpuDrawPass
 			"recordIndexCountUintOffset",
 			request.CommandBuffer.RecordIndexCountOffsetInBytes / sizeof(uint));
 		compactParamsWriter.SetUInt("activeDrawCommandUpperBound", request.ActiveDrawCommandUpperBound);
+		compactParamsWriter.SetUInt(
+			"recordInstanceCountUintOffset",
+			request.CommandBuffer.RecordInstanceCountOffsetInBytes / sizeof(uint));
 		commandList.SetComputeConstants(compactParamsWriter.RegisterIndex, compactParamsWriter.AsBytes());
 
 		commandList.SetComputeBuffer(0, compactedBuffer);
 		commandList.SetComputeBuffer(1, request.ExecutionRangeBuffer);
 		commandList.SetComputeReadOnlyBuffer(2, templateBuffer);
 		commandList.SetComputeReadOnlyBuffer(3, request.DrawArgsBuffer, request.DrawArgsBaseOffsetBytes);
-		commandList.SetComputeReadOnlyBuffer(4, request.DrawCommandBuffer);
+		commandList.SetComputeReadOnlyBuffer(4, request.BatchBuffer);
 
 		var (groupCountX, groupCountY, groupCountZ) =
 			threadGroupSize.GetDispatchGroupCount(request.PageCommandCapacity);
@@ -1410,21 +1484,18 @@ public sealed class GpuDrawPass
 	}
 
 	/// <summary>
-	/// The zeroed range table, kept as a field because it is sized by the lane and page counts and would
-	/// otherwise be a multi-kilobyte stack allocation on every compacting pass.
+	/// The zeroed ranges of a set's allocated pages, kept as a field so compacting does not allocate.
 	/// </summary>
-	private uint[] RentExecutionRangeReset()
+	private Span<uint> RentExecutionRangeReset(DrawRecordSet commandSet)
 	{
-		var length = DrawRecordSet.CompactedExecutionRangeEntryCount *
+		var length = commandSet.CompactedExecutionRangeEntryCount *
 		             (IndirectCompactionExecutionRange.StrideInBytes / sizeof(uint));
-		if (_executionRangeReset is null || _executionRangeReset.Length != length)
+		if (_executionRangeReset is null || _executionRangeReset.Length < length)
 		{
 			_executionRangeReset = new uint[length];
-			return _executionRangeReset;
 		}
 
-		Array.Clear(_executionRangeReset);
-		return _executionRangeReset;
+		return _executionRangeReset.AsSpan(0, length);
 	}
 
 	/// <summary>
@@ -1498,6 +1569,8 @@ public sealed class GpuDrawPass
 		    _terrainMaterialUpdateThreadGroupSize.HasValue &&
 		    _terrainLayerUpdateThreadGroupSize.HasValue &&
 		    _cullThreadGroupSize.HasValue &&
+		    _prepareBatchArgsThreadGroupSize.HasValue &&
+		    _prepareBatchArgsShaderBytecode.IsEmpty == false &&
 		    _compactThreadGroupSize.HasValue &&
 		    _compactParamsWriter is not null &&
 		    _compactShaderBytecode.IsEmpty == false &&
@@ -1574,6 +1647,14 @@ public sealed class GpuDrawPass
 		_cullShaderBytecode = cullCompiled.Bytecode;
 		_cullThreadGroupSize = cullCompiled.ThreadGroupSize;
 		_cullParamsWriter = new ShaderPropertyWriter(cullCompiled.ReflectionLayout.GetConstantBuffer("CullParams"));
+
+		var prepareBatchArgsCompiled = _shaderCompiler.GetComputeShaderWithReflection(
+			EngineShaderPrograms.GpuDrawCull,
+			"CSPrepareBatchArgs",
+			backendKind,
+			GpuDrawDiagnosticsEnabled ? "WOLF_GPU_DRAW_DIAGNOSTICS" : string.Empty);
+		_prepareBatchArgsShaderBytecode = prepareBatchArgsCompiled.Bytecode;
+		_prepareBatchArgsThreadGroupSize = prepareBatchArgsCompiled.ThreadGroupSize;
 
 		var compactCompiled = _shaderCompiler.GetComputeShaderWithReflection(
 			EngineShaderPrograms.GpuDrawCompact,
@@ -1780,7 +1861,7 @@ public sealed class GpuDrawPass
 
 		var verdict = problems.Count == 0 ? "ok" : $"SUSPECT: {string.Join("; ", problems)}";
 		Console.WriteLine(
-			$"[terrain draw] draw={update.DrawHandle.Value} material={update.MaterialHandle.Value} type={update.Type} " +
+			$"[terrain draw] instance={update.InstanceHandle.Value} material={update.MaterialHandle.Value} type={update.Type} " +
 			$"chunkOrigin=({chunk.X}, {chunk.Y}) chunkSize=({chunk.Z}, {chunk.W}) " +
 			$"uvScaleOffset=({uv.X}, {uv.Y}, {uv.Z}, {uv.W}) heightScale={heightScale} " +
 			$"heightmapHandle={heightmapHandle} layerMapHandles=({layerIndexMapHandle},{layerWeightMapHandle}) " +
@@ -1797,11 +1878,47 @@ public sealed class GpuDrawPass
 		return _activeIndirectSlot;
 	}
 
-	private static bool IsStructuralUpdateType(GpuDrawUpdateType type) =>
-		type is GpuDrawUpdateType.Add
-			or GpuDrawUpdateType.Remove
-			or GpuDrawUpdateType.UpdateMaterial
-			or GpuDrawUpdateType.UpdateMesh;
+	/// <summary>
+	/// Grows the shared tables to hold every slot the source databases have handed out. Runs before the staleness
+	/// check, so a replacement is re-uploaded and re-encoded in the same frame rather than drawn empty for one.
+	/// </summary>
+	private void EnsureTableCapacity(IGfxDevice device, ReadOnlySpan<GpuDrawSource> sources)
+	{
+		var instanceSlots = 0;
+		var meshSlots = 0;
+		var materialSlots = 0;
+		for (var i = 0; i < sources.Length; i++)
+		{
+			var database = sources[i].Database;
+			instanceSlots = Math.Max(instanceSlots, database.InstanceSlotCount);
+			meshSlots = Math.Max(meshSlots, database.MeshSlotCount);
+			materialSlots = Math.Max(materialSlots, database.MaterialSlotCount);
+		}
+
+		_gpuDrawResources.EnsureTableCapacity(device, instanceSlots, meshSlots, materialSlots);
+	}
+
+	/// <summary>
+	/// Uploads the batch table into the active frame slot's batch buffer when membership changed since that slot
+	/// last uploaded it. Each slot has its own buffer because the GPU may still be reading the others.
+	/// </summary>
+	private void UploadBatchTable(int frameSlot)
+	{
+		// Grown tables start empty, so every slot's batch table has to be uploaded again.
+		if (_uploadedTableGeneration != _gpuDrawResources.TableGeneration)
+		{
+			Array.Clear(_uploadedBatchTableVersions);
+			_uploadedTableGeneration = _gpuDrawResources.TableGeneration;
+		}
+
+		if (_uploadedBatchTableVersions[frameSlot] == _batches.Version)
+		{
+			return;
+		}
+
+		WriteBuffer<GpuDrawBatchData>(_gpuDrawResources.BatchBuffer!, _batches.GetBatchTable(), "BatchBuffer");
+		_uploadedBatchTableVersions[frameSlot] = _batches.Version;
+	}
 
 	/// <summary>
 	/// Count buffer for the GBuffer command set when compaction ran this frame, otherwise null so the
@@ -1913,6 +2030,22 @@ public sealed class GpuDrawPass
 		return buckets;
 	}
 
+	internal static bool ShouldApplyInstanceUpdate(
+		in GpuDrawUpdate update,
+		GpuDrawDatabase database,
+		GpuDrawBatches batches)
+	{
+		if (update.Type == GpuDrawUpdateType.Remove)
+		{
+			// An older source's remove must not clear the newer member already assigned to this slot.
+			return batches.IsSuperseded(update.InstanceHandle) == false;
+		}
+
+		// The database's generation table is authoritative. A current handle may replace an older batch member
+		// before that member's remove arrives from another source database.
+		return database.IsCurrentInstanceHandle(update.InstanceHandle);
+	}
+
 	private static uint CreateDrawFlags(int bucketIndex)
 	{
 		return DrawFlagActive | ((uint)bucketIndex & DrawFlagBucketMask) << DrawFlagBucketShift;
@@ -1951,7 +2084,6 @@ public sealed class GpuDrawPass
 			_updateSources.Add(source.Database);
 			destination.Add(GpuDrawUpdate.CreateAdd(
 				entry.DrawKind,
-				entry.DrawHandle,
 				entry.InstanceHandle,
 				entry.MeshHandle,
 				entry.MaterialHandle,
@@ -1967,25 +2099,27 @@ public sealed class GpuDrawPass
 		return destination.Count - initialCount;
 	}
 
+	/// <summary>
+	/// Empties every batch and queues a remove for every instance slot. The update shader clears a removed
+	/// instance's command whatever its generation, so a placeholder generation reaches every slot.
+	/// </summary>
 	private void AppendClearAllDraws(List<GpuDrawUpdate> destination)
 	{
-		for (var drawIndex = 1; drawIndex < GpuDrawResources.MaxDrawCount; drawIndex++)
+		_batches.Clear();
+		for (var instanceIndex = 1; instanceIndex < _gpuDrawResources.InstanceCapacity; instanceIndex++)
 		{
-			var drawHandle = GpuDrawHandle.Create(drawIndex, 1);
-			destination.Add(GpuDrawUpdate.CreateRemove(GpuDrawKind.Mesh, drawHandle, GpuDrawHandle.Invalid));
+			var instanceHandle = GpuDrawHandle.Create(instanceIndex, 1);
+			destination.Add(GpuDrawUpdate.CreateRemove(GpuDrawKind.Mesh, instanceHandle));
 		}
 	}
 
 	private void UploadGenerationTables(GpuDrawDatabase drawDatabase)
 	{
 		drawDatabase.CopyGenerationTables(
-			_drawGenerations,
 			_instanceGenerations,
 			_meshGenerations,
 			_materialGenerations);
 
-		WriteBuffer<uint>(_gpuDrawResources.DrawGenerationBuffer!, CollectionsMarshal.AsSpan(_drawGenerations),
-			"DrawGenerationBuffer");
 		WriteBuffer<uint>(_gpuDrawResources.InstanceGenerationBuffer!, CollectionsMarshal.AsSpan(_instanceGenerations),
 			"InstanceGenerationBuffer");
 		WriteBuffer<uint>(_gpuDrawResources.MeshGenerationBuffer!, CollectionsMarshal.AsSpan(_meshGenerations),
@@ -2106,7 +2240,7 @@ public sealed class GpuDrawPass
 		return _bindlessRegistry.GetTextureHandle(texture.Resources).Value;
 	}
 
-	private static uint GetPackedHandleIndex(uint handle) => handle & 0xFFFFu;
+	private static uint GetPackedHandleIndex(uint handle) => handle & GpuDrawHandle.IndexMask;
 
 	private static ShaderProgramId GetGBufferShaderPath(GpuDrawKind drawKind) => drawKind switch
 	{
@@ -2210,7 +2344,7 @@ public sealed class GpuDrawPass
 		_loggedCapacityExceeded = true;
 		_hardeningStats.IncrementPackedCapacityFailures();
 		Console.WriteLine(
-			$"GpuDraw capacity exceeded; some renderables are skipped. drawHandle={update.DrawHandle.Value}, instanceHandle={update.InstanceHandle.Value}, meshHandle={update.MeshHandle.Value}, materialHandle={update.MaterialHandle.Value}. Limits: draw<{GpuDrawResources.MaxDrawCount}, instance<{GpuDrawResources.MaxInstanceCount}, mesh<{GpuDrawResources.MaxMeshCount}, material<{GpuDrawResources.MaxMaterialCount}.");
+			$"GpuDraw capacity exceeded; some renderables are skipped. instanceHandle={update.InstanceHandle.Value}, meshHandle={update.MeshHandle.Value}, materialHandle={update.MaterialHandle.Value}. Capacities: instance<{_gpuDrawResources.InstanceCapacity}, mesh<{_gpuDrawResources.MeshCapacity}, material<{_gpuDrawResources.MaterialCapacity}, at most {GpuDrawResources.MaxInstanceCount} each.");
 	}
 
 	private static void WriteBufferElement<T>(IGfxBuffer buffer, in T data, ulong elementOffset, string bufferName)
