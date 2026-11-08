@@ -57,7 +57,9 @@ cbuffer CameraParams : register(b2)
     row_major float4x4 viewMatrix;
     float nearPlane;
     float farPlane;
-    float2 _cameraPadding;
+    // LOD bias for material textures; see SceneDrawData.MaterialMipBias.
+    float materialMipBias;
+    float _cameraPadding;
 };
 
 cbuffer LightingParams : register(b3)
@@ -186,12 +188,12 @@ TransparentOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFa
     Texture2D<float4> emissiveTex = GetTexture(materialData.emissiveHandle);
 
     float2 materialUv = input.uv * materialData.uvOffsetScale.zw + materialData.uvOffsetScale.xy;
-    float4 albedoSample = albedoTex.Sample(sampler, materialUv);
-    float4 ormSample = ormTex.Sample(sampler, materialUv);
+    float4 albedoSample = albedoTex.SampleBias(sampler, materialUv, materialMipBias);
+    float4 ormSample = ormTex.SampleBias(sampler, materialUv, materialMipBias);
     float3 tangentNormal = ApplyNormalMapScale(
-        DecodeNormalMapSample(normalTex.Sample(sampler, materialUv)),
+        DecodeNormalMapSample(normalTex.SampleBias(sampler, materialUv, materialMipBias)),
         materialData.metallicRoughness.w);
-    float4 emissiveSample = emissiveTex.Sample(sampler, materialUv);
+    float4 emissiveSample = emissiveTex.SampleBias(sampler, materialUv, materialMipBias);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
 
     float3 N = normal;

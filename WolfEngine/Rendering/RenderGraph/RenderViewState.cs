@@ -160,6 +160,12 @@ internal sealed class RenderViewState
 	/// <summary>The size this view last rendered at, which its camera's jitter and projection derive from.</summary>
 	public Int2 SceneRenderSize;
 
+	/// <summary>
+	/// The size this view's image is presented at. It differs from <see cref="SceneRenderSize"/> when the render
+	/// scale is below one, and is the size a temporal upscaler reconstructs to.
+	/// </summary>
+	public Int2 SceneDisplaySize;
+
 	public Matrix4x4 ResolvedProjection = Matrix4x4.Identity;
 	public Matrix4x4 PreviousResolvedProjection = Matrix4x4.Identity;
 	public bool HasPreviousResolvedProjection;
@@ -179,11 +185,11 @@ internal sealed class RenderViewState
 	public bool PreviousTaaEnabled;
 	public AntiAliasingMode PreviousAntiAliasingMode;
 
-	// Temporal anti-aliasing and FSR3 history. FSR3 keeps two more ping-pong textures alongside TAA's colour and
-	// depth; both histories are allocated, swapped and released together.
+	// Temporal anti-aliasing and FSR3 history. Only the selected method holds history: FSR3 keeps its own, because
+	// its upscaled colour history is at display size while its luma histories stay at render size.
 	public bool ResetTaaHistoryThisFrame;
 	public readonly ViewHistory<TemporalHistoryShape> TemporalHistory = new("Temporal AA", TemporalHistorySlot.Count, DescribeTemporalHistory);
-	public readonly ViewHistory<Int2> Fsr3History = new("FSR3", Fsr3HistorySlot.Count, DescribeFsr3History);
+	public readonly ViewHistory<Fsr3HistoryShape> Fsr3History = new("FSR3", Fsr3HistorySlot.Count, DescribeFsr3History);
 	public IGfxTexture? Fsr3FrameInfoTexture;
 	public ResourceState Fsr3FrameInfoState = ResourceState.UnorderedAccess;
 	public uint Fsr3FrameIndex;
@@ -276,6 +282,7 @@ internal sealed class RenderViewState
 		SceneRenderTarget.Release(device);
 		PresentedSceneTarget.Release(device);
 		SceneRenderSize = Int2.Zero;
+		SceneDisplaySize = Int2.Zero;
 		PreviousJitterPhaseCount = 0;
 		ResolvedProjection = Matrix4x4.Identity;
 		PreviousResolvedProjection = Matrix4x4.Identity;
@@ -361,8 +368,7 @@ internal sealed class RenderViewState
 
 	private static TextureDescriptor DescribeTemporalHistory(TemporalHistoryShape shape, int slot)
 	{
-		// Colour is cleared to opaque black. TAA stores view depth in the depth slot, zero for sky; FSR3 reuses it
-		// as its luma history.
+		// Colour is cleared to opaque black. TAA stores view depth in the depth slot, zero for sky.
 		var clearAlpha = slot == TemporalHistorySlot.Color ? 1.0f : 0.0f;
 
 		return new TextureDescriptor(
@@ -373,8 +379,12 @@ internal sealed class RenderViewState
 			new ColorRGBA(0.0f, 0.0f, 0.0f, clearAlpha));
 	}
 
-	private static TextureDescriptor DescribeFsr3History(Int2 size, int slot)
+	private static TextureDescriptor DescribeFsr3History(Fsr3HistoryShape shape, int slot)
 	{
+		var size = Fsr3HistorySlot.IsDisplayResolution(slot)
+			? shape.UpscaleSize
+			: shape.RenderSize;
+
 		return new TextureDescriptor(
 			size.X,
 			size.Y,
@@ -433,8 +443,14 @@ internal sealed class RenderViewState
 	}
 }
 
-/// <summary>What temporal AA and FSR3 history is only valid against.</summary>
+/// <summary>What temporal AA history is only valid against.</summary>
 internal readonly record struct TemporalHistoryShape(Int2 Size, AntiAliasingMode Mode);
+
+/// <summary>
+/// What FSR3 history is only valid against: the resolution the scene renders at and the resolution FSR3
+/// reconstructs to. The two are equal when FSR3 runs as native anti-aliasing.
+/// </summary>
+internal readonly record struct Fsr3HistoryShape(Int2 RenderSize, Int2 UpscaleSize);
 
 /// <summary>
 /// What volumetric fog history is only valid against. The maximum distance does not change the grid, but it
@@ -465,7 +481,14 @@ internal static class Fsr3HistorySlot
 {
 	public const int CurrentLuma = 0;
 	public const int Accumulation = 1;
-	public const int Count = 2;
+	public const int LumaHistory = 2;
+
+	/// <summary>The reconstructed colour, at display resolution. Every other slot is at render resolution.</summary>
+	public const int InternalUpscaled = 3;
+
+	public const int Count = 4;
+
+	public static bool IsDisplayResolution(int slot) => slot == InternalUpscaled;
 }
 
 /// <summary>

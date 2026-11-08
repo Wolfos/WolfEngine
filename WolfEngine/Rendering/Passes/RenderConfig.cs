@@ -487,10 +487,17 @@ public struct AntiAliasingConfig
 	public float Sharpness { get; set; } = 0.2f;
 
 	/// <summary>
-	/// Scales coverage-aware reactivity for surviving alpha-tested samples. One preserves
-	/// the authored coverage signal; zero lets FSR3 treat them as ordinary opaque pixels.
+	/// Scales coverage-aware reactivity for surviving alpha-tested samples. Zero, the default, lets FSR3
+	/// treat them as ordinary opaque pixels; one marks fractional coverage reactive.
 	/// </summary>
-	public float AlphaTestReactiveScale { get; set; } = 1.0f;
+	/// <remarks>
+	/// Leave this at zero unless a material's cutout changes in a way motion vectors cannot describe,
+	/// such as a dissolve or a scrolling alpha texture. Which texels pass the alpha test changes with the
+	/// jitter phase, and accumulating those phases is what anti-aliases a cutout edge. Marking the edge
+	/// reactive makes FSR3 show each frame's own clip result instead, so the edge steps every frame,
+	/// most visibly against a bright sky.
+	/// </remarks>
+	public float AlphaTestReactiveScale { get; set; } = 0.0f;
 
 	/// <summary>Scales the transparent-forward composition mask supplied to FSR3.</summary>
 	public float TransparencyAndCompositionMaskScale { get; set; } = 1.0f;

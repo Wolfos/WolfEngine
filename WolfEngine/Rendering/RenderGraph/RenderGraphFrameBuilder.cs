@@ -668,6 +668,7 @@ internal sealed class RenderGraphFrameBuilder
 		var fogIntegratedHandle = default(RenderGraphResourceHandle);
 		var fogHistoryValid = false;
 		var fsr3Resources = default(Fsr3FrameResources);
+		var resolvedSceneColorSize = GetResolvedSceneColorSize(config.AntiAliasing, framebufferSize, sceneFramebufferSize);
 		if (sceneEnabled)
 		{
 			gbufferAlbedoHandle = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -780,8 +781,8 @@ internal sealed class RenderGraphFrameBuilder
 			resolvedSceneColorHandle = sceneColorHandle.IsValid
 				? sceneColorHandle
 				: _resources.CreateTransientTexture(new TextureDescriptor(
-					sceneFramebufferSize.X,
-					sceneFramebufferSize.Y,
+					resolvedSceneColorSize.X,
+					resolvedSceneColorSize.Y,
 					TextureFormat.Rgba16Float,
 					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
 			var transparencyMaskHandle = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -854,21 +855,14 @@ internal sealed class RenderGraphFrameBuilder
 			fsr3Resources = new Fsr3FrameResources { TransparencyMask = transparencyMaskHandle };
 			if (taaEnabled)
 			{
-				var temporalHistoryShape = new TemporalHistoryShape(sceneFramebufferSize, config.AntiAliasing.Mode);
-				if (_view.TemporalHistory.Ensure(device, temporalHistoryShape))
-				{
-					_view.ResetTaaHistoryThisFrame = true;
-				}
-
-				_view.TemporalHistory.Import(_resources);
-				historyColorReadHandle = _view.TemporalHistory.Previous(TemporalHistorySlot.Color);
-				historyColorWriteHandle = _view.TemporalHistory.Current(TemporalHistorySlot.Color);
-				historyDepthReadHandle = _view.TemporalHistory.Previous(TemporalHistorySlot.Depth);
-				historyDepthWriteHandle = _view.TemporalHistory.Current(TemporalHistorySlot.Depth);
-
 				if (config.AntiAliasing.UsesFsr3)
 				{
-					EnsureFsr3HistoryResources(device, sceneFramebufferSize);
+					_view.TemporalHistory.Release();
+					if (EnsureFsr3HistoryResources(device, sceneFramebufferSize, framebufferSize))
+					{
+						_view.ResetTaaHistoryThisFrame = true;
+					}
+
 					_view.Fsr3History.Import(_resources);
 					var frameInfoHandle = _resources.ImportTexture(
 						_view.Fsr3FrameInfoTexture ?? throw new InvalidOperationException("FSR3 frame info was not allocated."),
@@ -899,18 +893,31 @@ internal sealed class RenderGraphFrameBuilder
 						AccumulationRead = _view.Fsr3History.Previous(Fsr3HistorySlot.Accumulation),
 						AccumulationWrite = _view.Fsr3History.Current(Fsr3HistorySlot.Accumulation),
 						DilatedReactiveMasks = CreateFsr3Texture(sceneFramebufferSize),
-						NewLocks = CreateFsr3Texture(sceneFramebufferSize),
-						LumaHistoryRead = historyDepthReadHandle,
-						LumaHistoryWrite = historyDepthWriteHandle,
+						// Prepare Reactivity writes new locks at the display pixel each jittered sample lands on.
+						NewLocks = CreateFsr3Texture(framebufferSize),
+						LumaHistoryRead = _view.Fsr3History.Previous(Fsr3HistorySlot.LumaHistory),
+						LumaHistoryWrite = _view.Fsr3History.Current(Fsr3HistorySlot.LumaHistory),
 						LumaInstability = CreateFsr3Texture(sceneFramebufferSize),
-						InternalHistoryRead = historyColorReadHandle,
-						InternalHistoryWrite = historyColorWriteHandle,
-						HistoryValid = _view.TemporalHistory.IsValid && _view.Fsr3History.IsValid
+						InternalHistoryRead = _view.Fsr3History.Previous(Fsr3HistorySlot.InternalUpscaled),
+						InternalHistoryWrite = _view.Fsr3History.Current(Fsr3HistorySlot.InternalUpscaled),
+						HistoryValid = _view.Fsr3History.IsValid
 					};
 				}
 				else
 				{
 					_view.ReleaseFsr3HistoryResources();
+
+					var temporalHistoryShape = new TemporalHistoryShape(sceneFramebufferSize, config.AntiAliasing.Mode);
+					if (_view.TemporalHistory.Ensure(device, temporalHistoryShape))
+					{
+						_view.ResetTaaHistoryThisFrame = true;
+					}
+
+					_view.TemporalHistory.Import(_resources);
+					historyColorReadHandle = _view.TemporalHistory.Previous(TemporalHistorySlot.Color);
+					historyColorWriteHandle = _view.TemporalHistory.Current(TemporalHistorySlot.Color);
+					historyDepthReadHandle = _view.TemporalHistory.Previous(TemporalHistorySlot.Depth);
+					historyDepthWriteHandle = _view.TemporalHistory.Current(TemporalHistorySlot.Depth);
 				}
 			}
 
@@ -1097,10 +1104,11 @@ internal sealed class RenderGraphFrameBuilder
 
 		if (sceneEnabled && config.Bloom.Enabled)
 		{
-			var levelCount = GetBloomLevelCount(sceneFramebufferSize, config.Bloom.Quality);
+			// Bloom runs on the resolved image, which an upscaler has already brought to display size.
+			var levelCount = GetBloomLevelCount(resolvedSceneColorSize, config.Bloom.Quality);
 			bloomDownsampleLevels = new RenderGraphResourceHandle[levelCount];
 			bloomUpsampleLevels = new RenderGraphResourceHandle[Math.Max(levelCount - 1, 0)];
-			var levelSize = new Int2(Math.Max(1, (sceneFramebufferSize.X + 1) / 2), Math.Max(1, (sceneFramebufferSize.Y + 1) / 2));
+			var levelSize = new Int2(Math.Max(1, (resolvedSceneColorSize.X + 1) / 2), Math.Max(1, (resolvedSceneColorSize.Y + 1) / 2));
 			for (var level = 0; level < levelCount; level++)
 			{
 				bloomDownsampleLevels[level] = CreateBloomTexture(levelSize);
@@ -1110,7 +1118,7 @@ internal sealed class RenderGraphFrameBuilder
 				}
 				levelSize = new Int2(Math.Max(1, (levelSize.X + 1) / 2), Math.Max(1, (levelSize.Y + 1) / 2));
 			}
-			bloomCompositeSceneColorHandle = CreateBloomTexture(sceneFramebufferSize);
+			bloomCompositeSceneColorHandle = CreateBloomTexture(resolvedSceneColorSize);
 		}
 
 		var tonemappedLinearSceneColorHandle = sceneEnabled
@@ -2905,6 +2913,7 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		var fsr = _view.FrameResources.Fsr3;
 		var size = _view.FrameResources.SceneFramebufferSize;
+		var upscaleSize = _view.FrameResources.FramebufferSize;
 		AddFsr3Clear(graph, "FSR3 Clear Reconstructed Depth", fsr.ReconstructedPrevNearestDepth,
 			size, BitConverter.SingleToUInt32Bits(1.0f), true);
 		AddFsr3Clear(graph, "FSR3 Clear Luma SPD Counter", fsr.LumaSpdAtomic, new Int2(1, 1), 0u, true);
@@ -2923,7 +2932,7 @@ internal sealed class RenderGraphFrameBuilder
 		if (!fsr.HistoryValid || _view.ResetTaaHistoryThisFrame)
 		{
 			AddFsr3Clear(graph, "FSR3 Clear Frame Info", fsr.FrameInfo, new Int2(1, 1), 0u, false);
-			AddFsr3Clear(graph, "FSR3 Clear Internal History", fsr.InternalHistoryRead, size, 0u, false);
+			AddFsr3Clear(graph, "FSR3 Clear Internal History", fsr.InternalHistoryRead, upscaleSize, 0u, false);
 			AddFsr3Clear(graph, "FSR3 Clear Luma History", fsr.LumaHistoryRead, size, 0u, false);
 			AddFsr3Clear(graph, "FSR3 Clear Previous Luma", fsr.CurrentLumaRead, size, 0u, false);
 			AddFsr3Clear(graph, "FSR3 Clear Accumulation", fsr.AccumulationRead, size, 0u, false);
@@ -2969,13 +2978,14 @@ internal sealed class RenderGraphFrameBuilder
 		// at the lifetime boundary, after those earlier intermediates have finished using the alias.
 		// Otherwise their depth/luma payload is read as a positive lock and stale colour history is
 		// protected from rectification, producing bright trails behind moving opaque geometry.
-		AddFsr3Clear(graph, "FSR3 Clear New Locks", fsr.NewLocks, size, 0u, false);
+		AddFsr3Clear(graph, "FSR3 Clear New Locks", fsr.NewLocks, upscaleSize, 0u, false);
 
 		graph.AddPass("FSR3 Prepare Reactivity", PassKind.Compute)
 			.ReadTexture(fsr.ReconstructedPrevNearestDepth, ResourceState.UnorderedAccess)
 			.ReadTexture(fsr.DilatedMotionVectors, ResourceState.ShaderResource)
 			.ReadTexture(fsr.DilatedDepth, ResourceState.ShaderResource)
 			.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(_view.FrameResources.GBufferVelocity, ResourceState.ShaderResource)
 			.ReadTexture(_view.FrameResources.GBufferMaterial, ResourceState.ShaderResource)
 			.ReadTexture(fsr.TransparencyMask, ResourceState.ShaderResource)
 			.ReadTexture(fsr.AccumulationRead, ResourceState.ShaderResource)
@@ -3046,19 +3056,34 @@ internal sealed class RenderGraphFrameBuilder
 		return new Int2(Math.Max(sourceSize.X / divisor, 1), Math.Max(sourceSize.Y / divisor, 1));
 	}
 
+	/// <summary>
+	/// The size of the temporally resolved scene colour. FSR3 reconstructs at display size; TAA resolves at render
+	/// size and leaves tonemapping to filter the image up to the display.
+	/// </summary>
+	internal static Int2 GetResolvedSceneColorSize(AntiAliasingConfig antiAliasing, Int2 displaySize, Int2 renderSize)
+	{
+		return antiAliasing.UsesFsr3
+			? displaySize
+			: renderSize;
+	}
+
 	internal static Int2 GetFsr3ShadingChangeSize(Int2 renderSize) => new(
 		Math.Max(renderSize.X / 2, 1),
 		Math.Max(renderSize.Y / 2, 1));
 
 	private Fsr3ConstantValues BuildFsr3Constants(RenderGraphContext context)
 	{
-		var size = _view.FrameResources.SceneFramebufferSize;
+		var renderSize = _view.FrameResources.SceneFramebufferSize;
+		var upscaleSize = _view.FrameResources.FramebufferSize;
 		var camera = context.ViewSnapshot.Camera;
 		var verticalFov = float.DegreesToRadians(camera.Fov > 0.0f ? camera.Fov : 70.0f);
 		var depth = Fsr3Constants.BuildDeviceToViewDepth(context.SceneData.NearPlane,
-			context.SceneData.FarPlane, verticalFov, (float)Math.Max(size.X, 1) / Math.Max(size.Y, 1));
+			context.SceneData.FarPlane, verticalFov, (float)Math.Max(renderSize.X, 1) / Math.Max(renderSize.Y, 1));
 		var reset = _view.ResetTaaHistoryThisFrame || context.SceneData.ResetHistory || !_view.FrameResources.Fsr3.HistoryValid;
-		return Fsr3Constants.Build(size, size, size, size, depth,
+
+		// Any change to either size reallocates the history and resets accumulation, so whenever last frame's
+		// history is read it was produced at this frame's sizes.
+		return Fsr3Constants.Build(renderSize, upscaleSize, renderSize, upscaleSize, depth,
 			context.SceneData.JitterPixels, context.SceneData.PreviousJitterPixels, verticalFov,
 			Math.Max(_view.SceneFrameDeltaSeconds, 1.0f / 1000.0f), reset ? 0.0f : _view.Fsr3FrameIndex);
 	}
@@ -3111,6 +3136,7 @@ internal sealed class RenderGraphFrameBuilder
 		var config = _passSet.Fsr3PrepareReactivityPass.BuildConfig(context, _renderer.GetGfxDevice(),
 			fsr.ReconstructedPrevNearestDepth, fsr.DilatedMotionVectors, fsr.DilatedDepth,
 			_view.FrameResources.GBufferDepth,
+			_view.FrameResources.GBufferVelocity,
 			_view.FrameResources.GBufferMaterial, fsr.TransparencyMask, fsr.AccumulationRead, fsr.AccumulationWrite,
 			fsr.ShadingChange, fsr.CurrentLumaWrite, fsr.FrameInfo, fsr.DilatedReactiveMasks,
 			fsr.NewLocks, in constants,
@@ -3353,7 +3379,7 @@ internal sealed class RenderGraphFrameBuilder
 			_view.FrameResources.SceneFramebufferSize);
 	}
 
-	private void ExecuteTonemapping(RenderGraphContext context)
+		private void ExecuteTonemapping(RenderGraphContext context)
 	{
 		var config = _tonemappingPass.BuildConfig(
 			context,
@@ -3631,13 +3657,15 @@ internal sealed class RenderGraphFrameBuilder
 		_view.ColorPyramidValid = false;
 	}
 
-	private void EnsureFsr3HistoryResources(IGfxDevice device, Int2 sceneFramebufferSize)
+	/// <summary>Allocates FSR3's history for the given sizes. Returns true when it was (re)allocated.</summary>
+	private bool EnsureFsr3HistoryResources(IGfxDevice device, Int2 renderSize, Int2 upscaleSize)
 	{
 		var previousDevice = _view.Fsr3History.Device;
-		if (_view.Fsr3History.Ensure(device, sceneFramebufferSize) == false &&
+		var shape = new Fsr3HistoryShape(renderSize, upscaleSize);
+		if (_view.Fsr3History.Ensure(device, shape) == false &&
 		    _view.Fsr3FrameInfoTexture is not null)
 		{
-			return;
+			return false;
 		}
 
 		// The frame info and frame index describe the accumulation in the history, so they restart with it.
@@ -3654,6 +3682,8 @@ internal sealed class RenderGraphFrameBuilder
 			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 		_view.Fsr3FrameInfoState = ResourceState.UnorderedAccess;
 		_view.Fsr3FrameIndex = 0;
+
+		return true;
 	}
 
 	private void EnsureDdgiHistoryResources(IGfxDevice device, DdgiHistoryShape shape)

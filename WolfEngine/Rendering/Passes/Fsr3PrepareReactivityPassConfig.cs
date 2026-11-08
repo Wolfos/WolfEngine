@@ -10,6 +10,12 @@ public readonly struct Fsr3PrepareReactivityPassConfig
 	public required DescriptorHandle DilatedMotionVectorsHandle { get; init; }
 	public required DescriptorHandle DilatedDepthHandle { get; init; }
 	public required DescriptorHandle InputDepthHandle { get; init; }
+
+	/// <summary>
+	/// The undilated G-buffer velocity, compared against the dilated motion to tell newly exposed
+	/// background from a surface that moves with its foreground neighbour.
+	/// </summary>
+	public required DescriptorHandle InputMotionVectorsHandle { get; init; }
 	public required DescriptorHandle ReactiveMaskHandle { get; init; }
 	public required DescriptorHandle TransparencyAndCompositionMaskHandle { get; init; }
 	public required DescriptorHandle AccumulationReadHandle { get; init; }

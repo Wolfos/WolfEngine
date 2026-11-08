@@ -343,6 +343,26 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken = default) =>
 		_controller.SetAntiAliasingAsync(mode, enabled, casSharpening, cancellationToken);
 
+	[McpServerTool(Name = "set_fsr3_settings"), Description("Set the active scene's FSR3 settings in memory without saving its render config: alpha-test reactivity, the transparency and composition mask scale, and RCAS sharpening.")]
+	public Task<string> SetFsr3Settings(
+		[Description("Reactivity for surviving alpha-tested samples, 0 to 1.")] float alphaTestReactiveScale,
+		[Description("Scale of the transparent-forward composition mask, 0 to 1.")] float transparencyAndCompositionMaskScale,
+		[Description("Whether RCAS sharpening runs.")] bool sharpening,
+		[Description("RCAS sharpness, 0 to 1.")] float sharpness,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetFsr3SettingsAsync(
+			alphaTestReactiveScale,
+			transparencyAndCompositionMaskScale,
+			sharpening,
+			sharpness,
+			cancellationToken);
+
+	[McpServerTool(Name = "set_render_scale"), Description("Set the active scene's render scale in memory without saving its render config. The scene renders at this per-axis fraction of the output; FSR3 upscales temporally, TAA is filtered up by tonemapping. Clamped to 0.25..1.")]
+	public Task<string> SetRenderScale(
+		[Description("Per-axis fraction of the output resolution, 0.25 to 1.")] float renderScale,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetRenderScaleAsync(renderScale, cancellationToken);
+
 	[McpServerTool(Name = "set_scene_debug_view"), Description("Sets the debug view captured from the scene viewport; pass an empty string to release it.")]
 	public async Task<string> SetSceneDebugView(
 		[Description("Debug view id, or empty to release.")] string debugViewId,

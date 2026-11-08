@@ -279,6 +279,56 @@ public sealed partial class EditorRemoteAutomationController
 			return $"Anti-aliasing: {selectedMode}, enabled: {enabled}, CAS: {settings.UsesCasSharpening}. Changed in memory only.";
 		}, cancellationToken);
 
+	public Task<string> SetRenderScaleAsync(float renderScale, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+			{
+				config = entry.First.RenderConfigAsset.Asset;
+			}
+
+			if (config is null)
+			{
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			}
+
+			config.RenderScale = renderScale;
+
+			return $"Render scale: {config.RenderScale}. Changed in memory only.";
+		}, cancellationToken);
+
+	public Task<string> SetFsr3SettingsAsync(
+		float alphaTestReactiveScale,
+		float transparencyAndCompositionMaskScale,
+		bool sharpening,
+		float sharpness,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+			{
+				config = entry.First.RenderConfigAsset.Asset;
+			}
+
+			if (config is null)
+			{
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			}
+
+			var settings = config.AntiAliasing;
+			settings.AlphaTestReactiveScale = alphaTestReactiveScale;
+			settings.TransparencyAndCompositionMaskScale = transparencyAndCompositionMaskScale;
+			settings.EnableSharpening = sharpening;
+			settings.Sharpness = sharpness;
+			config.AntiAliasing = settings;
+
+			return $"FSR3: alpha-test reactive {alphaTestReactiveScale}, composition mask {transparencyAndCompositionMaskScale}, RCAS {sharpening} at {sharpness}. Changed in memory only.";
+		}, cancellationToken);
+
 	public Task<string> SetRenderEffectsAsync(bool ambientOcclusion, bool reflections, bool diffuseGlobalIllumination,
 		bool volumetricFog, CancellationToken cancellationToken) =>
 		Enqueue(() =>

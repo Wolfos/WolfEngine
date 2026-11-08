@@ -370,10 +370,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		sceneData = null;
 		var world = snapshot.CameraWorldTransform.LocalToWorld;
 		var taaEnabled = snapshot.Config.AntiAliasing.Enabled;
-		// FSR3 owns the sequence length. At native resolution this is eight phases; once
-		// render/display sizes split, the display width belongs in the second argument.
+		// FSR3 owns the sequence length: eight phases at native resolution, growing with the square of the
+		// upscale ratio so each display pixel still receives the same number of jittered samples.
 		var phaseCount = snapshot.Config.AntiAliasing.Mode == AntiAliasingMode.Fsr3
-			? Fsr3Constants.GetJitterPhaseCount(_view.SceneRenderSize.X, _view.SceneRenderSize.X)
+			? Fsr3Constants.GetJitterPhaseCount(_view.SceneRenderSize.X, _view.SceneDisplaySize.X)
 			: Math.Max(1, snapshot.Config.AntiAliasing.Taa.PhaseCount);
 		var jitterPixels = taaEnabled
 			? TemporalJitter.GetHaltonJitterPixels(
@@ -450,7 +450,13 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				_view.RenderLights,
 				snapshot.DecalPackets,
 				snapshot.FogVolumePackets,
-				snapshot.OutlinePackets);
+				snapshot.OutlinePackets)
+			{
+				// TAA with a reduced render scale is a spatial upscale, so it keeps the render resolution's mips.
+				MaterialMipBias = snapshot.Config.AntiAliasing.UsesFsr3
+					? Fsr3Constants.GetMaterialMipBias(_view.SceneRenderSize.X, _view.SceneDisplaySize.X)
+					: 0.0f
+			};
 
 			_view.PreviousResolvedProjection = _view.ResolvedProjection;
 			_view.HasPreviousResolvedProjection = true;
@@ -977,12 +983,19 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				? 0.0f
 				: (float)Stopwatch.GetElapsedTime(_view.LastSceneFrameTimestamp, now).TotalSeconds;
 			_view.LastSceneFrameTimestamp = now;
+			var viewDisplaySize = ResolveViewDisplaySize(_view.Output, frameBufferSize, sceneViewportState, sceneRenderSize);
 			_view.SceneRenderSize = sceneRenderSize;
+			_view.SceneDisplaySize = viewDisplaySize;
 			var renderSceneToViewport = sceneEnabled && !renderSceneToWindow;
 			var sceneColorHandle = default(RenderGraphResourceHandle);
 			if (renderSceneToViewport)
 			{
-				var sceneTarget = _view.SceneRenderTarget.EnsureTarget(_renderer.GetGfxDevice(), sceneRenderSize);
+				// This target receives the temporally resolved colour, which an upscaler produces at display size.
+				var resolvedSceneColorSize = RenderGraphFrameBuilder.GetResolvedSceneColorSize(
+					viewSnapshot.Config.AntiAliasing,
+					viewDisplaySize,
+					sceneRenderSize);
+				var sceneTarget = _view.SceneRenderTarget.EnsureTarget(_renderer.GetGfxDevice(), resolvedSceneColorSize);
 				sceneColorHandle = _resourceRegistry.ImportTexture(
 					sceneTarget,
 					takeOwnership: false,
@@ -999,7 +1012,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				viewCameraPosition = viewSnapshot.Config.DiffuseGlobalIllumination.Origin;
 			}
 
-			var viewDisplaySize = ResolveViewDisplaySize(_view.Output, frameBufferSize, sceneViewportState, sceneRenderSize);
 			_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 			_frameBuilder.BeginViewFrame(
 				recordedView,

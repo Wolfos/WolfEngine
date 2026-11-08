@@ -313,6 +313,22 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<string> SetAntiAliasingAsync(string mode, bool enabled, bool casSharpening, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetAntiAliasingAsync(mode, enabled, casSharpening, cancellationToken);
 
+	public Task<string> SetFsr3SettingsAsync(
+		float alphaTestReactiveScale,
+		float transparencyAndCompositionMaskScale,
+		bool sharpening,
+		float sharpness,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SetFsr3SettingsAsync(
+			alphaTestReactiveScale,
+			transparencyAndCompositionMaskScale,
+			sharpening,
+			sharpness,
+			cancellationToken);
+
+	public Task<string> SetRenderScaleAsync(float renderScale, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetRenderScaleAsync(renderScale, cancellationToken);
+
 	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetSceneDebugViewAsync(debugViewId, cancellationToken);
 

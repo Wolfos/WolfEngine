@@ -38,7 +38,9 @@ cbuffer CameraParams : register(b2)
     row_major float4x4 viewMatrix;
     float nearPlane;
     float farPlane;
-    float2 _cameraPadding;
+    // LOD bias for material textures; see SceneDrawData.MaterialMipBias.
+    float materialMipBias;
+    float _cameraPadding;
 };
 
 struct VSInput
@@ -270,9 +272,9 @@ float2 GetTriplanarUvZ(float3 worldPosition, float layerScale)
 float4 SampleTriplanarFloat4(uint textureHandle, SamplerState samplerState, float3 worldPosition, float3 worldNormal, float layerScale)
 {
     float3 weights = GetTriplanarWeights(worldNormal);
-    float4 sampleX = GetTexture(textureHandle).Sample(samplerState, GetTriplanarUvX(worldPosition, layerScale));
-    float4 sampleY = GetTexture(textureHandle).Sample(samplerState, GetTriplanarUvY(worldPosition, layerScale));
-    float4 sampleZ = GetTexture(textureHandle).Sample(samplerState, GetTriplanarUvZ(worldPosition, layerScale));
+    float4 sampleX = GetTexture(textureHandle).SampleBias(samplerState, GetTriplanarUvX(worldPosition, layerScale), materialMipBias);
+    float4 sampleY = GetTexture(textureHandle).SampleBias(samplerState, GetTriplanarUvY(worldPosition, layerScale), materialMipBias);
+    float4 sampleZ = GetTexture(textureHandle).SampleBias(samplerState, GetTriplanarUvZ(worldPosition, layerScale), materialMipBias);
     return sampleX * weights.x + sampleY * weights.y + sampleZ * weights.z;
 }
 
@@ -289,9 +291,9 @@ float3 DecodeTriplanarNormal(uint normalHandle, SamplerState samplerState, float
         NonZeroSign(geometryNormal.x),
         NonZeroSign(geometryNormal.y),
         NonZeroSign(geometryNormal.z));
-    float3 normalX = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvX(worldPosition, layerScale)));
-    float3 normalY = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvY(worldPosition, layerScale)));
-    float3 normalZ = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvZ(worldPosition, layerScale)));
+    float3 normalX = DecodeNormalMapSample(GetTexture(normalHandle).SampleBias(samplerState, GetTriplanarUvX(worldPosition, layerScale), materialMipBias));
+    float3 normalY = DecodeNormalMapSample(GetTexture(normalHandle).SampleBias(samplerState, GetTriplanarUvY(worldPosition, layerScale), materialMipBias));
+    float3 normalZ = DecodeNormalMapSample(GetTexture(normalHandle).SampleBias(samplerState, GetTriplanarUvZ(worldPosition, layerScale), materialMipBias));
 
     float3 worldNormalX = normalize(float3(normalX.z * axisSign.x, normalX.y, normalX.x));
     float3 worldNormalY = normalize(float3(normalY.x, normalY.z * axisSign.y, normalY.y));

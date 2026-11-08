@@ -24,7 +24,8 @@ public sealed class TemporalAntiAliasingTests
 			Assert.That(settings.Taa.CasSharpness, Is.EqualTo(0.35f));
 			Assert.That(settings.EnableSharpening, Is.False);
 			Assert.That(settings.Sharpness, Is.EqualTo(0.2f));
-			Assert.That(settings.AlphaTestReactiveScale, Is.EqualTo(1.0f));
+			// Cutout edges must accumulate like opaque pixels; reactivity makes them step with the jitter.
+			Assert.That(settings.AlphaTestReactiveScale, Is.EqualTo(0.0f));
 			Assert.That(settings.TransparencyAndCompositionMaskScale, Is.EqualTo(1.0f));
 		});
 	}
@@ -55,7 +56,7 @@ public sealed class TemporalAntiAliasingTests
 			// FSR3 controls remain independent of TAA/CAS tuning.
 			Assert.That(config.AntiAliasing.EnableSharpening, Is.False);
 			Assert.That(config.AntiAliasing.Sharpness, Is.EqualTo(0.2f));
-			Assert.That(config.AntiAliasing.AlphaTestReactiveScale, Is.EqualTo(1.0f));
+			Assert.That(config.AntiAliasing.AlphaTestReactiveScale, Is.EqualTo(0.0f));
 			Assert.That(config.AntiAliasing.TransparencyAndCompositionMaskScale, Is.EqualTo(1.0f));
 		});
 	}
@@ -120,6 +121,24 @@ public sealed class TemporalAntiAliasingTests
 		Assert.That(
 			TemporalJitter.HasProjectionChanged(projection, changed),
 			Is.True);
+	}
+
+	[TestCase(1920, 1920, 8)]
+	[TestCase(1280, 1920, 18)]
+	[TestCase(960, 1920, 32)]
+	[TestCase(0, 1920, TemporalJitter.DefaultPhaseCount)]
+	[TestCase(1920, 0, TemporalJitter.DefaultPhaseCount)]
+	public void Fsr3JitterPhaseCountGrowsWithTheSquareOfTheUpscaleRatio(int renderWidth, int displayWidth, int expected)
+	{
+		Assert.That(Fsr3Constants.GetJitterPhaseCount(renderWidth, displayWidth), Is.EqualTo(expected));
+	}
+
+	[TestCase(1920, 1920, -1.0f)]
+	[TestCase(960, 1920, -2.0f)]
+	[TestCase(0, 1920, 0.0f)]
+	public void Fsr3MaterialMipBiasFollowsTheUpscaleRatio(int renderWidth, int displayWidth, float expected)
+	{
+		Assert.That(Fsr3Constants.GetMaterialMipBias(renderWidth, displayWidth), Is.EqualTo(expected).Within(1e-5f));
 	}
 
 	[TestCase(1280, 720, 640, 360)]
