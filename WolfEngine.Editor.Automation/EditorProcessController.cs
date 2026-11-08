@@ -180,6 +180,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<PlayModeStateResult> PausePlayModeAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().PausePlayModeAsync(cancellationToken);
 
+	public Task<PlayModeStateResult> SetGamePauseAsync(int reasonIndex, bool paused, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetGamePauseAsync(reasonIndex, paused, cancellationToken);
+
 	public Task<PlayModeStateResult> StopPlayModeAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().StopPlayModeAsync(cancellationToken);
 

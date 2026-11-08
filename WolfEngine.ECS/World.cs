@@ -16,11 +16,87 @@ public class World
 
 	public int Id { get; }
 
+	/// <summary>
+	/// Why the world is paused: one bit per held <see cref="PauseReason"/>. Each pauser, such as a menu, holds its own
+	/// reason, so closing one can't unpause another. Only a Game world's systems respond; see
+	/// <see cref="ExecutionTag"/>.
+	/// </summary>
+	public uint PauseReasons { get; private set; }
+
+	/// <summary>Whether any <see cref="PauseReason"/> is held.</summary>
+	public bool IsPaused => PauseReasons != 0;
+
+	/// <summary>
+	/// The tag systems are matched against this frame. It is <see cref="Tag"/>, except that a Game world swaps
+	/// <see cref="WorldTag.Game"/> for <see cref="WorldTag.GamePaused"/> while it <see cref="IsPaused"/>.
+	/// </summary>
+	public WorldTag ExecutionTag
+	{
+		get
+		{
+			if ((Tag & WorldTag.Game) == 0)
+			{
+				return Tag;
+			}
+
+			if (IsPaused)
+			{
+				return (Tag & ~WorldTag.Game) | WorldTag.GamePaused;
+			}
+
+			return Tag & ~WorldTag.GamePaused;
+		}
+	}
+
     public World(WorldTag tag)
     {
+		if ((tag & WorldTag.GamePaused) != 0 &&
+		    (tag & WorldTag.Game) == 0)
+		{
+			throw new ArgumentException(
+				$"{nameof(WorldTag.GamePaused)} is a Game world's paused state, not a kind of world.",
+				nameof(tag));
+		}
+
         Tag = tag;
 		Id = Interlocked.Increment(ref _nextId);
     }
+
+	/// <summary>Holds <paramref name="reason"/>. Holding a reason that is already held changes nothing.</summary>
+	public void Pause(PauseReason reason)
+	{
+		PauseReasons |= RequireReason(reason).Mask;
+	}
+
+	/// <summary>
+	/// Releases <paramref name="reason"/>. The world resumes once no reason is held. Releasing a reason that isn't held
+	/// changes nothing.
+	/// </summary>
+	public void Resume(PauseReason reason)
+	{
+		PauseReasons &= ~RequireReason(reason).Mask;
+	}
+
+	/// <summary>
+	/// Releases every reason. Hosts call this when the code that held them is gone, such as on a gameplay assembly
+	/// reload, so the world can't be left paused with nothing able to resume it.
+	/// </summary>
+	public void ClearPauseReasons()
+	{
+		PauseReasons = 0;
+	}
+
+	private static PauseReason RequireReason(PauseReason reason)
+	{
+		if (reason.Mask == 0)
+		{
+			throw new ArgumentException(
+				$"default({nameof(PauseReason)}) is not a reason; declare one with new {nameof(PauseReason)}(index).",
+				nameof(reason));
+		}
+
+		return reason;
+	}
 
     public Entity CreateEntity() => _entities.Create();
 

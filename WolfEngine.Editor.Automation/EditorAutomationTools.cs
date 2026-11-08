@@ -143,6 +143,13 @@ public sealed class EditorAutomationTools
 	public Task<PlayModeStateResult> PausePlayMode(CancellationToken cancellationToken) =>
 		_controller.PausePlayModeAsync(cancellationToken);
 
+	[McpServerTool(Name = "set_game_pause"), Description("Hold or release one game pause reason on the running Play-mode world, the way gameplay code pauses for a menu with World.Pause and World.Resume. The world is paused while any reason is held: WorldTag.Game systems stop and WorldTag.GamePaused/AnyGame systems run. This is the game's own pause, independent of pause_play_mode. Results report the held reasons as the gamePauseReasons bit mask.")]
+	public Task<PlayModeStateResult> SetGamePause(
+		[Description("The reason's bit index, 0 to 31, as declared with new PauseReason(index) in gameplay code.")] int reasonIndex,
+		[Description("True to hold the reason; false to release it.")] bool paused,
+		CancellationToken cancellationToken) =>
+		_controller.SetGamePauseAsync(reasonIndex, paused, cancellationToken);
+
 	[McpServerTool(Name = "stop_play_mode"), Description("Stop Play mode and discard the isolated runtime scene, returning to the authoring scene.")]
 	public Task<PlayModeStateResult> StopPlayMode(CancellationToken cancellationToken) =>
 		_controller.StopPlayModeAsync(cancellationToken);

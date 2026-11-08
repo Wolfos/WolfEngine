@@ -109,7 +109,8 @@ public sealed class RuntimeHost : IDisposable
 		_worldManager.AddSystem<CameraResolutionUpdater>();
 		_worldManager.AddSystem(new AnimationRenderResourceLifecycle(services.GetRequiredService<RenderGraph>()));
 		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
-		_worldManager.AddSystem<AnimationSystem>();
+		// Tagged Game, not the default All, so animation holds its pose while the world is paused.
+		_worldManager.AddSystem(new AnimationSystem(WorldTag.Game));
 		if (_rigidbodySystem is not null)
 		{
 			// Register before TransformSystem so interpolated child poses propagate this frame.
@@ -207,7 +208,14 @@ public sealed class RuntimeHost : IDisposable
 			? Settings.FixedDeltaTime
 			: Math.Clamp((float)(now - _lastFrameTime).TotalSeconds, 0, 0.1f);
 		_lastFrameTime = now;
-		_accumulator += delta;
+
+		// A paused world doesn't advance physics time, so resuming continues from the same step with no catch-up
+		// burst. The accumulator keeps its value, so interpolated poses hold still rather than snap.
+		var paused = world.IsPaused;
+		if (paused == false)
+		{
+			_accumulator += delta;
+		}
 
 		var windowSize = _renderer.GetWindowSize();
 		_input.ProcessPointerInput(
@@ -215,17 +223,32 @@ public sealed class RuntimeHost : IDisposable
 			new PointerInputContext(true, true, true, System.Numerics.Vector2.Zero, new(windowSize.X, windowSize.Y)));
 
 		var steps = 0;
-		while (_accumulator >= Settings.FixedDeltaTime && steps++ < Settings.MaxPhysicsStepsPerFrame)
+		while (paused == false &&
+		       _accumulator >= Settings.FixedDeltaTime &&
+		       steps++ < Settings.MaxPhysicsStepsPerFrame)
 		{
 			_gameplay.PhysicsUpdate(Settings.FixedDeltaTime, world);
 			_worldManager.PhysicsUpdate(Settings.FixedDeltaTime, WorldTag.Game, SystemExecutionGroup.All);
 			_accumulator -= Settings.FixedDeltaTime;
+
+			// Gameplay can pause during a step; the rest of this frame's steps wait for the resume.
+			if (world.IsPaused)
+			{
+				break;
+			}
 		}
 
 		// The accumulator left over after this frame's steps is how far the frame being rendered has
 		// advanced past the last one, which is what rigidbody interpolation blends by.
 		_rigidbodySystem?.PublishFixedStepAccumulator(world, _accumulator, Settings.FixedDeltaTime);
-		_gameplay.Update(delta, world);
+
+		// The gameplay module's own update is game logic, so it stops with the world; menus that must run while
+		// paused are systems tagged WorldTag.AnyGame.
+		if (world.IsPaused == false)
+		{
+			_gameplay.Update(delta, world);
+		}
+
 		_worldManager.Update(delta, WorldTag.Game, SystemExecutionGroup.All);
 		_audio.Update(delta);
 		_worldManager.OnPreRender(delta, WorldTag.Game, SystemExecutionGroup.All);

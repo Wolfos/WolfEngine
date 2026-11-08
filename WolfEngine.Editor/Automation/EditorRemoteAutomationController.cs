@@ -750,6 +750,30 @@ public sealed partial class EditorRemoteAutomationController
 			return GetPlayModeState();
 		}, cancellationToken);
 
+	/// <summary>
+	/// Holds or releases the game pause reason in bit <paramref name="reasonIndex"/> on the Play-mode world, as gameplay
+	/// code does through <see cref="World.Pause"/> and <see cref="World.Resume"/>. This is the game's own pause, not the
+	/// editor's Pause.
+	/// </summary>
+	public Task<PlayModeStateResult> SetGamePauseAsync(int reasonIndex, bool paused, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var world = _playSession.RuntimeScene?.World ??
+			            throw new InvalidOperationException("Pausing the game requires Play mode.");
+			var reason = new PauseReason(reasonIndex);
+
+			if (paused)
+			{
+				world.Pause(reason);
+			}
+			else
+			{
+				world.Resume(reason);
+			}
+
+			return GetPlayModeState();
+		}, cancellationToken);
+
 	public Task<PlayModeStateResult> StopPlayModeAsync(CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
@@ -1295,10 +1319,14 @@ public sealed partial class EditorRemoteAutomationController
 			: Path.Combine(_projectPath, outputPath));
 	}
 
-	private PlayModeStateResult GetPlayModeState() => new(
-		_playSession.State.ToString(),
-		_editorFrameCoordinator.CompletedSequence,
-		_renderFrameCoordinator.CompletedSequence);
+	private PlayModeStateResult GetPlayModeState()
+	{
+		return new PlayModeStateResult(
+			_playSession.State.ToString(),
+			_playSession.RuntimeScene?.World.PauseReasons ?? 0,
+			_editorFrameCoordinator.CompletedSequence,
+			_renderFrameCoordinator.CompletedSequence);
+	}
 
 	private static IReadOnlyList<GpuPassProfileResult> SummarizeGpuFrames(IReadOnlyList<GpuProfileFrame> frames)
 	{

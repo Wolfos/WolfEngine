@@ -411,6 +411,13 @@ public class WolfEngineEditor
 			return;
 		}
 
+		// The gameplay module's own update is game logic, so it stops with the world; menus that must run while
+		// paused are systems tagged WorldTag.AnyGame.
+		if (runtimeScene.World.IsPaused)
+		{
+			return;
+		}
+
 		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.Update),
 			() => _boundGameplayModule?.Update(deltaTime, runtimeScene.World));
@@ -438,8 +445,21 @@ public class WolfEngineEditor
 			return;
 		}
 
+		// A paused world doesn't advance physics time. Unlike the editor's own Pause, the accumulator keeps its
+		// value, so interpolated poses hold still and resuming continues from the same step.
+		if (runtimeScene.World.IsPaused)
+		{
+			return;
+		}
+
 		_physicsAccumulator.Execute(deltaTime, fixedDeltaTime =>
 		{
+			// Gameplay can pause during a step; the rest of this frame's steps are dropped rather than run paused.
+			if (runtimeScene.World.IsPaused)
+			{
+				return;
+			}
+
 			_gameplayExceptionReporter.Run(
 				nameof(IGameplayModule.PhysicsUpdate),
 				() => _boundGameplayModule?.PhysicsUpdate(fixedDeltaTime, runtimeScene.World));
@@ -491,6 +511,11 @@ public class WolfEngineEditor
 		}
 
 		UnbindGameplayModule();
+
+		// The systems that held the pause reasons are gone with the old module, and the new ones start with no
+		// record of them, so nothing could resume the world.
+		runtimeScene.World.ClearPauseReasons();
+
 		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.CreateSystems),
 			() => RegisterGameplaySystems(loadResult.Module?.CreateSystems(_serviceProvider)));

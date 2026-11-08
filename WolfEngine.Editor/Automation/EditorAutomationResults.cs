@@ -48,8 +48,15 @@ public sealed record SceneLoadResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+/// <param name="State">The editor's Play-mode state: Edit, Playing or Paused.</param>
+/// <param name="GamePauseReasons">
+/// The Play-mode world's <see cref="WolfEngine.ECS.World.PauseReasons"/>: one bit per pause reason the game holds; 0
+/// when it isn't paused or there is no Play-mode world. Independent of <paramref name="State"/>: the editor's own Pause
+/// leaves these untouched.
+/// </param>
 public sealed record PlayModeStateResult(
 	string State,
+	uint GamePauseReasons,
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
