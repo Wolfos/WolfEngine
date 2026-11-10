@@ -9,6 +9,9 @@ public static class EditorWindowIds
 	public const string AnimationClipBones = "animation-clip-bones";
 	public const string AnimationClipInspector = "animation-clip-inspector";
 	public const string AnimationClipTimeline = "animation-clip-timeline";
+	public const string ShapeViewport = "shape-viewport";
+	public const string ShapeTree = "shape-tree";
+	public const string ShapeInspector = "shape-inspector";
 	public const string Scene = "scene";
 	public const string Entities = "entities";
 	public const string Components = "components";
@@ -24,7 +27,8 @@ public static class EditorWindowIds
 	[
 		Animation, Scene, Entities, Components, Assets, AssetEditor, Log, Profiler,
 		MaterialImporter, Preferences, ProjectSettings,
-		AnimationClipViewport, AnimationClipBones, AnimationClipInspector, AnimationClipTimeline
+		AnimationClipViewport, AnimationClipBones, AnimationClipInspector, AnimationClipTimeline,
+		ShapeViewport, ShapeTree, ShapeInspector
 	];
 
 	/// <summary>The panels that make up the clip editor, in the order the Animate workspace opens them.</summary>
@@ -34,6 +38,14 @@ public static class EditorWindowIds
 		AnimationClipBones,
 		AnimationClipInspector,
 		AnimationClipTimeline
+	];
+
+	/// <summary>The panels that make up the shape editor, in the order the Model workspace opens them.</summary>
+	public static readonly string[] ShapeEditor =
+	[
+		ShapeViewport,
+		ShapeTree,
+		ShapeInspector
 	];
 }
 
@@ -85,8 +97,10 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 	internal static readonly Guid AssetsWorkspaceId = Guid.Parse("ca584798-3557-40f4-a1ca-b6c334f4a62c");
 	internal static readonly Guid AnimationWorkspaceId = Guid.Parse("b3181fbd-d60e-4fde-b116-78fafb25b105");
 	internal static readonly Guid AnimateWorkspaceId = Guid.Parse("6f0c2a8e-4b1d-4e7a-9c35-2d8f1e6b7a90");
+	internal static readonly Guid ModelWorkspaceId = Guid.Parse("0d6b4f2e-91a7-4c3b-8e52-7f1a9c4d3b60");
 	internal const string AnimationGraphWorkspaceName = "Animation Graph";
 	internal const string AnimateWorkspaceName = "Animate";
+	internal const string ModelWorkspaceName = "Model";
 	private const string LegacyAnimationWorkspaceName = "Animation";
 	private const int CurrentVersion = 1;
 	private static readonly TimeSpan IniSaveDelay = TimeSpan.FromMilliseconds(500);
@@ -285,6 +299,14 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 			_workspaces.Add(new EditorWorkspace(AnimateWorkspaceId, AnimateWorkspaceName, EditorDocumentKind.AnimationClip, EditorWindowIds.AnimationClipEditor));
 		}
 
+		if (preferences?.ModelWorkspaceSeeded != true &&
+		    _workspaces.Any(workspace =>
+			    workspace.Id == ModelWorkspaceId ||
+			    string.Equals(workspace.Name, ModelWorkspaceName, StringComparison.OrdinalIgnoreCase)) == false)
+		{
+			_workspaces.Add(new EditorWorkspace(ModelWorkspaceId, ModelWorkspaceName, EditorDocumentKind.Shape, EditorWindowIds.ShapeEditor));
+		}
+
         _activeId = preferences?.ActiveWorkspaceId is { } active && _workspaces.Any(workspace => workspace.Id == active)
 			? active
 			: _workspaces[0].Id;
@@ -306,6 +328,11 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 		if (workspaceId == AnimateWorkspaceId)
 		{
 			return EditorDocumentKind.AnimationClip;
+		}
+
+		if (workspaceId == ModelWorkspaceId)
+		{
+			return EditorDocumentKind.Shape;
 		}
 
 		return EditorDocumentKind.Scene;
@@ -355,6 +382,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 			AnimationWorkspaceSeeded = true,
 			AnimationGraphWorkspaceRenamed = true,
 			AnimateWorkspaceSeeded = true,
+			ModelWorkspaceSeeded = true,
 			ActiveWorkspaceId = _activeId,
 			ImGuiSettings = EditorPreferences.GetWorkspaceSettings()?.ImGuiSettings ?? string.Empty,
 			Workspaces = _workspaces.Select(workspace => new EditorWorkspacePreference

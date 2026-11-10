@@ -528,6 +528,89 @@ public sealed class EditorAutomationTools
 	public Task<FrameCaptureResult> CaptureClipPreview(string outputPath, CancellationToken cancellationToken = default) =>
 		_controller.CaptureClipPreviewAsync(outputPath, cancellationToken);
 
+	[McpServerTool(Name = "create_shape"), Description("Create a .shape in a project folder, compiled from the default rounded box, import it and open it in the Model workspace. Unsaved edits to the open shape are discarded.")]
+	public Task<ShapeEditorStateResult> CreateShape(string folder, string name, CancellationToken cancellationToken = default) =>
+		_controller.CreateShapeAsync(folder, name, cancellationToken);
+
+	[McpServerTool(Name = "open_shape"), Description("Open a shape (the Model3D asset of a .shape source) in the Model workspace. If the open shape has unsaved edits, a prompt is shown unless discardUnsavedChanges is true.")]
+	public Task<ShapeEditorStateResult> OpenShape(string assetId, bool discardUnsavedChanges = false, CancellationToken cancellationToken = default) =>
+		_controller.OpenShapeAsync(Guid.Parse(assetId), discardUnsavedChanges, cancellationToken);
+
+	[McpServerTool(Name = "add_shape_node"), Description("Add a node to the open shape and select it. kind is group, or a primitive: sphere, box, roundedbox, capsule, cylinder, torus, cone. It goes inside parentId when given, otherwise next to the selection. One undo step.")]
+	public Task<ShapeEditorStateResult> AddShapeNode(string kind, string? parentId = null, CancellationToken cancellationToken = default) =>
+		_controller.AddShapeNodeAsync(kind, parentId is null ? null : Guid.Parse(parentId), cancellationToken);
+
+	[McpServerTool(Name = "set_shape_node"), Description("Edit a shape node as one undo step. Omitted values keep theirs. operation is union, subtract or intersect; smoothness is the blend radius; position and rotationDegrees take three numbers, dimensions four (see the primitive's dimension labels in the inspector). Scale is uniform.")]
+	public Task<ShapeEditorStateResult> SetShapeNode(
+		string nodeId,
+		string? name = null,
+		string? operation = null,
+		float? smoothness = null,
+		float[]? position = null,
+		float[]? rotationDegrees = null,
+		float? scale = null,
+		string? primitive = null,
+		float[]? dimensions = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetShapeNodeAsync(
+			Guid.Parse(nodeId),
+			name,
+			operation,
+			smoothness,
+			ToVector(position),
+			ToVector(rotationDegrees),
+			scale,
+			primitive,
+			ToVector4(dimensions),
+			cancellationToken);
+
+	[McpServerTool(Name = "select_shape_node"), Description("Select a node of the open shape, or clear the selection when nodeId is omitted.")]
+	public Task<ShapeEditorStateResult> SelectShapeNode(string? nodeId = null, CancellationToken cancellationToken = default) =>
+		_controller.SelectShapeNodeAsync(nodeId is null ? null : Guid.Parse(nodeId), cancellationToken);
+
+	[McpServerTool(Name = "delete_shape_node"), Description("Delete a node, and everything under it, from the open shape. The root cannot be deleted.")]
+	public Task<ShapeEditorStateResult> DeleteShapeNode(string nodeId, CancellationToken cancellationToken = default) =>
+		_controller.DeleteShapeNodeAsync(Guid.Parse(nodeId), cancellationToken);
+
+	[McpServerTool(Name = "shape_history"), Description("Undo or redo in the open shape's own history. operation is undo or redo. Undo restores the compiled mesh with the tree.")]
+	public Task<ShapeEditorStateResult> ShapeHistory(string operation, CancellationToken cancellationToken = default) =>
+		_controller.ShapeHistoryAsync(operation, cancellationToken);
+
+	[McpServerTool(Name = "compile_shape"), Description("Bring the open shape's compiled mesh up to date and wait for it, returning the compile's measurements. cold recompiles from scratch, discarding the warm-start history.")]
+	public Task<ShapeEditorStateResult> CompileShape(bool cold = false, CancellationToken cancellationToken = default) =>
+		_controller.CompileShapeAsync(cold, cancellationToken);
+
+	[McpServerTool(Name = "save_shape"), Description("Save the open shape, waiting for its compile, and reimport it.")]
+	public Task<ShapeEditorStateResult> SaveShape(CancellationToken cancellationToken = default) =>
+		_controller.SaveShapeAsync(cancellationToken);
+
+	[McpServerTool(Name = "get_shape_state"), Description("Inspect the Model workspace: the open shape, its node tree, history, compile status and the last compile's measurements.")]
+	public Task<ShapeEditorStateResult> GetShapeState(CancellationToken cancellationToken = default) =>
+		_controller.GetShapeEditorStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "pick_shape"), Description("Pick the primitive under a point of the shape viewport, as a click does, and select it. ndcX and ndcY run from -1 to 1, +Y up. Wait for render frames after opening a shape.")]
+	public Task<ShapeEditorStateResult> PickShape(float ndcX, float ndcY, CancellationToken cancellationToken = default) =>
+		_controller.PickShapeAsync(ndcX, ndcY, cancellationToken);
+
+	[McpServerTool(Name = "capture_shape_preview"), Description("Capture the shape viewport's render view without editor UI. Keep the Shape Viewport visible and wait for render frames after changes.")]
+	public Task<FrameCaptureResult> CaptureShapePreview(string outputPath, CancellationToken cancellationToken = default) =>
+		_controller.CaptureShapePreviewAsync(outputPath, cancellationToken);
+
+	private static System.Numerics.Vector4? ToVector4(float[]? values)
+	{
+		if (values is null)
+		{
+			return null;
+		}
+
+		if (values.Length != 4)
+		{
+			throw new ArgumentException("Expected four numbers.", nameof(values));
+		}
+
+		return new System.Numerics.Vector4(values[0], values[1], values[2], values[3]);
+	}
+
 	private static System.Numerics.Vector3? ToVector(float[]? values)
 	{
 		if (values is null)

@@ -33,6 +33,7 @@ public static class AssetImporterIds
 	public const string SceneCell = "scene-cell";
 	public const string EditorPrefab = "editor-prefab";
 	public const string AnimationClip = "animation-clip";
+	public const string ShapeModel = "shape-model";
 }
 
 public sealed class AssetSourceMetaFile

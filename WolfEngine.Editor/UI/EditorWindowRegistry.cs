@@ -51,7 +51,10 @@ public sealed class EditorWindowRegistry
 		AnimationClipViewportWindow animationClipViewport,
 		AnimationClipBonesWindow animationClipBones,
 		AnimationClipInspectorWindow animationClipInspector,
-		AnimationClipTimelineWindow animationClipTimeline)
+		AnimationClipTimelineWindow animationClipTimeline,
+		ShapeViewportWindow shapeViewport,
+		ShapeTreeWindow shapeTree,
+		ShapeInspectorWindow shapeInspector)
 	{
 		_workspaces = workspaces;
 		_notifications = notifications;
@@ -71,7 +74,10 @@ public sealed class EditorWindowRegistry
 			new(EditorWindowIds.AnimationClipViewport, "Clip Viewport", animationClipViewport),
 			new(EditorWindowIds.AnimationClipBones, "Bones", animationClipBones),
 			new(EditorWindowIds.AnimationClipInspector, "Clip Inspector", animationClipInspector),
-			new(EditorWindowIds.AnimationClipTimeline, "Timeline", animationClipTimeline)
+			new(EditorWindowIds.AnimationClipTimeline, "Timeline", animationClipTimeline),
+			new(EditorWindowIds.ShapeViewport, "Shape Viewport", shapeViewport),
+			new(EditorWindowIds.ShapeTree, "Shape Tree", shapeTree),
+			new(EditorWindowIds.ShapeInspector, "Shape Inspector", shapeInspector)
 		];
 	}
 

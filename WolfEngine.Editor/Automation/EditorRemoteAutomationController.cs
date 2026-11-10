@@ -52,6 +52,7 @@ public sealed partial class EditorRemoteAutomationController
 
 	private readonly IGameBuildService _gameBuildService;
 	private readonly AnimationClipEditorSession _clipEditor;
+	private readonly ShapeEditorSession _shapeEditor;
 	private readonly VfxService _vfx;
 	private readonly VfxAssetEditor _vfxEditor;
 
@@ -81,10 +82,12 @@ public sealed partial class EditorRemoteAutomationController
 		SceneLoadRequests sceneLoadRequests,
 		IGameBuildService gameBuildService,
 		AnimationClipEditorSession clipEditor,
+		ShapeEditorSession shapeEditor,
 		VfxService vfx,
 		VfxAssetEditor vfxEditor)
 	{
 		_clipEditor = clipEditor;
+		_shapeEditor = shapeEditor;
 		_vfx = vfx;
 		_vfxEditor = vfxEditor;
 		_sceneLoadRequests = sceneLoadRequests;

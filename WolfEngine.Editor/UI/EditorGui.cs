@@ -379,7 +379,8 @@ public class EditorGui
 		if (workspace.Id != EditorWorkspaceService.SceneWorkspaceId &&
 		    workspace.Id != EditorWorkspaceService.AssetsWorkspaceId &&
 		    workspace.Id != EditorWorkspaceService.AnimationWorkspaceId &&
-		    workspace.Id != EditorWorkspaceService.AnimateWorkspaceId)
+		    workspace.Id != EditorWorkspaceService.AnimateWorkspaceId &&
+		    workspace.Id != EditorWorkspaceService.ModelWorkspaceId)
 		{
 			return;
 		}
@@ -406,6 +407,17 @@ public class EditorGui
 			Dock(EditorWindowIds.AnimationClipInspector, inspectorId);
 			Dock(EditorWindowIds.AnimationClipTimeline, timelineId);
 			Dock(EditorWindowIds.AnimationClipViewport, viewportId);
+			NativeDockBuilder.Finish(dockspaceId);
+			return;
+		}
+
+		if (workspace.Id == EditorWorkspaceService.ModelWorkspaceId)
+		{
+			NativeDockBuilder.SplitNode(dockspaceId, ImGuiDir.Left, 0.18f, out var treeId, out var shapeCenterAndRightId);
+			NativeDockBuilder.SplitNode(shapeCenterAndRightId, ImGuiDir.Right, 0.26f, out var shapeInspectorId, out var shapeViewportId);
+			Dock(EditorWindowIds.ShapeTree, treeId);
+			Dock(EditorWindowIds.ShapeInspector, shapeInspectorId);
+			Dock(EditorWindowIds.ShapeViewport, shapeViewportId);
 			NativeDockBuilder.Finish(dockspaceId);
 			return;
 		}

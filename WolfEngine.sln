@@ -46,6 +46,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.SourceGenerators
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Runtime.Desktop", "WolfEngine.Runtime.Desktop\WolfEngine.Runtime.Desktop.csproj", "{78F1080F-887D-4849-BAE9-4ACECE85BC58}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Modeling", "WolfEngine.Modeling\WolfEngine.Modeling.csproj", "{23592BB9-92F5-4B03-9E40-C2C6A891862E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -320,6 +322,18 @@ Global
 		{78F1080F-887D-4849-BAE9-4ACECE85BC58}.Release|x64.Build.0 = Release|Any CPU
 		{78F1080F-887D-4849-BAE9-4ACECE85BC58}.Release|x86.ActiveCfg = Release|Any CPU
 		{78F1080F-887D-4849-BAE9-4ACECE85BC58}.Release|x86.Build.0 = Release|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Debug|x64.Build.0 = Debug|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Debug|x86.Build.0 = Debug|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Release|x64.ActiveCfg = Release|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Release|x64.Build.0 = Release|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Release|x86.ActiveCfg = Release|Any CPU
+		{23592BB9-92F5-4B03-9E40-C2C6A891862E}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

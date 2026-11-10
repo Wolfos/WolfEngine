@@ -121,6 +121,9 @@ public static class Program
 		services.AddSingleton<IEditorDocument>(provider => provider.GetRequiredService<AnimationClipEditorSession>());
 		services.AddSingleton<IEditorDocument>(provider => provider.GetRequiredService<AnimationWindow>());
 		services.AddSingleton<IEditorAssetHandler, AnimationClipEditorAssetHandler>();
+		services.AddSingleton<ShapeEditorSession>();
+		services.AddSingleton<IEditorDocumentEditor>(provider => provider.GetRequiredService<ShapeEditorSession>());
+		services.AddSingleton<IEditorDocument>(provider => provider.GetRequiredService<ShapeEditorSession>());
         foreach (var type in new[] { AssetType.AnimationGraph })
             services.AddSingleton<IEditorAssetHandler>(provider => new AnimationEditorAssetHandler(type,
                 provider.GetRequiredService<AnimationWindow>(), provider.GetRequiredService<IEditorProjectService>(), provider.GetRequiredService<IProjectAssetPipelineService>()));
@@ -178,5 +181,8 @@ public static class Program
 		services.AddSingleton<AnimationClipBonesWindow>();
 		services.AddSingleton<AnimationClipInspectorWindow>();
 		services.AddSingleton<AnimationClipTimelineWindow>();
+		services.AddSingleton<ShapeViewportWindow>();
+		services.AddSingleton<ShapeTreeWindow>();
+		services.AddSingleton<ShapeInspectorWindow>();
 	}
 }

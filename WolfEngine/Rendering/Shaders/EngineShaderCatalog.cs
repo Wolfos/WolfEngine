@@ -92,6 +92,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId TerrainRayTracingVertexUpdate = Id("terrain-rt-vertex-update");
 	public static readonly ShaderProgramId Skinning = Id("skinning");
 	public static readonly ShaderProgramId TerrainAuthoringBrushes = Id("terrain-authoring-brushes");
+	public static readonly ShaderProgramId ShapeSdfSample = Id("shape-sdf-sample");
 	public static readonly ShaderProgramId ScreenSpaceDecal = Id("screen-space-decal");
 	public static readonly ShaderProgramId SelectionOutline = Id("selection-outline");
 	public static readonly ShaderProgramId GBufferDecalSeed = Id("gbuffer-decal-seed");
@@ -173,6 +174,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.TerrainRayTracingVertexUpdate, "Terrain/terrain_rt_vertex_update.compute.slang"),
 			D(EngineShaderPrograms.Skinning, "Animation/skinning.compute.slang"),
 			D(EngineShaderPrograms.TerrainAuthoringBrushes, "Terrain/Tools/terrain_authoring_brushes.compute.slang"),
+			D(EngineShaderPrograms.ShapeSdfSample, "Modeling/shape_sdf.compute.slang"),
 			D(EngineShaderPrograms.ScreenSpaceDecal, "Geometry/screen_space_decal.slang"),
 			D(EngineShaderPrograms.SelectionOutline, "Geometry/selection_outline.slang"),
 			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang"),
@@ -252,7 +254,8 @@ public sealed class EngineShaderCatalog
 		{
 			if (descriptor.Id == EngineShaderPrograms.Bc1Compress ||
 			    descriptor.Id == EngineShaderPrograms.Bc4Compress || descriptor.Id == EngineShaderPrograms.Bc3Stitch ||
-			    descriptor.Id == EngineShaderPrograms.Bc5Stitch || descriptor.Id == EngineShaderPrograms.TerrainAuthoringBrushes)
+			    descriptor.Id == EngineShaderPrograms.Bc5Stitch || descriptor.Id == EngineShaderPrograms.TerrainAuthoringBrushes ||
+			    descriptor.Id == EngineShaderPrograms.ShapeSdfSample)
 				continue;
 			if (IsGraphicsProgram(descriptor.Id))
 			{
@@ -385,6 +388,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.GpuDrawTerrainMaterialUpdate) return ["CSUpdateTerrainMaterial"];
 		if (id == EngineShaderPrograms.TerrainRayTracingVertexUpdate) return ["TerrainRayTracingVertexUpdateCS"];
 		if (id == EngineShaderPrograms.Skinning) return ["SkinningCS"];
+		if (id == EngineShaderPrograms.ShapeSdfSample) return ["SampleShapeSdfGrid"];
 		if (id == EngineShaderPrograms.TerrainAuthoringBrushes) return ["ApplyHeightmapRaiseLowerBrush", "ApplyHeightmapFlattenBrush", "ApplyHeightmapSmoothBrush", "ApplyLayerMapLayerBrush"];
 		if (id == EngineShaderPrograms.GBufferDecalSeed) return ["GBufferDecalSeedCS"];
 		if (id == EngineShaderPrograms.VolumetricFog) return ["VolumetricFogInjectCS", "VolumetricFogTemporalCS", "VolumetricFogIntegrateCS"];

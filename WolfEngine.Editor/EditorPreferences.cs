@@ -280,6 +280,7 @@ public sealed class EditorWorkspacePreferences
 	public bool AnimationWorkspaceSeeded { get; set; }
 	public bool AnimationGraphWorkspaceRenamed { get; set; }
 	public bool AnimateWorkspaceSeeded { get; set; }
+	public bool ModelWorkspaceSeeded { get; set; }
 	public int Version { get; set; }
 	public Guid ActiveWorkspaceId { get; set; }
 	public List<EditorWorkspacePreference> Workspaces { get; set; } = new();

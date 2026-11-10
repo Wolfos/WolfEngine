@@ -442,6 +442,52 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<FrameCaptureResult> CaptureClipPreviewAsync(string path, CancellationToken token) =>
 		GetRunningEditor().CaptureClipPreviewAsync(path, token);
 
+	public Task<ShapeEditorStateResult> CreateShapeAsync(string folder, string name, CancellationToken token) =>
+		GetRunningEditor().CreateShapeAsync(folder, name, token);
+
+	public Task<ShapeEditorStateResult> OpenShapeAsync(Guid assetId, bool discardUnsavedChanges, CancellationToken token) =>
+		GetRunningEditor().OpenShapeAsync(assetId, discardUnsavedChanges, token);
+
+	public Task<ShapeEditorStateResult> AddShapeNodeAsync(string kind, Guid? parentId, CancellationToken token) =>
+		GetRunningEditor().AddShapeNodeAsync(kind, parentId, token);
+
+	public Task<ShapeEditorStateResult> SetShapeNodeAsync(
+		Guid nodeId,
+		string? name,
+		string? operation,
+		float? smoothness,
+		System.Numerics.Vector3? position,
+		System.Numerics.Vector3? rotationDegrees,
+		float? scale,
+		string? primitive,
+		System.Numerics.Vector4? dimensions,
+		CancellationToken token) =>
+		GetRunningEditor().SetShapeNodeAsync(nodeId, name, operation, smoothness, position, rotationDegrees, scale, primitive, dimensions, token);
+
+	public Task<ShapeEditorStateResult> SelectShapeNodeAsync(Guid? nodeId, CancellationToken token) =>
+		GetRunningEditor().SelectShapeNodeAsync(nodeId, token);
+
+	public Task<ShapeEditorStateResult> DeleteShapeNodeAsync(Guid nodeId, CancellationToken token) =>
+		GetRunningEditor().DeleteShapeNodeAsync(nodeId, token);
+
+	public Task<ShapeEditorStateResult> ShapeHistoryAsync(string operation, CancellationToken token) =>
+		GetRunningEditor().ShapeHistoryAsync(operation, token);
+
+	public Task<ShapeEditorStateResult> CompileShapeAsync(bool cold, CancellationToken token) =>
+		GetRunningEditor().CompileShapeAsync(cold, token);
+
+	public Task<ShapeEditorStateResult> SaveShapeAsync(CancellationToken token) =>
+		GetRunningEditor().SaveShapeAsync(token);
+
+	public Task<ShapeEditorStateResult> GetShapeEditorStateAsync(CancellationToken token) =>
+		GetRunningEditor().GetShapeEditorStateAsync(token);
+
+	public Task<ShapeEditorStateResult> PickShapeAsync(float ndcX, float ndcY, CancellationToken token) =>
+		GetRunningEditor().PickShapeAsync(ndcX, ndcY, token);
+
+	public Task<FrameCaptureResult> CaptureShapePreviewAsync(string path, CancellationToken token) =>
+		GetRunningEditor().CaptureShapePreviewAsync(path, token);
+
 	public ValueTask DisposeAsync()
 	{
 		_startSignal.Dispose();

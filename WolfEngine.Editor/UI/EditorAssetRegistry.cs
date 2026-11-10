@@ -340,10 +340,12 @@ public sealed class PrefabEditorAssetHandler : IEditorAssetHandler
 public sealed class ModelEditorAssetHandler : IEditorAssetHandler
 {
 	private readonly ModelAssetEditor _editor;
+	private readonly ShapeEditorSession _shapes;
 
-	public ModelEditorAssetHandler(ModelAssetEditor editor)
+	public ModelEditorAssetHandler(ModelAssetEditor editor, ShapeEditorSession shapes)
 	{
 		_editor = editor ?? throw new ArgumentNullException(nameof(editor));
+		_shapes = shapes ?? throw new ArgumentNullException(nameof(shapes));
 	}
 
 	public AssetType AssetType => AssetType.Model3D;
@@ -352,16 +354,63 @@ public sealed class ModelEditorAssetHandler : IEditorAssetHandler
 
 	public string GetSubtitle(AssetDatabaseEntry asset)
 	{
+		if (ShapeEditorSession.IsShapeAsset(asset))
+		{
+			return "Shape";
+		}
+
 		return asset.TryGetSummary<Model3DAssetSummary>(out var summary) == false
 			? "3D Model"
 			: $"3D Model | {summary.RootNodeCount} root node(s) | {summary.AnimationCount} animation(s)";
 	}
 
-	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
+	/// <summary>Shapes are authored models: created here, edited in the Model workspace, imported like any model.</summary>
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() =>
+		[
+			new()
+			{
+				Label = "Shape",
+				CreateAction = CreateShape
+			}
+		];
 
 	public void DrawEditor(AssetDatabaseEntry asset)
 	{
+		if (ShapeEditorSession.IsShapeAsset(asset))
+		{
+			if (ImGui.Button("Open in Model"))
+			{
+				_shapes.Open(asset);
+			}
+
+			return;
+		}
+
 		_editor.Draw(asset);
+	}
+
+	public bool TryOpen(AssetDatabaseEntry asset)
+	{
+		if (ShapeEditorSession.IsShapeAsset(asset) == false)
+		{
+			return false;
+		}
+
+		_shapes.Open(asset);
+		return true;
+	}
+
+	private EditorAssetCreationResult CreateShape(string folder)
+	{
+		try
+		{
+			var asset = _shapes.CreateAsset(folder, ShapeEditorSession.DefaultName);
+			return EditorAssetCreationResult.Succeeded(asset.Id);
+		}
+		catch (Exception exception)
+		{
+			return EditorAssetCreationResult.Failed(exception.Message);
+		}
 	}
 }
 

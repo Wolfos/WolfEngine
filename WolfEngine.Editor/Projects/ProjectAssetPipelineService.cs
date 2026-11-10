@@ -8,6 +8,7 @@ using WolfEngine.Importing;
 using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
 using WolfEngine.Mathematics;
+using WolfEngine.Modeling;
 using WolfEngine.Rendering;
 using WolfEngine.Audio;
 using ImportImageLoader = WolfEngine.Importing.IImageLoader;
@@ -56,7 +57,7 @@ public readonly record struct AssetPipelineRefreshResult(
 	AssetDatabase Database,
 	IReadOnlyCollection<Guid> ReimportedNodeIds);
 
-public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
+public sealed partial class ProjectAssetPipelineService : IProjectAssetPipelineService
 {
 	private readonly IAssetPipelineIndex _index;
 	private readonly IAssetMetadataStore _metadataStore;
@@ -2355,6 +2356,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				AuthoredAnimationClipJson.IsAuthoredClipPath,
 				() => "{}",
 				ImportAuthoredAnimationClipSource),
+			new AssetImporterDescriptor(
+				AssetImporterIds.ShapeModel,
+				1,
+				ShapeFile.IsShapePath,
+				() => "{}",
+				ImportShapeSource),
             new AssetImporterDescriptor(
 				AssetImporterIds.Material,
 				1,

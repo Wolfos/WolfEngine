@@ -11,7 +11,8 @@ public enum EditorDocumentKind
 	None,
 	Scene,
 	AnimationGraph,
-	AnimationClip
+	AnimationClip,
+	Shape
 }
 
 /// <summary>
@@ -60,6 +61,7 @@ public static class EditorDocumentKindNames
 			EditorDocumentKind.Scene => "Scene",
 			EditorDocumentKind.AnimationGraph => "Animation Graph",
 			EditorDocumentKind.AnimationClip => "Animation Clip",
+			EditorDocumentKind.Shape => "Shape",
 			_ => "None"
 		};
 	}

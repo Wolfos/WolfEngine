@@ -11,12 +11,13 @@ public sealed class EditorWorkspaceServiceTests
 	{
 		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
 
-		Assert.That(service.Workspaces.Select(workspace => workspace.Name), Is.EqualTo(new[] { "Scene", "Assets", "Animation Graph", "Animate" }));
+		Assert.That(service.Workspaces.Select(workspace => workspace.Name), Is.EqualTo(new[] { "Scene", "Assets", "Animation Graph", "Animate", "Model" }));
 		Assert.That(service.ActiveWorkspace.Name, Is.EqualTo("Scene"));
 		Assert.That(service.Workspaces[0].OpenWindows, Does.Contain(EditorWindowIds.Scene));
 		Assert.That(service.Workspaces[1].OpenWindows, Does.Contain(EditorWindowIds.Assets));
 		Assert.That(service.Workspaces[2].OpenWindows, Is.EquivalentTo(new[] { EditorWindowIds.Animation }));
 		Assert.That(service.Workspaces[3].OpenWindows, Is.EquivalentTo(EditorWindowIds.AnimationClipEditor));
+		Assert.That(service.Workspaces[4].OpenWindows, Is.EquivalentTo(EditorWindowIds.ShapeEditor));
 	}
 
 	[Test]
@@ -57,7 +58,8 @@ public sealed class EditorWorkspaceServiceTests
 				EditorDocumentKind.Scene,
 				EditorDocumentKind.Scene,
 				EditorDocumentKind.AnimationGraph,
-				EditorDocumentKind.AnimationClip
+				EditorDocumentKind.AnimationClip,
+				EditorDocumentKind.Shape
 			}));
 	}
 
@@ -71,6 +73,7 @@ public sealed class EditorWorkspaceServiceTests
 			AnimationWorkspaceSeeded = true,
 			AnimationGraphWorkspaceRenamed = true,
 			AnimateWorkspaceSeeded = true,
+			ModelWorkspaceSeeded = true,
 			ActiveWorkspaceId = customId,
 			Workspaces =
 			[
@@ -155,7 +158,7 @@ public sealed class EditorWorkspaceServiceTests
 		service.TryCreate("Third", EditorDocumentKind.Scene, out var third, out _);
 
 		Assert.That(service.Delete(third!.Id), Is.True);
-		Assert.That(service.ActiveWorkspace.Name, Is.EqualTo("Animate"));
+		Assert.That(service.ActiveWorkspace.Name, Is.EqualTo("Model"));
 	}
 
 	[Test]
@@ -166,6 +169,7 @@ public sealed class EditorWorkspaceServiceTests
 			Version = 1,
             AnimationWorkspaceSeeded = true,
 			AnimateWorkspaceSeeded = true,
+			ModelWorkspaceSeeded = true,
 			ActiveWorkspaceId = Guid.Parse("118ed69b-4212-4cbf-a7bb-415ed4c9dd31"),
 			Workspaces =
 			[
@@ -191,6 +195,7 @@ public sealed class EditorWorkspaceServiceTests
 			Version = 1,
             AnimationWorkspaceSeeded = true,
 			AnimateWorkspaceSeeded = true,
+			ModelWorkspaceSeeded = true,
 			ActiveWorkspaceId = id,
 			Workspaces =
 			[
@@ -214,6 +219,7 @@ public sealed class EditorWorkspaceServiceTests
 			Version = 1,
             AnimationWorkspaceSeeded = true,
 			AnimateWorkspaceSeeded = true,
+			ModelWorkspaceSeeded = true,
 			ActiveWorkspaceId = id,
 			ImGuiSettings = "[Docking][Data]",
 			Workspaces = [new EditorWorkspacePreference { Id = id, Name = "Lighting", OpenWindowIds = [EditorWindowIds.Scene] }]
@@ -255,6 +261,35 @@ public sealed class EditorWorkspaceServiceTests
 	}
 
 	[Test]
+	public void ExistingSettingsGainTheModelWorkspaceOnce()
+	{
+		var settings = new EditorWorkspacePreferences
+		{
+			Version = 1,
+			AnimationWorkspaceSeeded = true,
+			AnimationGraphWorkspaceRenamed = true,
+			AnimateWorkspaceSeeded = true,
+			ActiveWorkspaceId = EditorWorkspaceService.SceneWorkspaceId,
+			Workspaces =
+			[
+				new EditorWorkspacePreference { Id = EditorWorkspaceService.SceneWorkspaceId, Name = "Scene" }
+			]
+		};
+
+		var service = new EditorWorkspaceService(settings);
+
+		var model = service.Workspaces.Single(workspace => workspace.Id == EditorWorkspaceService.ModelWorkspaceId);
+		Assert.That(model.Name, Is.EqualTo("Model"));
+		Assert.That(model.OwnedDocument, Is.EqualTo(EditorDocumentKind.Shape));
+		Assert.That(model.OpenWindows, Is.EquivalentTo(EditorWindowIds.ShapeEditor));
+
+		service.Delete(EditorWorkspaceService.ModelWorkspaceId);
+		var restored = new EditorWorkspaceService(EditorPreferences.GetWorkspaceSettings());
+
+		Assert.That(restored.Workspaces.Any(workspace => workspace.Id == EditorWorkspaceService.ModelWorkspaceId), Is.False);
+	}
+
+	[Test]
 	public void LegacyAnimationWorkspaceIsRenamedToAnimationGraph()
 	{
 		var settings = new EditorWorkspacePreferences
@@ -262,6 +297,7 @@ public sealed class EditorWorkspaceServiceTests
 			Version = 1,
 			AnimationWorkspaceSeeded = true,
 			AnimateWorkspaceSeeded = true,
+			ModelWorkspaceSeeded = true,
 			ActiveWorkspaceId = EditorWorkspaceService.AnimationWorkspaceId,
 			Workspaces =
 			[
@@ -287,6 +323,7 @@ public sealed class EditorWorkspaceServiceTests
 			Version = 1,
 			AnimationWorkspaceSeeded = true,
 			AnimateWorkspaceSeeded = true,
+			ModelWorkspaceSeeded = true,
 			ActiveWorkspaceId = EditorWorkspaceService.AnimationWorkspaceId,
 			Workspaces =
 			[
@@ -313,6 +350,7 @@ public sealed class EditorWorkspaceServiceTests
 			AnimationWorkspaceSeeded = true,
 			AnimationGraphWorkspaceRenamed = true,
 			AnimateWorkspaceSeeded = true,
+			ModelWorkspaceSeeded = true,
 			ActiveWorkspaceId = EditorWorkspaceService.AnimationWorkspaceId,
 			Workspaces =
 			[
