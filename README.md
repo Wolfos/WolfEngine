@@ -19,12 +19,6 @@ The engine features a fully integrated editor, runtime, and renderer, with an ar
 | Windows | Actively supported |
 | MacOS | Actively supported |
 | iOS   | A successful proof-of-concept port was made, but currently unsupported |
-| Linux | Viable future addition with Vulkan or VKD3D |
-| PS5/XSX | Viable future additions |
-| Switch 2 | Viable future addition |
-| Last-gen consoles and PC's (pre-2020) | Infeasible as WolfEngine requires bindless rendering |
-| Android | Infeasible due to poor Vulkan adoption of popular chipsets |
-| WebGPU | Undesired as lagging feature support would hold back other platforms |
 
 ## Current status
 WolfEngine is **NOT** production-ready for third parties. It is currently being used to create games internally. Documentation is scarce and major features are still missing. The current plan is to start testing with third party developers in the second half of 2027.
