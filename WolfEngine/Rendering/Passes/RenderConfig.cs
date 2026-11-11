@@ -218,7 +218,7 @@ public enum DdgiFinalGatherResolution
 /// Higher quality DDGI shading. Instead of interpolating probes at the visible surface, each pixel traces its first
 /// diffuse bounce and samples the probes where that ray lands. Visibility at the shading point is then exact, which
 /// removes most light bleeding through walls and adds contact detail the probe grid is too coarse to hold. Specular
-/// still samples the probes directly. One ray per pixel is noisy; there is no denoiser yet.
+/// still samples the probes directly. One ray per pixel is noisy, so the result is denoised with SVGF.
 /// </summary>
 public struct DdgiFinalGatherSettings
 {
@@ -231,16 +231,24 @@ public struct DdgiFinalGatherSettings
 
 	/// <summary>
 	/// World-space length of the gather rays. A ray that reaches it without hitting anything takes the probe
-	/// radiance at its end point instead, so this only needs to cover the range where probe interpolation leaks.
+	/// radiance at its end point instead. Covering the range where probe interpolation leaks is enough to remove
+	/// bleeding, but longer rays reach more emissive surfaces directly, which the probes resolve poorly.
 	/// </summary>
-	public float MaxRayDistance { get; set; } = 4.0f;
-	public float Bias { get; set; } = 0.03f;
+	public float MaxRayDistance { get; set; } = 12.0f;
 
 	/// <summary>
-	/// Luminance ceiling for a single gather sample. Rare rays that hit a sunlit or emissive surface otherwise
-	/// flash as isolated bright pixels. Zero disables the clamp.
+	/// Minimum offset of a gather ray's origin from the surface. The trace already pushes the origin off by at
+	/// least a pixel's footprint, so this only matters close to the camera.
 	/// </summary>
-	public float FireflyClamp { get; set; } = 8.0f;
+	public float Bias { get; set; } = 0.001f;
+
+	/// <summary>
+	/// Luminance ceiling for a single gather sample, in the gather's irradiance / PI units. Rare rays that hit a
+	/// sunlit or emissive surface otherwise flash as isolated bright pixels. It is absolute, so it is tuned to a
+	/// directional light intensity around 3; scenes lit much brighter need it raised or real bounce light is
+	/// clamped. Zero disables the clamp.
+	/// </summary>
+	public float FireflyClamp { get; set; } = 0.15f;
 
 	/// <summary>
 	/// Spatiotemporal variance-guided filtering (SVGF) of the gather at its trace resolution. Off shows the raw
@@ -250,9 +258,11 @@ public struct DdgiFinalGatherSettings
 
 	/// <summary>
 	/// Weight of this frame's sample in the temporal moving average. Lower is smoother and slower to follow
-	/// lighting changes. The SVGF paper uses 0.2.
+	/// lighting changes. The SVGF paper uses 0.2, which averages too few frames for one sample per pixel to resolve
+	/// small emissive surfaces. The temporal pass keeps at most 64 frames of history, so values below about 0.016
+	/// behave as 0.016.
 	/// </summary>
-	public float TemporalAlpha { get; set; } = 0.2f;
+	public float TemporalAlpha { get; set; } = 0.02f;
 
 	/// <summary>
 	/// Levels of the a-trous wavelet filter, each doubling its reach. Five, as in the SVGF paper, covers 65x65
