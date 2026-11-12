@@ -45,6 +45,15 @@ public readonly struct DdgiFinalGatherPassConfig
 	public required float DdgiHorizontalBlendDistance { get; init; }
 	public required float DdgiVerticalBlendDistance { get; init; }
 	public required bool DdgiProbeRelocationEnabled { get; init; }
+	public required DescriptorHandle ShadowMap0 { get; init; }
+	public required DescriptorHandle ShadowMap1 { get; init; }
+	public required DescriptorHandle ShadowMap2 { get; init; }
+
+	/// <summary>
+	/// This frame's directional shadow cascades. Hits they cover read sun visibility from them instead of tracing a
+	/// shadow ray; when they are disabled every hit traces.
+	/// </summary>
+	public required ShadowFrameData ShadowData { get; init; }
 	public required IGfxTopLevelAccelerationStructure TopLevelAccelerationStructure { get; init; }
 	public required IGfxBuffer InstanceBuffer { get; init; }
 	public required IGfxBuffer MaterialBuffer { get; init; }

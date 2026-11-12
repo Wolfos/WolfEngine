@@ -17,12 +17,10 @@ public readonly struct DdgiFinalGatherSvgfPassConfig
 	public required DescriptorHandle Trace { get; init; }
 	public required DescriptorHandle ColorHistory { get; init; }
 	public required DescriptorHandle MomentsHistory { get; init; }
-	public required DescriptorHandle DepthHistory { get; init; }
-	public required DescriptorHandle NormalHistory { get; init; }
+	public required DescriptorHandle GuideHistory { get; init; }
 	public required DescriptorHandle Integrated { get; init; }
 	public required DescriptorHandle Moments { get; init; }
-	public required DescriptorHandle GuideDepth { get; init; }
-	public required DescriptorHandle GuideNormal { get; init; }
+	public required DescriptorHandle Guide { get; init; }
 	public required DescriptorHandle Source { get; init; }
 	public required DescriptorHandle Output { get; init; }
 	public required Int2 FramebufferSize { get; init; }

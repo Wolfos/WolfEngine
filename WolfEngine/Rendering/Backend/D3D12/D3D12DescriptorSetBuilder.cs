@@ -108,6 +108,7 @@ internal sealed unsafe class D3D12DescriptorSetBuilder : IGfxDescriptorSetBuilde
 					TextureFormat.Rg16Float => Format.FormatR16G16Float,
 					TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 					TextureFormat.R32Float => Format.FormatR32Float,
+					TextureFormat.Rg32Float => Format.FormatR32G32Float,
 				TextureFormat.R32Uint => Format.FormatR32Uint,
 					TextureFormat.Bc1Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC1UnormSrgb : Format.FormatBC1Unorm,
 					TextureFormat.Bc3Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC3UnormSrgb : Format.FormatBC3Unorm,

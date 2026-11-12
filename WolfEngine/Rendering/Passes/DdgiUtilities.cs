@@ -813,20 +813,20 @@ public static class DdgiFinalGatherHistorySlot
 	/// <summary>Accumulated luminance mean and second moment in rg, history length in frames in b.</summary>
 	public const int Moments = 1;
 
-	/// <summary>Linear view depth of the surface each trace pixel saw, zero for sky.</summary>
-	public const int Depth = 2;
+	/// <summary>
+	/// The edge-stopping guide: linear view depth of the surface each trace pixel saw in r, zero for sky, and its
+	/// world normal in g, octahedral-encoded and quantised to an integer a 32-bit float holds exactly. One texture
+	/// so every filter tap reads both with a single fetch.
+	/// </summary>
+	public const int Guide = 2;
 
-	/// <summary>Octahedral-encoded world normal of that surface.</summary>
-	public const int Normal = 3;
-
-	public const int Count = 4;
+	public const int Count = 3;
 
 	private static readonly TextureFormat[] Formats =
 	[
 		TextureFormat.Rgba16Float,
 		TextureFormat.Rgba16Float,
-		TextureFormat.R32Float,
-		TextureFormat.Rg16Float
+		TextureFormat.Rg32Float
 	];
 
 	public static TextureFormat GetFormat(int slot) => Formats[slot];

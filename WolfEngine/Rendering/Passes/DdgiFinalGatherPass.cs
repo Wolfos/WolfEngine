@@ -1,3 +1,4 @@
+using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 
@@ -36,7 +37,8 @@ public sealed class DdgiFinalGatherPass
 		IRenderer renderer,
 		GpuDrawResources gpuDrawResources,
 		IRayTracingSceneResources rayTracingSceneResources,
-		SceneDrawData sceneData)
+		SceneDrawData sceneData,
+		ShadowFrameData shadowData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
@@ -102,6 +104,10 @@ public sealed class DdgiFinalGatherPass
 			DdgiHorizontalBlendDistance = Math.Max(ddgiConfig.HorizontalBlendDistance, 0.001f),
 			DdgiVerticalBlendDistance = Math.Max(ddgiConfig.VerticalBlendDistance, 0.001f),
 			DdgiProbeRelocationEnabled = ddgiConfig.ProbeRelocationEnabled,
+			ShadowMap0 = _bindlessRegistry.RegisterDepthTexture(context.GetTexture(resources.ShadowMapDepth0)),
+			ShadowMap1 = _bindlessRegistry.RegisterDepthTexture(context.GetTexture(resources.ShadowMapDepth1)),
+			ShadowMap2 = _bindlessRegistry.RegisterDepthTexture(context.GetTexture(resources.ShadowMapDepth2)),
+			ShadowData = shadowData,
 			TopLevelAccelerationStructure = rayTracingSceneResources.TopLevelAccelerationStructure
 				?? throw new InvalidOperationException("DDGI final gather requires a valid top-level acceleration structure."),
 			InstanceBuffer = gpuDrawResources.InstanceBuffer
@@ -152,6 +158,9 @@ public sealed class DdgiFinalGatherPass
 		bindlessWriter.SetUInt("ddgiProbeStateHandle", config.DdgiProbeState.Value);
 		bindlessWriter.SetUInt("ddgiProbeActivityHandle", config.DdgiProbeActivity.Value);
 		bindlessWriter.SetUInt("ddgiProbeRelocationDecisionHandle", config.DdgiProbeRelocationDecision.Value);
+		bindlessWriter.SetUInt("shadowMapHandle0", config.ShadowMap0.Value);
+		bindlessWriter.SetUInt("shadowMapHandle1", config.ShadowMap1.Value);
+		bindlessWriter.SetUInt("shadowMapHandle2", config.ShadowMap2.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var cameraWriter = _cameraWriter
@@ -198,6 +207,22 @@ public sealed class DdgiFinalGatherPass
 		settingsWriter.SetFloat("ddgiHorizontalBlendDistance", config.DdgiHorizontalBlendDistance);
 		settingsWriter.SetFloat("ddgiVerticalBlendDistance", config.DdgiVerticalBlendDistance);
 		settingsWriter.SetUInt("ddgiProbeRelocationEnabled", config.DdgiProbeRelocationEnabled ? 1u : 0u);
+
+		// Shadow casters are culled against the unjittered frustum, so the coverage test uses it too.
+		var shadow = config.ShadowData;
+		settingsWriter.SetMatrix4x4("cameraViewProjection", sceneData.UnjitteredViewProjection);
+		settingsWriter.SetMatrix4x4("shadowViewProjection0", shadow.CascadeViewProjection0);
+		settingsWriter.SetMatrix4x4("shadowViewProjection1", shadow.CascadeViewProjection1);
+		settingsWriter.SetMatrix4x4("shadowViewProjection2", shadow.CascadeViewProjection2);
+		settingsWriter.SetVector4(
+			"shadowSplitsEnabled",
+			new Vector4(
+				shadow.CascadeSplit0,
+				shadow.CascadeSplit1,
+				shadow.CascadeSplit2,
+				shadow.Enabled ? 1.0f : 0.0f));
+		settingsWriter.SetVector4("shadowDepthBiases", new Vector4(shadow.DepthBiases, 0.0f));
+		settingsWriter.SetVector4("shadowNormalOffsets", new Vector4(shadow.NormalOffsets, 0.0f));
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		commandList.SynchronizeAccelerationStructureBuildForComputeRead(config.TopLevelAccelerationStructure);

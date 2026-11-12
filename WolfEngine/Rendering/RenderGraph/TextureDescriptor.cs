@@ -84,7 +84,8 @@ public enum TextureFormat
 	Bc1Unorm = 13,
 	Bc4Unorm = 14,
 	/// <summary>Single-channel 32-bit unsigned integer. Required for textures written by integer atomics.</summary>
-	R32Uint = 15
+	R32Uint = 15,
+	Rg32Float = 16
 }
 
 [Flags]

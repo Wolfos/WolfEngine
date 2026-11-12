@@ -36,6 +36,9 @@ cbuffer BindlessHandles : register(b0)
     uint ddgiProbeStateHandle;
     uint ddgiProbeActivityHandle;
     uint ddgiProbeRelocationDecisionHandle;
+    uint shadowMapHandle0;
+    uint shadowMapHandle1;
+    uint shadowMapHandle2;
 };
 
 cbuffer CameraParams : register(b1)
@@ -74,6 +77,16 @@ cbuffer FinalGatherSettings : register(b2)
     float ddgiHorizontalBlendDistance;
     float ddgiVerticalBlendDistance;
     uint ddgiProbeRelocationEnabled;
+    // The camera's unjittered view-projection and the directional shadow cascades, all camera-relative. The
+    // cascades answer sun visibility at hits they fully cover; see ShadowMapSunVisibility.
+    row_major float4x4 cameraViewProjection;
+    row_major float4x4 shadowViewProjection0;
+    row_major float4x4 shadowViewProjection1;
+    row_major float4x4 shadowViewProjection2;
+    // xyz: radial distance each cascade covers. w: 1 when the cascades are rendered this frame, else 0.
+    float4 shadowSplitsEnabled;
+    float4 shadowDepthBiases;
+    float4 shadowNormalOffsets;
 };
 
 RaytracingAccelerationStructure sceneTlas : register(t3);
@@ -245,6 +258,105 @@ float3 SampleUnoccludedRadiance(DdgiSampleParams params, float3 endPosition, flo
     return lerp(skyRadiance, EvaluateDdgiRadiance(sample, direction), gridInfluence);
 }
 
+/// Returned by ShadowMapSunVisibility where the cascades cannot answer and a shadow ray has to be traced.
+static const float SHADOW_MAP_NOT_COVERED = -1.0f;
+
+/// Sun visibility at a gather hit read from the directional shadow cascades, or SHADOW_MAP_NOT_COVERED.
+///
+/// A texture lookup instead of a shadow ray that can run the length of the scene. It is only valid where the
+/// cascades hold every caster: shadow casters are culled to those that can shadow a receiver inside the camera
+/// frustum, out to each cascade's split, so a hit outside the frustum, behind the camera or past the last cascade
+/// gets a traced ray instead. The gather lights its hits with the first directional light, which is also the one
+/// the cascades are rendered for.
+///
+/// One bilinear 2x2 comparison rather than deferred lighting's wide PCF kernel: one gather sample feeds one pixel
+/// of a signal the denoiser then averages, so a soft edge here is wasted work.
+float ShadowMapSunVisibility(float3 worldPosition, float3 geometricNormal, float3 lightDirection)
+{
+    if (shadowSplitsEnabled.w < 0.5f)
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    float3 relativePosition = worldPosition - camera.cameraOrigin;
+    float4 clip = mul(float4(relativePosition, 1.0f), cameraViewProjection);
+    if (clip.w <= 0.0f)
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    float2 ndc = clip.xy / clip.w;
+    if (any(abs(ndc) > 1.0f.xx))
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    // Radial distance, as deferred lighting selects cascades. It is never less than the view depth the caster
+    // culling extends each cascade to, so a hit inside a split is inside that cascade's culling volume.
+    float receiverDistance = length(relativePosition);
+    float4x4 shadowViewProjection;
+    uint shadowMapHandle;
+    float depthBias;
+    float normalOffset;
+    if (receiverDistance <= shadowSplitsEnabled.x)
+    {
+        shadowViewProjection = shadowViewProjection0;
+        shadowMapHandle = shadowMapHandle0;
+        depthBias = shadowDepthBiases.x;
+        normalOffset = shadowNormalOffsets.x;
+    }
+    else if (receiverDistance <= shadowSplitsEnabled.y)
+    {
+        shadowViewProjection = shadowViewProjection1;
+        shadowMapHandle = shadowMapHandle1;
+        depthBias = shadowDepthBiases.y;
+        normalOffset = shadowNormalOffsets.y;
+    }
+    else if (receiverDistance <= shadowSplitsEnabled.z)
+    {
+        shadowViewProjection = shadowViewProjection2;
+        shadowMapHandle = shadowMapHandle2;
+        depthBias = shadowDepthBiases.z;
+        normalOffset = shadowNormalOffsets.z;
+    }
+    else
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    // The same normal offset deferred lighting applies, so a hit surface is not shadowed by itself.
+    float nDotL = dot(geometricNormal, lightDirection);
+    float3 shadowPosition = relativePosition + geometricNormal * (normalOffset * saturate(1.0f - nDotL));
+    float4 shadowPositionH = mul(float4(shadowPosition, 1.0f), shadowViewProjection);
+    if (shadowPositionH.w <= 0.0f)
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    float3 shadowNdc = shadowPositionH.xyz / shadowPositionH.w;
+    float2 shadowUv = float2(shadowNdc.x * 0.5f + 0.5f, 0.5f - shadowNdc.y * 0.5f);
+    if (any(shadowUv <= 0.0f.xx) ||
+        any(shadowUv >= 1.0f.xx) ||
+        shadowNdc.z <= 0.0f ||
+        shadowNdc.z >= 1.0f)
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    Texture2D<float4> shadowMap = GetTexture(shadowMapHandle);
+    uint shadowWidth;
+    uint shadowHeight;
+    shadowMap.GetDimensions(shadowWidth, shadowHeight);
+    int2 shadowMapSize = int2(max(int(shadowWidth), 1), max(int(shadowHeight), 1));
+
+    ShadowReceiverPlane receiver;
+    receiver.depth = shadowNdc.z - depthBias;
+    receiver.uv = shadowUv;
+    receiver.depthGradient = ComputeShadowReceiverDepthGradient(geometricNormal, lightDirection, shadowViewProjection);
+
+    return SampleShadowBilinearPCF(shadowMap, shadowUv, shadowMapSize, receiver);
+}
+
 float TraceDirectionalVisibility(float3 worldPosition, float3 geometricNormal, float3 lightDirection)
 {
     RayDesc ray;
@@ -256,7 +368,8 @@ float TraceDirectionalVisibility(float3 worldPosition, float3 geometricNormal, f
 }
 
 /// Outgoing diffuse radiance of a hit surface, lit the same way the DDGI probe rays light theirs:
-/// the primary directional light with a traced shadow, plus the probe irradiance at the hit.
+/// the primary directional light, shadowed by the cascades where they cover the hit and by a traced
+/// ray elsewhere, plus the probe irradiance at the hit.
 float3 ShadeHitSurface(DdgiSampleParams params, RtHitSurface surface)
 {
     float3 direct = 0.0f.xxx;
@@ -266,10 +379,17 @@ float3 ShadeHitSurface(DdgiSampleParams params, RtHitSurface surface)
         float nDotL = saturate(dot(surface.worldNormal, lightDirection));
         if (nDotL > 0.0f)
         {
-            float visibility = TraceDirectionalVisibility(
+            float visibility = ShadowMapSunVisibility(
                 surface.worldPosition,
                 surface.worldGeometricNormal,
                 lightDirection);
+            if (visibility == SHADOW_MAP_NOT_COVERED)
+            {
+                visibility = TraceDirectionalVisibility(
+                    surface.worldPosition,
+                    surface.worldGeometricNormal,
+                    lightDirection);
+            }
             direct = directLightColorIntensity * nDotL * visibility / PI;
         }
     }

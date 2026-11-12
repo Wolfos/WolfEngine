@@ -26,12 +26,10 @@ cbuffer BindlessHandles : register(b0)
     uint traceHandle;
     uint colorHistoryHandle;
     uint momentsHistoryHandle;
-    uint depthHistoryHandle;
-    uint normalHistoryHandle;
+    uint guideHistoryHandle;
     uint integratedHandle;
     uint momentsHandle;
-    uint guideDepthHandle;
-    uint guideNormalHandle;
+    uint guideHandle;
     uint sourceHandle;
     uint outputHandle;
 };
@@ -136,6 +134,25 @@ float3 OctDecode(float2 encoded)
     return normalize(n);
 }
 
+/// Quantisation of each octahedral normal axis in the guide texture.
+static const float GUIDE_NORMAL_STEPS = 4095.0f;
+
+/// Packs a normal into the guide texture's second channel: octahedral-encoded, 12 bits per axis, as an integer
+/// below 2^24. A 32-bit float holds every such integer exactly, so the channel stays an ordinary finite float
+/// rather than a bit pattern that a float format could flush or canonicalise.
+float PackGuideNormal(float3 normal)
+{
+    uint2 quantised = uint2(round(saturate(OctEncode(normal) * 0.5f + 0.5f) * GUIDE_NORMAL_STEPS));
+    return float(quantised.x | (quantised.y << 12u));
+}
+
+float3 UnpackGuideNormal(float packed)
+{
+    uint bits = uint(packed);
+    float2 quantised = float2(float(bits & 0xFFFu), float(bits >> 12u));
+    return OctDecode(quantised / GUIDE_NORMAL_STEPS * 2.0f - 1.0f);
+}
+
 bool InsideTrace(int2 pixel)
 {
     return all(pixel >= 0) && all(pixel < int2(TraceSize()));
@@ -144,7 +161,7 @@ bool InsideTrace(int2 pixel)
 /// Screen-space gradient of linear depth, per trace pixel. Of the forward and backward differences along each
 /// axis the smaller one is taken, so a pixel on a silhouette measures its own surface, not the jump to the next.
 /// Sky neighbours, which store zero depth, are skipped.
-float2 DepthGradient(Texture2D<float4> guideDepth, int2 pixel, float depth)
+float2 DepthGradient(Texture2D<float4> guide, int2 pixel, float depth)
 {
     float2 gradient = 0.0f.xx;
     [unroll]
@@ -161,7 +178,7 @@ float2 DepthGradient(Texture2D<float4> guideDepth, int2 pixel, float depth)
                 continue;
             }
 
-            float neighbourDepth = guideDepth.Load(int3(neighbour, 0)).r;
+            float neighbourDepth = guide.Load(int3(neighbour, 0)).r;
             if (neighbourDepth <= 0.0f)
             {
                 continue;
@@ -199,8 +216,7 @@ void DdgiSvgfTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     RWTexture2D<float4> integratedOutput = GetRWTexture(integratedHandle);
     RWTexture2D<float4> momentsOutput = GetRWTexture(momentsHandle);
-    RWTexture2D<float4> guideDepthOutput = GetRWTexture(guideDepthHandle);
-    RWTexture2D<float4> guideNormalOutput = GetRWTexture(guideNormalHandle);
+    RWTexture2D<float4> guideOutput = GetRWTexture(guideHandle);
 
     uint2 pixel = RepresentativePixel(tracePixel);
     Texture2D<float4> depthTexture = GetTexture(depthHandle);
@@ -209,15 +225,13 @@ void DdgiSvgfTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         integratedOutput[tracePixel] = 0.0f.xxxx;
         momentsOutput[tracePixel] = 0.0f.xxxx;
-        guideDepthOutput[tracePixel] = 0.0f.xxxx;
-        guideNormalOutput[tracePixel] = 0.0f.xxxx;
+        guideOutput[tracePixel] = 0.0f.xxxx;
         return;
     }
 
     float depth = LinearDepth(deviceDepth);
     float3 normal = DecodeGBufferNormal(GetTexture(normalHandle).Load(int3(pixel, 0)).xyz);
-    guideDepthOutput[tracePixel] = float4(depth, 0.0f, 0.0f, 0.0f);
-    guideNormalOutput[tracePixel] = float4(OctEncode(normal), 0.0f, 0.0f);
+    guideOutput[tracePixel] = float4(depth, PackGuideNormal(normal), 0.0f, 0.0f);
 
     float4 traceSample = GetTexture(traceHandle).Load(int3(tracePixel, 0));
     float3 sampleColor = IsFinite(traceSample) ? max(traceSample.rgb, 0.0f.xxx) : 0.0f.xxx;
@@ -268,8 +282,7 @@ void DdgiSvgfTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         Texture2D<float4> colorHistory = GetTexture(colorHistoryHandle);
         Texture2D<float4> momentsHistory = GetTexture(momentsHistoryHandle);
-        Texture2D<float4> depthHistory = GetTexture(depthHistoryHandle);
-        Texture2D<float4> normalHistory = GetTexture(normalHistoryHandle);
+        Texture2D<float4> guideHistory = GetTexture(guideHistoryHandle);
 
         int2 baseTap = int2(floor(previousTracePosition));
         float2 fraction = previousTracePosition - float2(baseTap);
@@ -288,13 +301,13 @@ void DdgiSvgfTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
                 continue;
             }
 
-            float tapDepth = depthHistory.Load(int3(tap, 0)).r;
-            if (tapDepth <= 0.0f || abs(tapDepth - expectedDepth) > depthTolerance)
+            float2 tapGuide = guideHistory.Load(int3(tap, 0)).rg;
+            if (tapGuide.x <= 0.0f || abs(tapGuide.x - expectedDepth) > depthTolerance)
             {
                 continue;
             }
 
-            float3 tapNormal = OctDecode(normalHistory.Load(int3(tap, 0)).rg);
+            float3 tapNormal = UnpackGuideNormal(tapGuide.y);
             if (dot(tapNormal, normal) < REPROJECTION_MIN_NORMAL_DOT)
             {
                 continue;
@@ -332,13 +345,13 @@ void DdgiSvgfTemporalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
                         continue;
                     }
 
-                    float tapDepth = depthHistory.Load(int3(tap, 0)).r;
-                    if (tapDepth <= 0.0f || abs(tapDepth - expectedDepth) > depthTolerance)
+                    float2 tapGuide = guideHistory.Load(int3(tap, 0)).rg;
+                    if (tapGuide.x <= 0.0f || abs(tapGuide.x - expectedDepth) > depthTolerance)
                     {
                         continue;
                     }
 
-                    float3 tapNormal = OctDecode(normalHistory.Load(int3(tap, 0)).rg);
+                    float3 tapNormal = UnpackGuideNormal(tapGuide.y);
                     if (dot(tapNormal, normal) < REPROJECTION_MIN_NORMAL_DOT)
                     {
                         continue;
@@ -390,8 +403,9 @@ void DdgiSvgfVarianceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     RWTexture2D<float4> output = GetRWTexture(outputHandle);
-    Texture2D<float4> guideDepth = GetTexture(guideDepthHandle);
-    float depth = guideDepth.Load(int3(tracePixel, 0)).r;
+    Texture2D<float4> guide = GetTexture(guideHandle);
+    float2 centerGuide = guide.Load(int3(tracePixel, 0)).rg;
+    float depth = centerGuide.x;
     if (depth <= 0.0f)
     {
         output[tracePixel] = 0.0f.xxxx;
@@ -413,9 +427,8 @@ void DdgiSvgfVarianceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         // Too few frames for the moments to mean anything: estimate the variance from the neighbourhood on the
         // same surface, weighted by depth and normal only.
-        Texture2D<float4> guideNormal = GetTexture(guideNormalHandle);
-        float3 normal = OctDecode(guideNormal.Load(int3(tracePixel, 0)).rg);
-        float2 gradient = DepthGradient(guideDepth, int2(tracePixel), depth);
+        float3 normal = UnpackGuideNormal(centerGuide.y);
+        float2 gradient = DepthGradient(guide, int2(tracePixel), depth);
         float2 momentsSum = 0.0f.xx;
         float weightSum = 0.0f;
         for (int y = -SPATIAL_VARIANCE_RADIUS; y <= SPATIAL_VARIANCE_RADIUS; y++)
@@ -429,13 +442,14 @@ void DdgiSvgfVarianceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
                     continue;
                 }
 
-                float neighbourDepth = guideDepth.Load(int3(neighbour, 0)).r;
+                float2 neighbourGuide = guide.Load(int3(neighbour, 0)).rg;
+                float neighbourDepth = neighbourGuide.x;
                 if (neighbourDepth <= 0.0f)
                 {
                     continue;
                 }
 
-                float3 neighbourNormal = OctDecode(guideNormal.Load(int3(neighbour, 0)).rg);
+                float3 neighbourNormal = UnpackGuideNormal(neighbourGuide.y);
                 float weight =
                     exp(-DepthWeightExponent(depth, gradient, neighbourDepth, float2(offset))) *
                     NormalWeight(normal, neighbourNormal);
@@ -460,8 +474,9 @@ void DdgiSvgfFilterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     RWTexture2D<float4> output = GetRWTexture(outputHandle);
-    Texture2D<float4> guideDepth = GetTexture(guideDepthHandle);
-    float depth = guideDepth.Load(int3(tracePixel, 0)).r;
+    Texture2D<float4> guide = GetTexture(guideHandle);
+    float2 centerGuide = guide.Load(int3(tracePixel, 0)).rg;
+    float depth = centerGuide.x;
     if (depth <= 0.0f)
     {
         output[tracePixel] = 0.0f.xxxx;
@@ -469,10 +484,9 @@ void DdgiSvgfFilterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     Texture2D<float4> source = GetTexture(sourceHandle);
-    Texture2D<float4> guideNormal = GetTexture(guideNormalHandle);
     float4 center = source.Load(int3(tracePixel, 0));
-    float3 normal = OctDecode(guideNormal.Load(int3(tracePixel, 0)).rg);
-    float2 gradient = DepthGradient(guideDepth, int2(tracePixel), depth);
+    float3 normal = UnpackGuideNormal(centerGuide.y);
+    float2 gradient = DepthGradient(guide, int2(tracePixel), depth);
     float centerLuminance = Luminance(center.rgb);
 
     // The luminance edge stopping is normalised by the local standard deviation. Its variance is prefiltered
@@ -488,7 +502,7 @@ void DdgiSvgfFilterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         for (int x = -1; x <= 1; x++)
         {
             int2 neighbour = int2(tracePixel) + int2(x, y);
-            if (InsideTrace(neighbour) == false || guideDepth.Load(int3(neighbour, 0)).r <= 0.0f)
+            if (InsideTrace(neighbour) == false || guide.Load(int3(neighbour, 0)).r <= 0.0f)
             {
                 continue;
             }
@@ -525,7 +539,8 @@ void DdgiSvgfFilterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
                 continue;
             }
 
-            float neighbourDepth = guideDepth.Load(int3(neighbour, 0)).r;
+            float2 neighbourGuide = guide.Load(int3(neighbour, 0)).rg;
+            float neighbourDepth = neighbourGuide.x;
             if (neighbourDepth <= 0.0f)
             {
                 continue;
@@ -537,7 +552,7 @@ void DdgiSvgfFilterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
                 continue;
             }
 
-            float3 neighbourNormal = OctDecode(guideNormal.Load(int3(neighbour, 0)).rg);
+            float3 neighbourNormal = UnpackGuideNormal(neighbourGuide.y);
             float luminanceExponent = abs(centerLuminance - Luminance(neighbourValue.rgb)) / luminanceScale;
             float edgeWeight =
                 exp(-DepthWeightExponent(depth, gradient, neighbourDepth, float2(offset)) - luminanceExponent) *

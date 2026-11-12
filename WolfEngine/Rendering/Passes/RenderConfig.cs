@@ -265,10 +265,11 @@ public struct DdgiFinalGatherSettings
 	public float TemporalAlpha { get; set; } = 0.02f;
 
 	/// <summary>
-	/// Levels of the a-trous wavelet filter, each doubling its reach. Five, as in the SVGF paper, covers 65x65
-	/// trace pixels.
+	/// Levels of the a-trous wavelet filter, each doubling its reach and each costing a full pass over the trace.
+	/// Four covers 33x33 trace pixels, which at the default half-resolution trace is already 66 screen pixels; the
+	/// SVGF paper's five levels are for a full-resolution signal with a much shorter temporal average than this one.
 	/// </summary>
-	public int FilterIterations { get; set; } = 5;
+	public int FilterIterations { get; set; } = 4;
 	public float UpsampleSharpness { get; set; } = 16.0f;
 }
 

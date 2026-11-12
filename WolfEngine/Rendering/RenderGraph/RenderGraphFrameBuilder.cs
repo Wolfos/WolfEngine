@@ -1684,6 +1684,9 @@ internal sealed class RenderGraphFrameBuilder
 						.ReadTexture(_view.FrameResources.DdgiProbeStateWrite, ResourceState.ShaderResource)
 						.ReadTexture(_view.FrameResources.DdgiProbeActivity, ResourceState.ShaderResource)
 						.ReadTexture(_view.FrameResources.DdgiProbeRelocationDecision, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.ShadowMapDepth2, ResourceState.ShaderResource)
 						.WriteTexture(_view.FrameResources.DdgiFinalGatherTrace, ResourceState.UnorderedAccess);
 					ReadSkyboxTextures(finalGatherBuilder);
 					finalGatherBuilder.SetExecute(_ddgiFinalGatherExecute);
@@ -2773,7 +2776,8 @@ internal sealed class RenderGraphFrameBuilder
 			_renderer,
 			_gpuDrawResources,
 			_rayTracingSceneResources,
-			context.SceneData);
+			context.SceneData,
+			GetShadowFrameData());
 		_ddgiFinalGatherPass.Record(context, in config, context.SceneData);
 	}
 
@@ -2784,8 +2788,7 @@ internal sealed class RenderGraphFrameBuilder
 			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
 		var historyWrite = resources.DdgiFinalGatherHistoryWrite
 			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
-		var guideDepth = historyWrite[DdgiFinalGatherHistorySlot.Depth];
-		var guideNormal = historyWrite[DdgiFinalGatherHistorySlot.Normal];
+		var guide = historyWrite[DdgiFinalGatherHistorySlot.Guide];
 		var moments = historyWrite[DdgiFinalGatherHistorySlot.Moments];
 
 		graph.AddPass("DDGI Final Gather SVGF Temporal", PassKind.Compute)
@@ -2795,19 +2798,16 @@ internal sealed class RenderGraphFrameBuilder
 			.ReadTexture(resources.DdgiFinalGatherTrace, ResourceState.ShaderResource)
 			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Color], ResourceState.ShaderResource)
 			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Moments], ResourceState.ShaderResource)
-			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Depth], ResourceState.ShaderResource)
-			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Normal], ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Guide], ResourceState.ShaderResource)
 			.WriteTexture(resources.DdgiFinalGatherIntegrated, ResourceState.UnorderedAccess)
 			.WriteTexture(moments, ResourceState.UnorderedAccess)
-			.WriteTexture(guideDepth, ResourceState.UnorderedAccess)
-			.WriteTexture(guideNormal, ResourceState.UnorderedAccess)
+			.WriteTexture(guide, ResourceState.UnorderedAccess)
 			.SetExecute(_ddgiFinalGatherTemporalExecute);
 
 		graph.AddPass("DDGI Final Gather SVGF Variance", PassKind.Compute)
 			.ReadTexture(resources.DdgiFinalGatherIntegrated, ResourceState.ShaderResource)
 			.ReadTexture(moments, ResourceState.ShaderResource)
-			.ReadTexture(guideDepth, ResourceState.ShaderResource)
-			.ReadTexture(guideNormal, ResourceState.ShaderResource)
+			.ReadTexture(guide, ResourceState.ShaderResource)
 			.WriteTexture(resources.DdgiFinalGatherFilterInput, ResourceState.UnorderedAccess)
 			.SetExecute(_ddgiFinalGatherVarianceExecute);
 
@@ -2815,8 +2815,7 @@ internal sealed class RenderGraphFrameBuilder
 		{
 			var (source, output) = GetFinalGatherFilterTargets(iteration);
 			graph.AddPass($"DDGI Final Gather SVGF Filter {iteration}", PassKind.Compute)
-				.ReadTexture(guideDepth, ResourceState.ShaderResource)
-				.ReadTexture(guideNormal, ResourceState.ShaderResource)
+				.ReadTexture(guide, ResourceState.ShaderResource)
 				.ReadTexture(source, ResourceState.ShaderResource)
 				.WriteTexture(output, ResourceState.UnorderedAccess)
 				.SetExecute(_ddgiFinalGatherFilterExecutes[iteration]);

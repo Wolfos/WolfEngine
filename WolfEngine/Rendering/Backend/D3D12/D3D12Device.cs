@@ -2240,6 +2240,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		TextureFormat.Rg16Float => Format.FormatR16G16Float,
 		TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 		TextureFormat.R32Float => Format.FormatR32Float,
+		TextureFormat.Rg32Float => Format.FormatR32G32Float,
 		TextureFormat.R32Uint => Format.FormatR32Uint,
 		TextureFormat.D32Float => Format.FormatD32Float,
 		TextureFormat.Bc1Unorm => isSrgb ? Format.FormatBC1UnormSrgb : Format.FormatBC1Unorm,

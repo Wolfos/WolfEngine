@@ -80,8 +80,7 @@ public sealed class DdgiFinalGatherSvgfPass
 			Trace = isTemporal ? _bindlessRegistry.GetTextureHandle(trace) : DescriptorHandle.Invalid,
 			ColorHistory = isTemporal ? ReadHandle(context, historyRead[DdgiFinalGatherHistorySlot.Color]) : DescriptorHandle.Invalid,
 			MomentsHistory = isTemporal ? ReadHandle(context, historyRead[DdgiFinalGatherHistorySlot.Moments]) : DescriptorHandle.Invalid,
-			DepthHistory = isTemporal ? ReadHandle(context, historyRead[DdgiFinalGatherHistorySlot.Depth]) : DescriptorHandle.Invalid,
-			NormalHistory = isTemporal ? ReadHandle(context, historyRead[DdgiFinalGatherHistorySlot.Normal]) : DescriptorHandle.Invalid,
+			GuideHistory = isTemporal ? ReadHandle(context, historyRead[DdgiFinalGatherHistorySlot.Guide]) : DescriptorHandle.Invalid,
 			Integrated = isTemporal
 				? WriteHandle(context, resources.DdgiFinalGatherIntegrated)
 				: isVariance
@@ -92,12 +91,9 @@ public sealed class DdgiFinalGatherSvgfPass
 				: isVariance
 					? ReadHandle(context, historyWrite[DdgiFinalGatherHistorySlot.Moments])
 					: DescriptorHandle.Invalid,
-			GuideDepth = isTemporal
-				? WriteHandle(context, historyWrite[DdgiFinalGatherHistorySlot.Depth])
-				: ReadHandle(context, historyWrite[DdgiFinalGatherHistorySlot.Depth]),
-			GuideNormal = isTemporal
-				? WriteHandle(context, historyWrite[DdgiFinalGatherHistorySlot.Normal])
-				: ReadHandle(context, historyWrite[DdgiFinalGatherHistorySlot.Normal]),
+			Guide = isTemporal
+				? WriteHandle(context, historyWrite[DdgiFinalGatherHistorySlot.Guide])
+				: ReadHandle(context, historyWrite[DdgiFinalGatherHistorySlot.Guide]),
 			Source = isFilter ? ReadHandle(context, source) : DescriptorHandle.Invalid,
 			Output = isTemporal ? DescriptorHandle.Invalid : WriteHandle(context, output),
 			FramebufferSize = resources.SceneFramebufferSize,
@@ -126,12 +122,10 @@ public sealed class DdgiFinalGatherSvgfPass
 		bindlessWriter.SetUInt("traceHandle", config.Trace.Value);
 		bindlessWriter.SetUInt("colorHistoryHandle", config.ColorHistory.Value);
 		bindlessWriter.SetUInt("momentsHistoryHandle", config.MomentsHistory.Value);
-		bindlessWriter.SetUInt("depthHistoryHandle", config.DepthHistory.Value);
-		bindlessWriter.SetUInt("normalHistoryHandle", config.NormalHistory.Value);
+		bindlessWriter.SetUInt("guideHistoryHandle", config.GuideHistory.Value);
 		bindlessWriter.SetUInt("integratedHandle", config.Integrated.Value);
 		bindlessWriter.SetUInt("momentsHandle", config.Moments.Value);
-		bindlessWriter.SetUInt("guideDepthHandle", config.GuideDepth.Value);
-		bindlessWriter.SetUInt("guideNormalHandle", config.GuideNormal.Value);
+		bindlessWriter.SetUInt("guideHandle", config.Guide.Value);
 		bindlessWriter.SetUInt("sourceHandle", config.Source.Value);
 		bindlessWriter.SetUInt("outputHandle", config.Output.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
