@@ -177,6 +177,12 @@ bool FinalGatherIsFinite(float4 value)
     return all(exponent != 0x7F800000u.xxxx);
 }
 
+/// Angle by which a gather ray's texture-filtering cone widens per unit of distance. A gather sample stands for
+/// one of the many directions the denoiser averages at a pixel, at most 64 frames of them; this is the solid
+/// angle one of 64 directions covers on the hemisphere, sqrt(2 pi / 64). Texture detail finer than that cone is
+/// averaged away by the filter anyway, so sampling it only costs bandwidth and adds noise.
+static const float FINAL_GATHER_CONE_SPREAD_ANGLE = 0.3133f;
+
 /// Device-depth increment used to measure how far one step of depth precision moves a reconstructed
 /// position at a given depth: a few ulps of 32-bit float just below 1.
 static const float DEPTH_PRECISION_STEP = 4.0e-7f;
@@ -223,21 +229,33 @@ float3 SampleSkyRadiance(float3 direction)
     return SampleEnvironment(environmentHandle, samplerHandle, direction) * IBL_EXPOSURE;
 }
 
+/// Irradiance / PI the sky delivers to a surface with this normal, ignoring everything in between.
+float3 SampleSkyIrradiance(float3 normal)
+{
+    return GetTexture(irradianceHandle)
+        .SampleLevel(GetSampler(samplerHandle), DirToEnvUV(normal), 0.0f).rgb * IBL_EXPOSURE / PI;
+}
+
 /// Irradiance / PI arriving at a world position, from the probes inside the grid and the sky
-/// irradiance outside it, blended the same way deferred lighting blends them.
+/// irradiance outside it, blended the same way deferred lighting blends them. The sky is only
+/// fetched where it contributes: most hits sit well inside the grid, where its weight is zero.
 float3 SampleIndirectIrradiance(DdgiSampleParams params, float3 worldPosition, float3 normal)
 {
-    float3 skyIrradiance = GetTexture(irradianceHandle)
-        .SampleLevel(GetSampler(samplerHandle), DirToEnvUV(normal), 0.0f).rgb * IBL_EXPOSURE / PI;
     float gridInfluence = DdgiGridInfluence(params, worldPosition);
     if (gridInfluence <= 0.0f)
     {
-        return skyIrradiance;
+        return SampleSkyIrradiance(normal);
     }
 
     DdgiProbeDebug debug;
     DdgiShSample sample = SampleDdgiSh(params, worldPosition, normal, gridInfluence, 0u, debug);
-    return lerp(skyIrradiance, EvaluateDdgiDiffuse(sample, normal), gridInfluence);
+    float3 probeIrradiance = EvaluateDdgiDiffuse(sample, normal);
+    if (gridInfluence >= 1.0f)
+    {
+        return probeIrradiance;
+    }
+
+    return lerp(SampleSkyIrradiance(normal), probeIrradiance, gridInfluence);
 }
 
 /// Radiance travelling back along a ray that left the gather range without hitting anything. The
@@ -246,16 +264,21 @@ float3 SampleIndirectIrradiance(DdgiSampleParams params, float3 worldPosition, f
 /// the side the ray came from.
 float3 SampleUnoccludedRadiance(DdgiSampleParams params, float3 endPosition, float3 direction)
 {
-    float3 skyRadiance = SampleSkyRadiance(direction);
     float gridInfluence = DdgiGridInfluence(params, endPosition);
     if (gridInfluence <= 0.0f)
     {
-        return skyRadiance;
+        return SampleSkyRadiance(direction);
     }
 
     DdgiProbeDebug debug;
     DdgiShSample sample = SampleDdgiSh(params, endPosition, -direction, gridInfluence, 0u, debug);
-    return lerp(skyRadiance, EvaluateDdgiRadiance(sample, direction), gridInfluence);
+    float3 probeRadiance = EvaluateDdgiRadiance(sample, direction);
+    if (gridInfluence >= 1.0f)
+    {
+        return probeRadiance;
+    }
+
+    return lerp(SampleSkyRadiance(direction), probeRadiance, gridInfluence);
 }
 
 /// Returned by ShadowMapSunVisibility where the cascades cannot answer and a shadow ray has to be traced.
@@ -444,6 +467,11 @@ void DdgiFinalGatherCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float selfHitDistance = (surfaceOffset + viewOffset) * 4.0f;
     WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
 
+    // The cone starts as wide as the trace pixel it was launched from, not the full-resolution pixel the
+    // origin was reconstructed at.
+    float tracePixelScale = float(size.x) / float(outputSize.x);
+    float coneWidthAtOrigin = pixelFootprint * max(tracePixelScale, 1.0f);
+
     DdgiSampleParams params = MakeDdgiSampleParams();
     float3 radiance;
     float hitDistance = maxRayDistance;
@@ -459,6 +487,7 @@ void DdgiFinalGatherCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             hit.distance,
             ray.Origin,
             direction,
+            coneWidthAtOrigin + hit.distance * FINAL_GATHER_CONE_SPREAD_ANGLE,
             surface);
         if (resolved == false)
         {

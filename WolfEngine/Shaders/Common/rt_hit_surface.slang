@@ -56,6 +56,77 @@ float3 RtSafeNormalize(float3 value)
     return lengthSquared > 1e-20f ? value * rsqrt(lengthSquared) : 0.0f.xxx;
 }
 
+/// Texture level of detail for ray hits, from the width of the ray's cone where it lands (Akenine-Moller et al.,
+/// "Improved Shader and Texture Level of Detail Using Ray Cones", JCGT 2021). A caller that passes a cone width of
+/// zero or less gets level 0, the unfiltered texel a plain point sample reads.
+///
+/// Incoherent rays that read level 0 touch a different cache line for almost every hit; a level matched to the
+/// footprint touches far fewer and returns the footprint's average, which is what a diffuse bounce converges to.
+static const float RT_MIN_COS_FOR_LOD = 0.05f;
+
+/// A triangle LOD bias far enough below zero that any texture size still clamps to level 0. Returned for a
+/// triangle too degenerate to measure, which must not fall through to the texture's smallest level.
+static const float RT_LOD_BIAS_UNFILTERED = -64.0f;
+
+/// Level of detail for a texture of the given size mapped onto a triangle, before the texture size is known:
+/// half the log2 of uv area per world area, plus the cone width projected onto the surface.
+float RtTriangleLodBias(
+    float3 worldPosition0,
+    float3 worldPosition1,
+    float3 worldPosition2,
+    float2 uv0,
+    float2 uv1,
+    float2 uv2,
+    float2 uvScale,
+    float3 rayDirection,
+    float coneWidth)
+{
+    float3 worldEdge0 = worldPosition1 - worldPosition0;
+    float3 worldEdge1 = worldPosition2 - worldPosition0;
+    float3 worldCross = cross(worldEdge0, worldEdge1);
+    float worldArea = length(worldCross);
+    float2 uvEdge0 = (uv1 - uv0) * uvScale;
+    float2 uvEdge1 = (uv2 - uv0) * uvScale;
+    float uvArea = abs(uvEdge0.x * uvEdge1.y - uvEdge0.y * uvEdge1.x);
+    if (worldArea <= 1e-12f || uvArea <= 1e-12f || coneWidth <= 0.0f)
+    {
+        return RT_LOD_BIAS_UNFILTERED;
+    }
+
+    float cosine = max(abs(dot(worldCross / worldArea, rayDirection)), RT_MIN_COS_FOR_LOD);
+    return 0.5f * log2(uvArea / worldArea) + log2(coneWidth / cosine);
+}
+
+/// Adds a texture's own size to a triangle LOD bias. Level 0 when the caller asked for no filtering.
+float RtTextureLod(Texture2D<float4> texture, float triangleLodBias, float coneWidth)
+{
+    if (coneWidth <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    uint width;
+    uint height;
+    texture.GetDimensions(width, height);
+    return max(triangleLodBias + 0.5f * log2(float(max(width, 1u)) * float(max(height, 1u))), 0.0f);
+}
+
+/// Level of detail for a triplanar projection, where uv is world position divided by the layer scale, so one
+/// texel spans scale / size world units on every projection axis.
+float RtTriplanarLod(Texture2D<float4> texture, float layerScale, float coneWidth)
+{
+    if (coneWidth <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    uint width;
+    uint height;
+    texture.GetDimensions(width, height);
+    float texelsPerWorldUnit = float(max(width, height)) / max(layerScale, 0.001f);
+    return max(log2(coneWidth * texelsPerWorldUnit), 0.0f);
+}
+
 uint RtResolveMaterialIndex(uint materialHandle)
 {
     if (!IsPackedHandleValid(materialHandle))
@@ -144,13 +215,21 @@ float3 RtGetTriplanarWeights(float3 worldNormal)
     return sum > 1e-5f ? weights / sum : float3(0.0f, 1.0f, 0.0f);
 }
 
-float4 RtSampleTriplanarFloat4(uint textureHandle, SamplerState samplerState, float3 worldPosition, float3 worldNormal, float layerScale)
+float4 RtSampleTriplanarFloat4(
+    uint textureHandle,
+    SamplerState samplerState,
+    float3 worldPosition,
+    float3 worldNormal,
+    float layerScale,
+    float coneWidth)
 {
     float3 weights = RtGetTriplanarWeights(worldNormal);
     float safeScale = max(layerScale, 0.001f);
-    float4 sampleX = GetTexture(textureHandle).SampleLevel(samplerState, worldPosition.zy / safeScale, 0.0f);
-    float4 sampleY = GetTexture(textureHandle).SampleLevel(samplerState, worldPosition.xz / safeScale, 0.0f);
-    float4 sampleZ = GetTexture(textureHandle).SampleLevel(samplerState, worldPosition.xy / safeScale, 0.0f);
+    Texture2D<float4> texture = GetTexture(textureHandle);
+    float lod = RtTriplanarLod(texture, safeScale, coneWidth);
+    float4 sampleX = texture.SampleLevel(samplerState, worldPosition.zy / safeScale, lod);
+    float4 sampleY = texture.SampleLevel(samplerState, worldPosition.xz / safeScale, lod);
+    float4 sampleZ = texture.SampleLevel(samplerState, worldPosition.xy / safeScale, lod);
     return sampleX * weights.x + sampleY * weights.y + sampleZ * weights.z;
 }
 
@@ -158,13 +237,26 @@ RtTerrainLayerSample RtSampleTerrainLayer(
     float3 worldPosition,
     float3 worldNormal,
     GpuTerrainLayerData layerData,
-    GpuTerrainMaterialData terrainData)
+    GpuTerrainMaterialData terrainData,
+    float coneWidth)
 {
     SamplerState samplerState = GetSampler(terrainData.layerSamplerHandle);
     RtTerrainLayerSample sample;
-    sample.albedo = RtSampleTriplanarFloat4(layerData.albedoHandle, samplerState, worldPosition, worldNormal, layerData.scale);
+    sample.albedo = RtSampleTriplanarFloat4(
+        layerData.albedoHandle,
+        samplerState,
+        worldPosition,
+        worldNormal,
+        layerData.scale,
+        coneWidth);
     sample.height = layerData.hasHeight != 0u
-        ? saturate(RtSampleTriplanarFloat4(layerData.heightHandle, samplerState, worldPosition, worldNormal, layerData.scale).r)
+        ? saturate(RtSampleTriplanarFloat4(
+            layerData.heightHandle,
+            samplerState,
+            worldPosition,
+            worldNormal,
+            layerData.scale,
+            coneWidth).r)
         : 0.5f;
     return sample;
 }
@@ -174,7 +266,8 @@ float3 RtSampleTerrainAlbedo(
     float2 uv,
     float3 worldPosition,
     float3 worldNormal,
-    GpuTerrainMaterialData terrainData)
+    GpuTerrainMaterialData terrainData,
+    float coneWidth)
 {
     // Resolved exactly as the g-buffer pass does, terrain normal included, so a slope that renders
     // as cliff also bounces cliff albedo instead of whatever layer zero happens to be.
@@ -200,7 +293,7 @@ float3 RtSampleTerrainAlbedo(
         }
 
         GpuTerrainLayerData layerData = tables.terrainLayers[terrainData.layerStart + layerIndex];
-        layerSamples[i] = RtSampleTerrainLayer(worldPosition, worldNormal, layerData, terrainData);
+        layerSamples[i] = RtSampleTerrainLayer(worldPosition, worldNormal, layerData, terrainData, coneWidth);
     }
 
     float4 heights = float4(
@@ -263,6 +356,7 @@ bool RtTryResolveTerrainHitSurface(
     float fallbackRayT,
     float3 rayOrigin,
     float3 rayDirection,
+    float coneWidth,
     GpuInstanceData instanceData,
     out RtHitSurface surface)
 {
@@ -301,7 +395,13 @@ bool RtTryResolveTerrainHitSurface(
         return false;
     }
     surface.worldGeometricNormal = surface.worldNormal;
-    surface.albedo = RtSampleTerrainAlbedo(tables, surface.uv, surface.worldPosition, surface.worldNormal, terrainData);
+    surface.albedo = RtSampleTerrainAlbedo(
+        tables,
+        surface.uv,
+        surface.worldPosition,
+        surface.worldNormal,
+        terrainData,
+        coneWidth);
     surface.emissive = 0.0f.xxx;
     surface.valid = true;
     return true;
@@ -393,6 +493,8 @@ bool RtTryResolveGeometricNormal(
     return length(worldGeometricNormal) > 1e-4f;
 }
 
+/// coneWidth is the world-space width of the ray's cone at the hit, which picks the texture level of detail. Zero
+/// or less samples level 0.
 bool RtTryResolveHitSurface(
     RtSceneTables tables,
     uint instanceIndex,
@@ -401,6 +503,7 @@ bool RtTryResolveHitSurface(
     float fallbackRayT,
     float3 rayOrigin,
     float3 rayDirection,
+    float coneWidth,
     out RtHitSurface surface)
 {
     surface = (RtHitSurface)0;
@@ -421,10 +524,17 @@ bool RtTryResolveHitSurface(
             fallbackRayT,
             rayOrigin,
             rayDirection,
+            coneWidth,
             instanceData,
             surface);
     }
 
+    float3 lodWorldPosition0 = 0.0f.xxx;
+    float3 lodWorldPosition1 = 0.0f.xxx;
+    float3 lodWorldPosition2 = 0.0f.xxx;
+    float2 lodUv0 = 0.0f.xx;
+    float2 lodUv1 = 0.0f.xx;
+    float2 lodUv2 = 0.0f.xx;
     if (IsPackedHandleValid(instanceData.meshHandle))
     {
         uint meshIndex = GetHandleIndex(instanceData.meshHandle);
@@ -466,6 +576,12 @@ bool RtTryResolveHitSurface(
             surface.worldGeometricNormal = RtSafeNormalize(cross(
                 worldPosition1 - worldPosition0,
                 worldPosition2 - worldPosition0));
+            lodWorldPosition0 = worldPosition0;
+            lodWorldPosition1 = worldPosition1;
+            lodWorldPosition2 = worldPosition2;
+            lodUv0 = GetPackedVertexUv(v0);
+            lodUv1 = GetPackedVertexUv(v1);
+            lodUv2 = GetPackedVertexUv(v2);
         }
     }
 
@@ -484,8 +600,24 @@ bool RtTryResolveHitSurface(
     GpuMaterialData material = tables.materials[materialIndex];
     SamplerState materialSampler = GetSampler(material.samplerHandle);
     float2 materialUv = surface.uv * material.uvOffsetScale.zw + material.uvOffsetScale.xy;
-    float3 albedoSample = GetTexture(material.albedoHandle).SampleLevel(materialSampler, materialUv, 0.0f).rgb;
-    float3 emissiveSample = GetTexture(material.emissiveHandle).SampleLevel(materialSampler, materialUv, 0.0f).rgb;
+    Texture2D<float4> albedoTexture = GetTexture(material.albedoHandle);
+    Texture2D<float4> emissiveTexture = GetTexture(material.emissiveHandle);
+    float triangleLodBias = RtTriangleLodBias(
+        lodWorldPosition0,
+        lodWorldPosition1,
+        lodWorldPosition2,
+        lodUv0,
+        lodUv1,
+        lodUv2,
+        material.uvOffsetScale.zw,
+        rayDirection,
+        coneWidth);
+    float3 albedoSample = albedoTexture
+        .SampleLevel(materialSampler, materialUv, RtTextureLod(albedoTexture, triangleLodBias, coneWidth))
+        .rgb;
+    float3 emissiveSample = emissiveTexture
+        .SampleLevel(materialSampler, materialUv, RtTextureLod(emissiveTexture, triangleLodBias, coneWidth))
+        .rgb;
     surface.albedo = max(material.baseColor.rgb * albedoSample, 0.0f.xxx);
     surface.emissive =
         emissiveSample *

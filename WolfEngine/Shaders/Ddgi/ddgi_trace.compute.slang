@@ -85,6 +85,7 @@ bool DdgiTryResolveHitSurface(
         fallbackRayT,
         rayOrigin,
         rayDirection,
+        0.0f,
         surface);
 }
 
