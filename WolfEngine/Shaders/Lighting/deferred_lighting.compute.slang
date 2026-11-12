@@ -326,11 +326,7 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         ddgiGridInfluence);
     if (ddgiFinalGatherEnabled != 0u)
     {
-        // The final gather already traced the first bounce, so it finds the occluders screen-space AO
-        // approximates; applying that AO as well would darken every contact twice. Only the material's
-        // baked occlusion, which covers detail below the geometry, still applies. The trace also fell
-        // back to the sky itself wherever the probe grid ends, so no grid blend is needed here.
-        ddgiDiffuseIrradiance = GetTexture(ddgiFinalGatherHandle).Load(int3(dispatchThreadId.xy, 0)).rgb;
+        ddgiDiffuseIrradiance = GetTexture(ddgiFinalGatherHandle).Load(int3(dispatchThreadId.xy, 0)).rgb * occlusion;
         ddgiGridInfluence = 1.0f;
         diffuseIndirectContribution = ddgiDiffuseIrradiance * diffuseEnergy * albedo * materialOcclusion;
     }
