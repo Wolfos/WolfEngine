@@ -76,7 +76,6 @@ internal static class ProjectGameplayScaffolder
 			   </PropertyGroup>
 
 			   <ItemGroup>
-			     <FrameworkReference Include="Microsoft.AspNetCore.App" />
 			     <EmbeddedResource Include="UI\**\*.css" />
 			   </ItemGroup>
 

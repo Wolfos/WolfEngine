@@ -102,7 +102,14 @@ public static class GameBuilder
 		Console.WriteLine($"Building for {target.Rid}.");
 		if (target.PublishesDesktopRuntime)
 		{
-			PublishDesktopRuntime(engineSolutionRoot, configuration, target.Rid, config.SelfContained, staging, options.Debug);
+			PublishDesktopRuntime(
+				engineSolutionRoot,
+				configuration,
+				target.Rid,
+				config.SelfContained,
+				GetExecutableName(projectRoot),
+				staging,
+				options.Debug);
 		}
 
 		var graph = catalog.Mounts.SelectMany(mount => mount.Dependencies)
@@ -370,6 +377,7 @@ public static class GameBuilder
 		string configuration,
 		string rid,
 		bool selfContained,
+		string executableName,
 		string staging,
 		bool debug)
 	{
@@ -386,6 +394,12 @@ public static class GameBuilder
 			selfContained ? "true" : "false",
 			"--output",
 			staging,
+			// The executable carries the game's name. A global AssemblyName would also rename every referenced engine
+			// project, so the runtime project maps this property onto its own. The .NET runtime and the managed
+			// assemblies are bundled into it. Native libraries stay beside it: Silk.NET only finds GLFW there, not in
+			// the temporary folder a bundle extracts them to.
+			$"-p:WolfEngineGameName={executableName}",
+			"-p:PublishSingleFile=true",
 			"/m:1"
 		};
 		AddSymbolProperties(publishArgs, debug);
@@ -399,6 +413,36 @@ public static class GameBuilder
 			if (Directory.Exists(leakedPath))
 				Directory.Delete(leakedPath, true);
 		}
+
+		// The self-contained runtime's crash dump writer, which only runs when crash dumps are enabled through
+		// environment variables. A shipped game does not use it.
+		foreach (var createDump in new[] { "createdump", "createdump.exe" })
+		{
+			var createDumpPath = Path.Combine(staging, createDump);
+			if (File.Exists(createDumpPath))
+				File.Delete(createDumpPath);
+		}
+
+		// Native packages such as HarfBuzzSharp ship their own symbols, which a build without debug symbols drops.
+		if (!debug)
+		{
+			foreach (var symbols in Directory.EnumerateFiles(staging, "*.pdb"))
+				File.Delete(symbols);
+		}
+	}
+
+	/// <summary>
+	/// The game's executable is named after its project, whose folder carries the name it was created with. Characters
+	/// MSBuild would read as property separators are replaced.
+	/// </summary>
+	internal static string GetExecutableName(string projectRoot)
+	{
+		var projectName = Path.GetFileName(Path.TrimEndingDirectorySeparator(projectRoot));
+		var name = new string(projectName
+			.Select(character => char.IsLetterOrDigit(character) || character is ' ' or '-' or '_' or '.' ? character : '_')
+			.ToArray()).Trim(' ', '.');
+
+		return name.Length == 0 ? "Game" : name;
 	}
 
 	private static string GetCurrentRid()
