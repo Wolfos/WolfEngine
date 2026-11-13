@@ -13,6 +13,7 @@ using WolfEngine.Physics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Shaders;
+using WolfEngine.Rendering.Splash;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Serialization;
 using WolfEngine.Vfx;
@@ -51,6 +52,12 @@ public sealed class RuntimeHostOptions
 	/// it, turn this off; rigidbodies, colliders and vehicles then stay where they were placed.
 	/// </summary>
 	public bool EnablePhysics { get; init; } = true;
+
+	/// <summary>
+	/// Whether to show the engine splash screen, when the build carries one, while the initial scene loads. The
+	/// platform host must render while <see cref="RuntimeHost.Tick"/> loads, from another thread.
+	/// </summary>
+	public bool ShowSplashScreen { get; init; }
 }
 
 /// <summary>
@@ -62,8 +69,11 @@ public sealed class RuntimeHost : IDisposable
 	private readonly ServiceProvider _services;
 	private readonly IGameplayModule _gameplay;
 	private readonly GameplayWorldSession _session;
-	private readonly RenderViewId _primaryView;
-	private readonly World _initialWorld;
+	private readonly RenderGraph _renderGraph;
+	private readonly SplashScreen _splashScreen;
+	private readonly Guid _initialSceneId;
+	private RenderViewId _primaryView;
+	private World? _initialWorld;
 	private readonly int _frameCount;
 	private readonly int _memoryReportFrame = ReadMemoryReportFrame();
 	private readonly IWorldManager _worldManager;
@@ -102,9 +112,9 @@ public sealed class RuntimeHost : IDisposable
 		_renderer.SetWindowSize(new Int2(settings.Width, settings.Height));
 		AssetDatabase.SetInstanceRegistry(services.GetRequiredService<IAssetInstanceRegistry>());
 
-		var initialSceneId = options.Catalog.Manifest.InitialSceneId;
-		_initialWorld = _sceneLoader.Load(initialSceneId);
-		Console.WriteLine($"runtime loaded scene {initialSceneId:D}");
+		_renderGraph = services.GetRequiredService<RenderGraph>();
+		_splashScreen = services.GetRequiredService<SplashScreen>();
+		_initialSceneId = options.Catalog.Manifest.InitialSceneId;
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
 		_worldManager.AddSystem(new AnimationRenderResourceLifecycle(services.GetRequiredService<RenderGraph>()));
@@ -126,8 +136,7 @@ public sealed class RuntimeHost : IDisposable
 		// After transforms, so attached effects follow this frame's poses.
 		_worldManager.AddSystem(new VfxSystem(services.GetRequiredService<VfxService>()), SystemExecutionGroup.Gameplay);
 
-		var renderGraph = services.GetRequiredService<RenderGraph>();
-		_primaryView = renderGraph.CreateView(new RenderViewDescriptor(_initialWorld, "game", RenderViewOutput.Backbuffer));
+		var renderGraph = _renderGraph;
 		_session = new GameplayWorldSession(
 			_worldManager,
 			_gameplay,
@@ -176,7 +185,16 @@ public sealed class RuntimeHost : IDisposable
 		var provider = services.BuildServiceProvider();
 		try
 		{
-			return new RuntimeHost(options, settings, provider);
+			var host = new RuntimeHost(options, settings, provider);
+			if (options.ShowSplashScreen &&
+			    catalog.Manifest.SplashScreenId != Guid.Empty)
+			{
+				// Shown before rendering starts, so the first frame the window presents is the splash.
+				var splash = SplashScreenSerializer.Read(catalog.Read(catalog.Manifest.SplashScreenId));
+				host._splashScreen.Show(splash);
+			}
+
+			return host;
 		}
 		catch
 		{
@@ -190,14 +208,19 @@ public sealed class RuntimeHost : IDisposable
 	/// Steps gameplay by one frame: scene load requests, fixed physics steps, gameplay and system updates, then
 	/// publishes a render snapshot. Returns false once a fixed <see cref="RuntimeHostOptions.FrameCount"/> has run.
 	/// </summary>
+	/// <remarks>
+	/// The first call loads the initial scene, which the renderer covers with the splash screen when one is
+	/// showing. Gameplay starts once the splash has played its intro; until then each call waits briefly and
+	/// returns without stepping, publishing nothing, so the splash keeps the window.
+	/// </remarks>
 	public bool Tick()
 	{
 		if (_started == false)
 		{
-			_session.Replace(_initialWorld);
-			_clock.Start();
-			_lastFrameTime = _clock.Elapsed;
-			_started = true;
+			if (TryStart() == false)
+			{
+				return true;
+			}
 		}
 
 		ProcessSceneLoadRequest();
@@ -267,6 +290,31 @@ public sealed class RuntimeHost : IDisposable
 		}
 
 		return _frameCount <= 0 || _frames < _frameCount;
+	}
+
+	private bool TryStart()
+	{
+		if (_initialWorld is null)
+		{
+			_initialWorld = _sceneLoader.Load(_initialSceneId);
+			Console.WriteLine($"runtime loaded scene {_initialSceneId:D}");
+			_primaryView = _renderGraph.CreateView(
+				new RenderViewDescriptor(_initialWorld, "game", RenderViewOutput.Backbuffer));
+		}
+
+		if (_splashScreen.WaitForIntro(TimeSpan.FromMilliseconds(16)) == false)
+		{
+			return false;
+		}
+
+		// From here the game publishes frames, and the splash fades out over the first of them.
+		_splashScreen.Reveal();
+		_session.Replace(_initialWorld);
+		_clock.Start();
+		_lastFrameTime = _clock.Elapsed;
+		_started = true;
+
+		return true;
 	}
 
 	/// <summary>

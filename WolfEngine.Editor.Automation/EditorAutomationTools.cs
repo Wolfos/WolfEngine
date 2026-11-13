@@ -434,6 +434,12 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.CaptureEditorWindowAsync(outputPath, cancellationToken);
 
+	[McpServerTool(Name = "preview_splash_screen"), Description("Hold the engine splash screen at a moment of its animation, covering the editor window, so capture_editor_window or capture_frame can record it. The splash is baked from the engine's sources on first use. Omit time_seconds to hide it again.")]
+	public Task<SplashScreenPreviewResult> PreviewSplashScreen(
+		[Description("Seconds into the splash animation: the trace runs 0.3-1.9, the logo fills in by 2.4 and the text by 3.05. Omit to hide the splash.")] float? timeSeconds = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.PreviewSplashScreenAsync(timeSeconds, cancellationToken);
+
 	[McpServerTool(Name = "capture_gameplay_frame"), Description("Enter or resume Play mode, verify that an enabled gameplay Camera is driving the viewport, wait for gameplay startup frames, and capture a PNG from that camera. Fails instead of silently falling back to the authoring camera.")]
 	public Task<GameplayFrameCaptureResult> CaptureGameplayFrame(
 		[Description("Absolute or project-relative PNG output path.")] string outputPath,

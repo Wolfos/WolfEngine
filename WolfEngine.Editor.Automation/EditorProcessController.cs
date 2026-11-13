@@ -366,6 +366,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureEditorWindowAsync(outputPath, cancellationToken);
 
+	public Task<SplashScreenPreviewResult> PreviewSplashScreenAsync(float? timeSeconds, CancellationToken cancellationToken) =>
+		GetRunningEditor().PreviewSplashScreenAsync(timeSeconds, cancellationToken);
+
 	public Task<GameplayFrameCaptureResult> CaptureGameplayFrameAsync(
 		string outputPath,
 		int settleFrameCount,

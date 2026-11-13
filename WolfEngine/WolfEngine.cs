@@ -45,6 +45,7 @@ public static class WolfEngine
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
 		services.AddSingleton<EditorFrameCoordinator>();
 		services.AddSingleton<RenderFrameCoordinator>();
+		services.AddSingleton<Rendering.Splash.SplashScreen>();
 		services.AddSingleton<IFileDialogService, FileDialogService>();
 		services.AddSingleton<IFileManagerService, FileManagerService>();
 		services.AddSingleton<GpuDrawResources>();

@@ -8,6 +8,8 @@ using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Audio;
 using WolfEngine.Editor.Tooling;
+using WolfEngine.Editor.Tooling.Splash;
+using WolfEngine.Rendering.Splash;
 using WolfEngine.Serialization;
 
 namespace WolfEngine.Build;
@@ -40,6 +42,7 @@ public static class GameBuilder
 	private static readonly Guid GameplayAssemblyId = new("ca55e2d4-f348-5e92-a173-00f3f1d2bda4");
 	private static readonly Guid GameplaySymbolsId = new("ca55e2d4-f348-5e92-a173-00f3f1d2bda5");
 	private static readonly Guid RuntimeSettingsId = new("e1317bc4-b53c-59ea-982f-3b8170b61f10");
+	private static readonly Guid SplashScreenId = new("5a1a5c4e-0b6f-4e57-9c1d-77f0e3a2b8d1");
 
 	public static GameBuildResult Build(GameBuildContext context, GameBuildOptions options)
 	{
@@ -143,6 +146,12 @@ public static class GameBuilder
 				RuntimeSettingsId,
 				"RuntimeSettings",
 				JsonSerializer.SerializeToUtf8Bytes(config.RuntimeSettings, EngineJsonContext.Default.CookedRuntimeSettings),
+				[]),
+			new WolfPackSource(
+				SplashScreenId,
+				SplashScreenSerializer.Kind,
+				SplashScreenSerializer.Write(SplashScreenBaker.Bake(
+					SplashScreenBaker.GetSourceDirectory(Path.Combine(engineSolutionRoot, "WolfEngine")))),
 				[])
 		];
 		if (options.Debug)
@@ -160,7 +169,8 @@ public static class GameBuilder
 			InitialSceneId = sceneIds[0],
 			GameplayAssemblyId = GameplayAssemblyId,
 			GameplaySymbolsId = options.Debug ? GameplaySymbolsId : Guid.Empty,
-			RuntimeSettingsId = RuntimeSettingsId
+			RuntimeSettingsId = RuntimeSettingsId,
+			SplashScreenId = SplashScreenId
 		};
 		foreach (var group in groups.OrderBy(group => group.Key, StringComparer.Ordinal))
 		{
@@ -194,7 +204,8 @@ public static class GameBuilder
 			..(options.Debug
 				? new[] { new WolfManifestRoot { Kind = "GameplaySymbols", Id = GameplaySymbolsId } }
 				: []),
-			new WolfManifestRoot { Kind = "RuntimeSettings", Id = RuntimeSettingsId }
+			new WolfManifestRoot { Kind = "RuntimeSettings", Id = RuntimeSettingsId },
+			new WolfManifestRoot { Kind = SplashScreenSerializer.Kind, Id = SplashScreenId }
 		];
 		File.WriteAllBytes(Path.Combine(contentRoot, "bootstrap.wolfmanifest"),
 			JsonSerializer.SerializeToUtf8Bytes(manifest, EngineJsonContext.Default.WolfBootstrapManifest));

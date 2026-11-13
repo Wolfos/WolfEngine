@@ -59,6 +59,9 @@ public sealed class WolfBootstrapManifest
 	public Guid GameplayAssemblyId { get; set; }
 	public Guid GameplaySymbolsId { get; set; }
 	public Guid RuntimeSettingsId { get; set; }
+
+	/// <summary>The engine splash screen in the bootstrap pack, or empty for a build without one.</summary>
+	public Guid SplashScreenId { get; set; }
 	public List<WolfManifestPack> Packs { get; set; } = [];
 	public List<WolfManifestRoot> Roots { get; set; } = [];
 }

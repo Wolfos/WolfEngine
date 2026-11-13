@@ -6,6 +6,7 @@ using WolfEngine.ECS;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Features;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.Splash;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Profiling;
@@ -54,6 +55,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	private readonly GpuProfiler _gpuProfiler;
 	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
 	private readonly UiCompositor _uiCompositor;
+	private readonly SplashScreen _splashScreen;
+	private readonly SplashScreenRenderer _splashScreenRenderer;
 	private long _pendingShaderRevision;
 	private long _appliedShaderRevision;
 	private readonly RenderViewRegistry _viewRegistry = new();
@@ -102,7 +105,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		IDrawRecordEncoder drawRecordEncoder,
 		IGpuDrawDiagnosticsSampler gpuDrawDiagnosticsSampler,
 		RenderPresentationOptions? presentationOptions = null,
-		RenderFeatureRegistry? renderFeatures = null)
+		RenderFeatureRegistry? renderFeatures = null,
+		SplashScreen? splashScreen = null)
 	{
 		RenderFeatures = renderFeatures ?? new RenderFeatureRegistry();
 		_resourceRegistry = resourceRegistry;
@@ -128,6 +132,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_gpuProfiler = gpuProfiler ?? throw new ArgumentNullException(nameof(gpuProfiler));
 		_uiCompositor = new UiCompositor(imGuiRenderer ?? throw new ArgumentNullException(nameof(imGuiRenderer)));
+		_splashScreen = splashScreen ?? new SplashScreen();
+		_splashScreenRenderer = new SplashScreenRenderer(shaderProvider, bindlessResourceRegistry, renderer);
 		_gameplayUiRenderer = gameplayUiRenderer ?? throw new ArgumentNullException(nameof(gameplayUiRenderer));
 		_uiFrameProvider = uiFrameProvider;
 		_gameplayUiFrameProvider = gameplayUiFrameProvider ?? throw new ArgumentNullException(nameof(gameplayUiFrameProvider));
@@ -347,6 +353,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		ShaderPipelineInvalidation.Invalidate(_gpuDrawResources);
 		ShaderPipelineInvalidation.Invalidate(_renderer);
 		_uiCompositor.InvalidateShaderPipeline();
+		_splashScreenRenderer.InvalidateShaderPipeline();
 		device.ClearPipelineCache();
 		lock (_resourceSync)
 		{
@@ -742,6 +749,25 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		}
 
 		_mainThreadDispatcher.ExecutePending();
+
+		// While the splash owns the window the game is still loading and publishes no frames, so the splash is drawn
+		// without waiting for one. Loading keeps queueing uploads and main-thread work, which run above every frame.
+		var splashFrame = _splashScreen.BeginFrame(Stopwatch.GetTimestamp());
+		if (splashFrame.Exclusive)
+		{
+			// Whoever publishes frames meanwhile (the editor under a held splash) waits for the renderer to take each
+			// frame and its snapshot, so take them without drawing them; the scene resumes from the latest.
+			_lastObservedEditorFrameSequence = _editorFrameCoordinator.ObservePublished();
+			if (_snapshotBuffer.TryConsumeLatest(out var heldSnapshot))
+			{
+				_currentSnapshot = heldSnapshot;
+			}
+
+			PresentSplashScreen(splashFrame);
+			FrameProfiler.Instance.EndFrame();
+			return;
+		}
+
 		bool framePublished;
 		using (FrameProfiler.Instance.Measure("Wait For Editor Frame"))
 		{
@@ -847,6 +873,17 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 						_gpuFrameCapture);
 				}
 
+				// The splash fades out over the game's first frames; with nothing showing this releases its textures.
+				_splashScreenRenderer.Compose(
+					_renderer.GetGfxDevice(),
+					_resourceRegistry.GetTexture(windowColor),
+					splashFrame,
+					clearTarget: false);
+				if (splashFrame.IsVisible && sceneFrame)
+				{
+					_splashScreen.MarkDrawnOverGame(Stopwatch.GetTimestamp());
+				}
+
 				_gpuFrameCapture?.Seal();
 				_gpuFrameCapture = null;
 				if (sceneCaptureColor.IsValid || windowColor.IsValid)
@@ -881,6 +918,49 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		PublishRayTracingSceneState();
 		_renderFrameCoordinator.PublishCompletedFrame(sceneFrame);
 		FrameProfiler.Instance.EndFrame();
+	}
+
+	/// <summary>
+	/// Presents a frame of the splash screen alone, in place of the scene and UI. No graph runs: the window image is
+	/// cleared to the splash background and the splash is drawn over it.
+	/// </summary>
+	private void PresentSplashScreen(in SplashScreenFrame splashFrame)
+	{
+		var device = _renderer.GetGfxDevice();
+		var frameBufferSize = _renderer.GetFrameBufferSize();
+		if (frameBufferSize.X <= 0 || frameBufferSize.Y <= 0)
+		{
+			return;
+		}
+
+		_resourceRegistry.SetDevice(device);
+		using (FrameProfiler.Instance.Measure("Begin Frame"))
+		{
+			_renderer.BeginFrame();
+		}
+
+		using (FrameProfiler.Instance.Measure("Splash Screen"))
+		{
+			_resourceRegistry.BeginFrame();
+			try
+			{
+				var windowColor = _resourceRegistry.ImportTexture(
+					_frameBuilder.WindowColorTarget.EnsureTarget(device, frameBufferSize),
+					takeOwnership: false,
+					initialState: _frameBuilder.WindowColorTarget.CurrentState);
+				_splashScreenRenderer.Compose(device, _resourceRegistry.GetTexture(windowColor), splashFrame, clearTarget: true);
+
+				// The splash is the whole picture, so a scene capture taken now reads it too.
+				_renderer.CompletePendingFrameCapture(_resourceRegistry, windowColor, windowColor);
+				_renderer.Render(_resourceRegistry, windowColor);
+			}
+			finally
+			{
+				_resourceRegistry.EndFrame();
+			}
+		}
+
+		_renderFrameCoordinator.PublishCompletedFrame(false);
 	}
 
 	/// <summary>

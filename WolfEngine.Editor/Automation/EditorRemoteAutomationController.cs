@@ -54,6 +54,8 @@ public sealed partial class EditorRemoteAutomationController
 	private readonly AnimationClipEditorSession _clipEditor;
 	private readonly VfxService _vfx;
 	private readonly VfxAssetEditor _vfxEditor;
+	private readonly Rendering.Splash.SplashScreen _splashScreen;
+	private readonly Rendering.Shaders.EngineShaderOptions _engineShaderOptions;
 
 	public EditorRemoteAutomationController(
 		string projectPath,
@@ -82,8 +84,12 @@ public sealed partial class EditorRemoteAutomationController
 		IGameBuildService gameBuildService,
 		AnimationClipEditorSession clipEditor,
 		VfxService vfx,
-		VfxAssetEditor vfxEditor)
+		VfxAssetEditor vfxEditor,
+		Rendering.Splash.SplashScreen splashScreen,
+		Rendering.Shaders.EngineShaderOptions engineShaderOptions)
 	{
+		_splashScreen = splashScreen;
+		_engineShaderOptions = engineShaderOptions;
 		_clipEditor = clipEditor;
 		_vfx = vfx;
 		_vfxEditor = vfxEditor;

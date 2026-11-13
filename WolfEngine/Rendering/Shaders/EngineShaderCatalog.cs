@@ -98,6 +98,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId VfxSimulate = Id("vfx-simulate");
 	public static readonly ShaderProgramId VfxSprite = Id("vfx-sprite");
 	public static readonly ShaderProgramId VfxRibbon = Id("vfx-ribbon");
+	public static readonly ShaderProgramId SplashScreen = Id("splash-screen");
 	public static readonly ShaderProgramId VolumetricFog = Id("volumetric-fog");
 
 	private static ShaderProgramId Id(string name) => new($"engine://shaders/{name}");
@@ -179,7 +180,8 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.VolumetricFog, "VolumetricFog/volumetric_fog.compute.slang"),
 			D(EngineShaderPrograms.VfxSimulate, "Vfx/vfx_simulate.compute.slang"),
 			D(EngineShaderPrograms.VfxSprite, "Vfx/vfx_sprite.slang"),
-			D(EngineShaderPrograms.VfxRibbon, "Vfx/vfx_ribbon.slang")
+			D(EngineShaderPrograms.VfxRibbon, "Vfx/vfx_ribbon.slang"),
+			D(EngineShaderPrograms.SplashScreen, "Splash/splash_screen.slang")
 		};
 
 		_byId = new();
@@ -320,7 +322,7 @@ public sealed class EngineShaderCatalog
 		id == EngineShaderPrograms.TerrainSharedGBuffer || id == EngineShaderPrograms.DebugPrimitiveForward ||
 		id == EngineShaderPrograms.DebugPrimitiveGBuffer || id == EngineShaderPrograms.ScreenSpaceDecal ||
 		id == EngineShaderPrograms.SelectionOutline || id == EngineShaderPrograms.VfxSprite ||
-		id == EngineShaderPrograms.VfxRibbon;
+		id == EngineShaderPrograms.VfxRibbon || id == EngineShaderPrograms.SplashScreen;
 
 	private static bool IsDeclaredGraphicsEntryPointCombination(ShaderRequest request) =>
 		request.VertexEntryPoint == "vertexShader" &&

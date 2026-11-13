@@ -51,7 +51,8 @@ public static class Program
 			Gameplay = gameplay,
 			ComponentAssemblies = [gameplayAssembly, typeof(ServiceCollectionExtensions).Assembly],
 			ConfigureServices = services => services.AddWolfEngineGameplayUi(),
-			FrameCount = options.Frames
+			FrameCount = options.Frames,
+			ShowSplashScreen = true
 		});
 
 		var running = true;

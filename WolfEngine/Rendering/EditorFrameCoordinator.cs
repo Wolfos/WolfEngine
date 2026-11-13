@@ -97,6 +97,24 @@ public sealed class EditorFrameCoordinator
         }
     }
 
+    /// <summary>
+    /// Render thread: picks up every published frame without waiting for one, for frames the renderer presents on
+    /// its own, such as the splash screen. Returns the newest published sequence.
+    /// </summary>
+    public long ObservePublished()
+    {
+        lock (_sync)
+        {
+            if (_observedSequence < _publishedSequence)
+            {
+                _observedSequence = _publishedSequence;
+                Monitor.PulseAll(_sync);
+            }
+
+            return _publishedSequence;
+        }
+    }
+
     private bool TryObserve(long lastObservedSequence, out long sequence, out bool published)
     {
         sequence = _publishedSequence;
