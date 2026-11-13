@@ -269,9 +269,10 @@ public static class GameBuilder
 		{
 			if (element.ValueKind == JsonValueKind.Object)
 			{
+				var isAssetRefShape = element.EnumerateObject().Count() == 1;
 				foreach (var property in element.EnumerateObject())
 				{
-					var isAssetReference = property.NameEquals("NodeId")
+					var isAssetReference = (property.NameEquals("NodeId") && isAssetRefShape)
 					                       || property.NameEquals("PrefabAssetId")
 					                       || property.NameEquals("CellId")
 					                       || property.NameEquals("GlobalCellId");
