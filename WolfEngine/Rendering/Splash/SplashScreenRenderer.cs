@@ -24,7 +24,7 @@ internal sealed class SplashScreenRenderer
 	private const float ReferenceAspect = 16.0f / 9.0f;
 
 	// Style, in display-encoded colour and reference units.
-	internal static readonly ColorRGBA BackgroundColor = new(0.063f, 0.071f, 0.082f, 1.0f);
+	internal static readonly ColorRGBA BackgroundColor = new(0.0f, 0.0f, 0.0f, 1.0f);
 	private static readonly ColorRGBA StrokeColor = new(0.55f, 0.84f, 0.98f, 1.0f);
 	private const float StrokeGlowStrength = 0.45f;
 	private const float StrokeHalfWidth = 1.1f;
