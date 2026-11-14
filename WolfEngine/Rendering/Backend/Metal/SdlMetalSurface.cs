@@ -14,7 +14,6 @@ namespace WolfEngine.Rendering.Backend.Metal;
 [SupportedOSPlatform("macos")]
 internal sealed unsafe class SdlMetalSurface : IMetalSurface
 {
-	private const string WindowTitle = "WolfEngine";
 	private const int MacTitlebarDoubleClickHeight = 28;
 	private const int MacTrafficLightExclusionWidth = 70;
 
@@ -36,7 +35,7 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 
 	public bool CanDisableVSync => true;
 
-	public IntPtr Initialize(Int2 initialSize, bool exactDrawableSize)
+	public IntPtr Initialize(Int2 initialSize, bool exactDrawableSize, string title)
 	{
 		_requestedSize = initialSize;
 		_hasRequestedDrawableSize = exactDrawableSize;
@@ -47,7 +46,7 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 
 		MacOSGestureResponder.EnableMomentumScrolling();
 
-		var titlePtr = SilkMarshal.StringToPtr(WindowTitle, NativeStringEncoding.UTF8);
+		var titlePtr = SilkMarshal.StringToPtr(title, NativeStringEncoding.UTF8);
 		try
 		{
 			var flags = WindowFlags.Resizable | WindowFlags.AllowHighdpi | WindowFlags.Metal;

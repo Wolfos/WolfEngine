@@ -88,6 +88,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 	private int _width;
 	private int _height;
+	private string _windowTitle = "WolfEngine";
 	private readonly IShaderProvider _shaderCompiler;
 	private readonly IArenaAllocator _arenaAllocator;
 	private readonly IInputSystem _inputSystem;
@@ -219,6 +220,17 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 		_width = size.X;
 		_height = size.Y;
+	}
+
+	public void SetWindowTitle(string title)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(title);
+		if (_isInitialized)
+		{
+			throw new InvalidOperationException("Window title must be configured before the renderer starts.");
+		}
+
+		_windowTitle = title;
 	}
 
 	public Task<FrameCapture> CaptureNextFrameAsync(FrameCaptureTarget target, CancellationToken cancellationToken = default)
@@ -691,7 +703,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	private void InitializeWindow()
 	{
 		var options = WindowOptions.Default;
-		options.Title = "WolfEngine";
+		options.Title = _windowTitle;
 		options.Size = new(_width, _height);
 		options.API = GraphicsAPI.None;
 		options.WindowBorder = WindowBorder.Hidden;

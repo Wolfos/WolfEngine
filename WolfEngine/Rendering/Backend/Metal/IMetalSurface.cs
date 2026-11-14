@@ -35,7 +35,7 @@ internal interface IMetalSurface
 	/// Whether a host asked for <paramref name="initialSize"/> explicitly, in which case it is also the drawable size
 	/// in pixels until the window is resized, so automation captures do not depend on the display scale.
 	/// </param>
-	IntPtr Initialize(Int2 initialSize, bool exactDrawableSize);
+	IntPtr Initialize(Int2 initialSize, bool exactDrawableSize, string title);
 
 	/// <summary>The size the layer's drawables should have, in pixels, or false while it is not known yet.</summary>
 	bool TryGetDrawableSize(out Int2 size);

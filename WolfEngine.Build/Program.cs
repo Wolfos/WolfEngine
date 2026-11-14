@@ -110,7 +110,7 @@ public static class GameBuilder
 				configuration,
 				target.Rid,
 				config.SelfContained,
-				GetExecutableName(projectRoot),
+				GetExecutableName(projectRoot, config.ExecutableName),
 				staging,
 				options.Debug);
 		}
@@ -146,14 +146,18 @@ public static class GameBuilder
 				RuntimeSettingsId,
 				"RuntimeSettings",
 				JsonSerializer.SerializeToUtf8Bytes(config.RuntimeSettings, EngineJsonContext.Default.CookedRuntimeSettings),
-				[]),
-			new WolfPackSource(
+				[])
+		];
+		if (config.ShowEngineSplashScreen)
+		{
+			groups["bootstrap"].Add(new WolfPackSource(
 				SplashScreenId,
 				SplashScreenSerializer.Kind,
 				SplashScreenSerializer.Write(SplashScreenBaker.Bake(
 					SplashScreenBaker.GetSourceDirectory(Path.Combine(engineSolutionRoot, "WolfEngine")))),
-				[])
-		];
+				[]));
+		}
+
 		if (options.Debug)
 		{
 			groups["bootstrap"].Add(
@@ -170,7 +174,7 @@ public static class GameBuilder
 			GameplayAssemblyId = GameplayAssemblyId,
 			GameplaySymbolsId = options.Debug ? GameplaySymbolsId : Guid.Empty,
 			RuntimeSettingsId = RuntimeSettingsId,
-			SplashScreenId = SplashScreenId
+			SplashScreenId = config.ShowEngineSplashScreen ? SplashScreenId : Guid.Empty
 		};
 		foreach (var group in groups.OrderBy(group => group.Key, StringComparer.Ordinal))
 		{
@@ -205,7 +209,9 @@ public static class GameBuilder
 				? new[] { new WolfManifestRoot { Kind = "GameplaySymbols", Id = GameplaySymbolsId } }
 				: []),
 			new WolfManifestRoot { Kind = "RuntimeSettings", Id = RuntimeSettingsId },
-			new WolfManifestRoot { Kind = SplashScreenSerializer.Kind, Id = SplashScreenId }
+			..(config.ShowEngineSplashScreen
+				? new[] { new WolfManifestRoot { Kind = SplashScreenSerializer.Kind, Id = SplashScreenId } }
+				: [])
 		];
 		File.WriteAllBytes(Path.Combine(contentRoot, "bootstrap.wolfmanifest"),
 			JsonSerializer.SerializeToUtf8Bytes(manifest, EngineJsonContext.Default.WolfBootstrapManifest));
@@ -446,9 +452,15 @@ public static class GameBuilder
 	/// The game's executable is named after its project, whose folder carries the name it was created with. Characters
 	/// MSBuild would read as property separators are replaced.
 	/// </summary>
-	internal static string GetExecutableName(string projectRoot)
+	/// <summary>
+	/// The executable's file name: <paramref name="configuredName"/>, or the project folder's name when that is
+	/// empty, with characters that are unsafe in file names replaced.
+	/// </summary>
+	internal static string GetExecutableName(string projectRoot, string? configuredName = null)
 	{
-		var projectName = Path.GetFileName(Path.TrimEndingDirectorySeparator(projectRoot));
+		var projectName = string.IsNullOrWhiteSpace(configuredName)
+			? Path.GetFileName(Path.TrimEndingDirectorySeparator(projectRoot))
+			: configuredName.Trim();
 		var name = new string(projectName
 			.Select(character => char.IsLetterOrDigit(character) || character is ' ' or '-' or '_' or '.' ? character : '_')
 			.ToArray()).Trim(' ', '.');

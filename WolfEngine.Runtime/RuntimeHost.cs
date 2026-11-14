@@ -110,6 +110,10 @@ public sealed class RuntimeHost : IDisposable
 		_sceneLoader = services.GetRequiredService<IRuntimeSceneLoader>();
 
 		_renderer.SetWindowSize(new Int2(settings.Width, settings.Height));
+		if (string.IsNullOrWhiteSpace(settings.Title) == false)
+		{
+			_renderer.SetWindowTitle(settings.Title);
+		}
 		AssetDatabase.SetInstanceRegistry(services.GetRequiredService<IAssetInstanceRegistry>());
 
 		_renderGraph = services.GetRequiredService<RenderGraph>();

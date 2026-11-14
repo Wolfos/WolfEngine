@@ -54,6 +54,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private CAMetalLayer _metalLayer;
     private bool _surfaceInitialized;
     private bool _hasRequestedWindowSize;
+    private string _windowTitle = "WolfEngine";
     private bool _isRunning;
     private volatile bool _shutdownRequested;
     private bool _hasDrawableSize;
@@ -232,7 +233,7 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private void InitializeSurface()
     {
-        var layerPtr = _surface.Initialize(new Int2(_width, _height), _hasRequestedWindowSize);
+        var layerPtr = _surface.Initialize(new Int2(_width, _height), _hasRequestedWindowSize, _windowTitle);
         _surfaceInitialized = true;
 
         _metalLayer = new CAMetalLayer(layerPtr);
@@ -541,6 +542,17 @@ internal unsafe class WolfRendererMetal : IRenderer
         _width = size.X;
         _height = size.Y;
         _hasRequestedWindowSize = true;
+    }
+
+    public void SetWindowTitle(string title)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        if (_surfaceInitialized)
+        {
+            throw new InvalidOperationException("Window title must be configured before the renderer starts.");
+        }
+
+        _windowTitle = title;
     }
 
     public Task<FrameCapture> CaptureNextFrameAsync(FrameCaptureTarget target, CancellationToken cancellationToken = default)

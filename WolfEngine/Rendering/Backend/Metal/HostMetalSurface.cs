@@ -52,7 +52,7 @@ public sealed class HostMetalSurface : IMetalSurface
 		}
 	}
 
-	IntPtr IMetalSurface.Initialize(Int2 initialSize, bool exactDrawableSize)
+	IntPtr IMetalSurface.Initialize(Int2 initialSize, bool exactDrawableSize, string title)
 	{
 		return _layerHandle;
 	}

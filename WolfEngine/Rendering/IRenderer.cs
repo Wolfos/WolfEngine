@@ -7,6 +7,9 @@ namespace WolfEngine;
 public interface IRenderer : IFrameCaptureSource
 {
 	void SetWindowSize(Int2 size) => throw new PlatformNotSupportedException("Window configuration is not supported by this renderer.");
+
+	/// <summary>The title the window is created with. Set before the renderer starts.</summary>
+	void SetWindowTitle(string title) => throw new PlatformNotSupportedException("Window configuration is not supported by this renderer.");
 	void Run(Action startup, Action<float> update, Action<float> render);
 
 	/// <summary>

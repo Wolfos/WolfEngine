@@ -17,7 +17,14 @@ public sealed class WolfEngineBuildConfig
 	public CookedRuntimeSettings RuntimeSettings { get; set; } = new();
 	public string Configuration { get; set; } = "Release";
 	public bool SelfContained { get; set; } = true;
+	/// <summary>The built executable's name, without extension. Empty uses the project folder's name.</summary>
+	public string ExecutableName { get; set; } = string.Empty;
 	public string Target { get; set; } = "current-host";
+	/// <summary>
+	/// Whether the build shows the "Powered by WolfEngine" splash screen while the first scene loads. Settings files
+	/// written before this existed omit it and keep the splash.
+	/// </summary>
+	public bool ShowEngineSplashScreen { get; set; } = true;
 
 	public IReadOnlyList<Guid> GetSceneIds()
 	{
