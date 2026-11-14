@@ -150,6 +150,10 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.SetGamePauseAsync(reasonIndex, paused, cancellationToken);
 
+	[McpServerTool(Name = "quit_game"), Description("Quit the running Play-mode game the way a gameplay Quit button does, through IApplicationQuitService. In the editor this stops Play mode rather than closing the editor; a built game would exit. Returns the Play state after the editor has handled the request.")]
+	public Task<PlayModeStateResult> QuitGame(CancellationToken cancellationToken) =>
+		_controller.QuitGameAsync(cancellationToken);
+
 	[McpServerTool(Name = "stop_play_mode"), Description("Stop Play mode and discard the isolated runtime scene, returning to the authoring scene.")]
 	public Task<PlayModeStateResult> StopPlayMode(CancellationToken cancellationToken) =>
 		_controller.StopPlayModeAsync(cancellationToken);

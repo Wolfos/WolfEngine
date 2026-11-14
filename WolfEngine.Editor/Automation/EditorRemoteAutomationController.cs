@@ -30,6 +30,7 @@ public sealed partial class EditorRemoteAutomationController
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorPlaySession _playSession;
 	private readonly SceneLoadRequests _sceneLoadRequests;
+	private readonly IApplicationQuitService _quitService;
 	private readonly IInputSystem _inputSystem;
 	private readonly IImGuiInputSink _imguiInput;
 	private readonly IEditorInteractionState _interactionState;
@@ -81,6 +82,7 @@ public sealed partial class EditorRemoteAutomationController
 		EditorCameraSystem cameraSystem,
 		IImGuiInputSink imguiInput,
 		SceneLoadRequests sceneLoadRequests,
+		IApplicationQuitService quitService,
 		IGameBuildService gameBuildService,
 		AnimationClipEditorSession clipEditor,
 		VfxService vfx,
@@ -94,6 +96,7 @@ public sealed partial class EditorRemoteAutomationController
 		_vfx = vfx;
 		_vfxEditor = vfxEditor;
 		_sceneLoadRequests = sceneLoadRequests;
+		_quitService = quitService;
 		_gameBuildService = gameBuildService;
 		_cameraSystem = cameraSystem;
 		_viewportStateBus = viewportStateBus;
@@ -828,6 +831,26 @@ public sealed partial class EditorRemoteAutomationController
 			}
 
 			return GetPlayModeState();
+		}, cancellationToken);
+
+	/// <summary>
+	/// Quits the way a gameplay Quit button does, through <see cref="IApplicationQuitService"/>, and reports the Play
+	/// state once the editor has handled the request: Play mode stops, and the editor stays open.
+	/// </summary>
+	public Task<PlayModeStateResult> QuitGameAsync(CancellationToken cancellationToken) =>
+		EnqueueAsync(async () =>
+		{
+			var world = _playSession.RuntimeScene?.World ??
+			            throw new InvalidOperationException("Quitting the game requires Play mode.");
+			_quitService.Quit(world);
+
+			// The editor takes the request later in this frame. The first completed scene frame may be the previous
+			// frame still in flight, so the second is the earliest that was published after the request was handled.
+			await _renderFrameCoordinator
+				.WaitForCompletedSceneFramesAsync(2, cancellationToken)
+				.ConfigureAwait(false);
+
+			return await Enqueue(GetPlayModeState, cancellationToken).ConfigureAwait(false);
 		}, cancellationToken);
 
 	public Task<PlayModeStateResult> StopPlayModeAsync(CancellationToken cancellationToken) =>

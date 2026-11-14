@@ -24,6 +24,8 @@ public static class WolfEngine
 		services.AddSingleton<ILogService, LogService>();
 		services.AddSingleton<Gameplay.SceneLoadRequests>();
 		services.AddSingleton<Gameplay.ISceneLoadService>(sp => sp.GetRequiredService<Gameplay.SceneLoadRequests>());
+		services.AddSingleton<Gameplay.ApplicationQuitRequests>();
+		services.AddSingleton<Gameplay.IApplicationQuitService>(sp => sp.GetRequiredService<Gameplay.ApplicationQuitRequests>());
 		services.AddSingleton<EngineShaderCatalog>();
 		services.AddSingleton<IImageLoader, StbImageLoader>();
 		services.AddSingleton<ITextureFactory, TextureFactory>();

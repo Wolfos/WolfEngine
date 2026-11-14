@@ -250,6 +250,8 @@ public class WolfEngineEditor
 			{
 				HandleGameplayBuildAndReload();
 				_serviceProvider.GetRequiredService<IEditorCommandService>().ProcessDeferredSceneLoad();
+				// Before scene loads: stopping Play mode cancels a load requested in the same frame.
+				ProcessQuitRequest();
 				ProcessSceneLoadRequest();
 				SyncCurrentScene();
 				ValidateSelection();
@@ -361,6 +363,21 @@ public class WolfEngineEditor
 			_currentScene,
 			editorCamera,
 			editorCameraWorldTransform);
+	}
+
+	/// <summary>
+	/// Gameplay quitting from Play mode, such as from its main menu, stops Play mode. The editor itself stays open.
+	/// </summary>
+	private void ProcessQuitRequest()
+	{
+		var requests = _serviceProvider.GetRequiredService<ApplicationQuitRequests>();
+		if (requests.TryTake(_playSession.RuntimeScene?.World) == false)
+		{
+			return;
+		}
+
+		UnbindGameplayModule();
+		_playSession.Stop();
 	}
 
 	private void ProcessSceneLoadRequest()

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Audio;
@@ -54,6 +55,12 @@ public sealed class RuntimeHostOptions
 	public bool EnablePhysics { get; init; } = true;
 
 	/// <summary>
+	/// Whether gameplay may close the game through <see cref="IApplicationQuitService"/>. Platforms whose apps are
+	/// closed only by the user, such as iOS, turn this off.
+	/// </summary>
+	public bool IsQuitSupported { get; init; } = true;
+
+	/// <summary>
 	/// Whether to show the engine splash screen, when the build carries one, while the initial scene loads. The
 	/// platform host must render while <see cref="RuntimeHost.Tick"/> loads, from another thread.
 	/// </summary>
@@ -91,6 +98,7 @@ public sealed class RuntimeHost : IDisposable
 	private readonly IInputSystem _input;
 	private readonly IPointerInputRouter _pointerRouter;
 	private readonly SceneLoadRequests _sceneRequests;
+	private readonly ApplicationQuitRequests _quitRequests;
 	private readonly IRuntimeSceneLoader _sceneLoader;
 	private readonly Stopwatch _clock = new();
 	private TimeSpan _lastFrameTime;
@@ -113,6 +121,7 @@ public sealed class RuntimeHost : IDisposable
 		_input = services.GetRequiredService<IInputSystem>();
 		_pointerRouter = services.GetRequiredService<IPointerInputRouter>();
 		_sceneRequests = services.GetRequiredService<SceneLoadRequests>();
+		_quitRequests = services.GetRequiredService<ApplicationQuitRequests>();
 		_sceneLoader = services.GetRequiredService<IRuntimeSceneLoader>();
 
 		var graphicsSettings = CreateInitialGraphicsSettings(settings);
@@ -214,7 +223,7 @@ public sealed class RuntimeHost : IDisposable
 
 		var services = new ServiceCollection();
 		WolfEngine.ConfigureServices(services);
-		AddRuntimeServices(services, catalog);
+		AddRuntimeServices(services, catalog, options.IsQuitSupported);
 		options.ConfigureServices?.Invoke(services);
 
 		var provider = services.BuildServiceProvider();
@@ -241,7 +250,8 @@ public sealed class RuntimeHost : IDisposable
 
 	/// <summary>
 	/// Steps gameplay by one frame: scene load requests, fixed physics steps, gameplay and system updates, then
-	/// publishes a render snapshot. Returns false once a fixed <see cref="RuntimeHostOptions.FrameCount"/> has run.
+	/// publishes a render snapshot. Returns false once a fixed <see cref="RuntimeHostOptions.FrameCount"/> has run,
+	/// or when gameplay asked to quit during the previous frame; the host then calls <see cref="Stop"/>.
 	/// </summary>
 	/// <remarks>
 	/// The first call loads the initial scene, which the renderer covers with the splash screen when one is
@@ -256,6 +266,14 @@ public sealed class RuntimeHost : IDisposable
 			{
 				return true;
 			}
+		}
+
+		// Before scene loads, so a quit wins over a load requested in the same frame; Stop cancels the load.
+		if (_quitRequests.TryTake(_session.World))
+		{
+			Console.WriteLine("runtime quit requested by gameplay");
+
+			return false;
 		}
 
 		ProcessSceneLoadRequest();
@@ -410,8 +428,9 @@ public sealed class RuntimeHost : IDisposable
 		}
 	}
 
-	private static void AddRuntimeServices(IServiceCollection services, WolfPackCatalog catalog)
+	private static void AddRuntimeServices(IServiceCollection services, WolfPackCatalog catalog, bool isQuitSupported)
 	{
+		services.Replace(ServiceDescriptor.Singleton(new ApplicationQuitRequests(isQuitSupported)));
 		services.AddSingleton(new RenderPresentationOptions { OutputMode = RenderOutputMode.FullWindow });
 		var packagedShaders = new PackagedShaderProvider(catalog);
 		services.AddSingleton<IShaderProvider>(packagedShaders);
