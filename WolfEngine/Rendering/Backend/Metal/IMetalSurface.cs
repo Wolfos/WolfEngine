@@ -43,6 +43,21 @@ internal interface IMetalSurface
 	/// <summary>The window's size in points, or false while it is not known yet.</summary>
 	bool TryGetWindowSize(out Int2 size);
 
+	/// <summary>Whether <see cref="ApplyWindowConfiguration"/> can change the window. A host-owned view cannot.</summary>
+	bool CanConfigureWindow { get; }
+
+	/// <summary>The mode the window is in now, which lags a fullscreen request while the platform animates it.</summary>
+	WindowMode WindowMode { get; }
+
+	/// <summary>
+	/// Changes the window's mode and size, on the thread that renders. The drawable follows on a later
+	/// <see cref="TryGetDrawableSize"/>, so a fullscreen resolution below native renders smaller and is scaled up.
+	/// </summary>
+	void ApplyWindowConfiguration(WindowConfiguration configuration);
+
+	/// <summary>The resolution in pixels of the display the window is on, or false while it is not known yet.</summary>
+	bool TryGetNativeResolution(out Int2 resolution);
+
 	/// <summary>Processes the platform events that arrived since the previous frame.</summary>
 	MetalSurfaceEvents PumpEvents();
 

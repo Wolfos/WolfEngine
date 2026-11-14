@@ -2,6 +2,7 @@ using System.Text.Json;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.UI;
 
@@ -153,6 +154,14 @@ public sealed class ProjectSettingsWindow : EditorWindow
 			settings.Title = title;
 		}
 
+		var fullscreen = settings.WindowMode == WindowMode.Fullscreen;
+		if (ImGui.Checkbox("Fullscreen", ref fullscreen))
+		{
+			settings.WindowMode = fullscreen ? WindowMode.Fullscreen : WindowMode.Windowed;
+		}
+
+		ImGui.BeginDisabled(fullscreen);
+
 		var width = settings.Width;
 		if (ImGui.InputInt("Width", ref width))
 		{
@@ -165,7 +174,11 @@ public sealed class ProjectSettingsWindow : EditorWindow
 			settings.Height = Math.Clamp(height, MinimumWindowSize, MaximumWindowSize);
 		}
 
-		DrawHint("The window's size when the game starts.");
+		ImGui.EndDisabled();
+
+		DrawHint(fullscreen
+			? "The game starts fullscreen at the display's native resolution. Players can change it at runtime."
+			: "The window's size when the game starts.");
 	}
 
 	private static void DrawSimulationSettings(CookedRuntimeSettings settings)

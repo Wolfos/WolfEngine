@@ -58,6 +58,12 @@ public sealed class RuntimeHostOptions
 	/// platform host must render while <see cref="RuntimeHost.Tick"/> loads, from another thread.
 	/// </summary>
 	public bool ShowSplashScreen { get; init; }
+
+	/// <summary>
+	/// Adjusts the graphics settings the game starts with, which come from the project's settings, such as to start an
+	/// automated run windowed and without vsync.
+	/// </summary>
+	public Func<CookedRuntimeSettings, GraphicsSettings, GraphicsSettings>? ConfigureGraphicsSettings { get; init; }
 }
 
 /// <summary>
@@ -109,7 +115,14 @@ public sealed class RuntimeHost : IDisposable
 		_sceneRequests = services.GetRequiredService<SceneLoadRequests>();
 		_sceneLoader = services.GetRequiredService<IRuntimeSceneLoader>();
 
-		_renderer.SetWindowSize(new Int2(settings.Width, settings.Height));
+		var graphicsSettings = CreateInitialGraphicsSettings(settings);
+		if (options.ConfigureGraphicsSettings is { } configureGraphicsSettings)
+		{
+			graphicsSettings = configureGraphicsSettings(settings, graphicsSettings);
+		}
+
+		// Before the renderer starts, so the window opens in this mode rather than switching on its first frame.
+		services.GetRequiredService<IGraphicsSettings>().Apply(graphicsSettings);
 		if (string.IsNullOrWhiteSpace(settings.Title) == false)
 		{
 			_renderer.SetWindowTitle(settings.Title);
@@ -156,6 +169,24 @@ public sealed class RuntimeHost : IDisposable
 	}
 
 	public CookedRuntimeSettings Settings { get; }
+
+	/// <summary>
+	/// The project's startup settings: fullscreen at the display's native resolution, or a window of the project's size.
+	/// </summary>
+	public static GraphicsSettings CreateInitialGraphicsSettings(CookedRuntimeSettings settings)
+	{
+		ArgumentNullException.ThrowIfNull(settings);
+
+		var resolution = settings.WindowMode == WindowMode.Windowed
+			? new Int2(settings.Width, settings.Height)
+			: Int2.Zero;
+
+		return new GraphicsSettings
+		{
+			WindowMode = settings.WindowMode,
+			Resolution = resolution
+		};
+	}
 
 	public IServiceProvider Services => _services;
 

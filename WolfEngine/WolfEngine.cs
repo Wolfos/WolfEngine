@@ -42,6 +42,8 @@ public static class WolfEngine
 		services.AddSingleton<GameplayUiGpuRenderer>();
 		services.AddSingleton<EditorViewportStateBus>();
 		services.AddSingleton(new RenderPresentationOptions());
+		services.AddSingleton<GraphicsSettingsService>();
+		services.AddSingleton<IGraphicsSettings>(sp => sp.GetRequiredService<GraphicsSettingsService>());
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
 		services.AddSingleton<EditorFrameCoordinator>();
 		services.AddSingleton<RenderFrameCoordinator>();

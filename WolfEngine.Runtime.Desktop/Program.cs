@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.UI;
 using WolfEngine.Utility;
@@ -33,10 +34,6 @@ public static class Program
 
 		// Checked before loading code from the packs, which is only built for the target they were cooked for.
 		RuntimeTarget.EnsureCanRun(catalog.Manifest.Target);
-		if (options.Frames > 0)
-		{
-			Screen.VSyncEnabled = false;
-		}
 
 		var gameplaySymbols = catalog.Manifest.GameplaySymbolsId == Guid.Empty
 			? null
@@ -52,7 +49,8 @@ public static class Program
 			ComponentAssemblies = [gameplayAssembly, typeof(ServiceCollectionExtensions).Assembly],
 			ConfigureServices = services => services.AddWolfEngineGameplayUi(),
 			FrameCount = options.Frames,
-			ShowSplashScreen = true
+			ShowSplashScreen = true,
+			ConfigureGraphicsSettings = options.ApplyTo
 		});
 
 		var running = true;
@@ -114,12 +112,50 @@ public static class Program
 		return 0;
 	}
 
-	private readonly record struct RuntimeOptions(string? Manifest, int Frames)
+	/// <param name="Manifest">The bootstrap manifest to run, when not the one next to the executable.</param>
+	/// <param name="Frames">For automated runs: how many fixed-step frames to run before quitting, or zero.</param>
+	/// <param name="Windowed">Starts in a window even when the project starts fullscreen.</param>
+	/// <param name="WindowSize">The window size in points, which implies <paramref name="Windowed"/>, or zero.</param>
+	private readonly record struct RuntimeOptions(string? Manifest, int Frames, bool Windowed, Int2 WindowSize)
 	{
+		/// <summary>
+		/// Automated runs render as fast as they can, without vsync. Overrides from the command line win over the
+		/// project's settings.
+		/// </summary>
+		public GraphicsSettings ApplyTo(CookedRuntimeSettings project, GraphicsSettings settings)
+		{
+			if (Frames > 0)
+			{
+				settings = settings with { VSync = false };
+			}
+
+			if (WindowSize.X > 0 && WindowSize.Y > 0)
+			{
+				return settings with
+				{
+					WindowMode = WindowMode.Windowed,
+					Resolution = WindowSize
+				};
+			}
+
+			if (Windowed && settings.WindowMode != WindowMode.Windowed)
+			{
+				return settings with
+				{
+					WindowMode = WindowMode.Windowed,
+					Resolution = new Int2(project.Width, project.Height)
+				};
+			}
+
+			return settings;
+		}
+
 		public static RuntimeOptions Parse(string[] args)
 		{
 			string? manifest = null;
 			var frames = 0;
+			var windowed = false;
+			var windowSize = Int2.Zero;
 			for (var i = 0; i < args.Length; i++)
 			{
 				if (args[i] == "--manifest" && ++i < args.Length)
@@ -127,6 +163,13 @@ public static class Program
 					manifest = Path.GetFullPath(args[i]);
 				}
 				else if (args[i] == "--frames" && ++i < args.Length && int.TryParse(args[i], out frames) && frames > 0)
+				{
+				}
+				else if (args[i] == "--windowed")
+				{
+					windowed = true;
+				}
+				else if (args[i] == "--window-size" && ++i < args.Length && TryParseSize(args[i], out windowSize))
 				{
 				}
 				else if (args[i] == "--quit")
@@ -138,7 +181,30 @@ public static class Program
 				}
 			}
 
-			return new RuntimeOptions(manifest, frames);
+			return new RuntimeOptions(manifest, frames, windowed, windowSize);
+		}
+
+		/// <summary>Reads a size written as <c>WIDTHxHEIGHT</c>, such as <c>1280x720</c>.</summary>
+		private static bool TryParseSize(string value, out Int2 size)
+		{
+			size = Int2.Zero;
+			var parts = value.Split('x');
+			if (parts.Length != 2)
+			{
+				return false;
+			}
+
+			if (int.TryParse(parts[0], out var width) == false ||
+			    int.TryParse(parts[1], out var height) == false ||
+			    width <= 0 ||
+			    height <= 0)
+			{
+				return false;
+			}
+
+			size = new Int2(width, height);
+
+			return true;
 		}
 	}
 }

@@ -1,4 +1,6 @@
-﻿namespace WolfEngine.Platform;
+﻿using WolfEngine.Mathematics;
+
+namespace WolfEngine.Platform;
 
 public interface IWindowChromeController
 {
@@ -158,6 +160,47 @@ public sealed class WindowChromeController : IWindowChromeController
 		}
 
 		WindowsHelpers.CloseWindow(_windowHandle);
+	}
+
+	/// <summary>Covers the window's monitor with the window, without a frame.</summary>
+	public void EnterBorderlessFullscreen()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			return;
+		}
+
+		WindowsHelpers.EnterBorderlessFullscreen(_windowHandle);
+	}
+
+	/// <summary>Restores the frame and placement the window had before it went fullscreen.</summary>
+	public void ExitBorderlessFullscreen()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			return;
+		}
+
+		WindowsHelpers.ExitBorderlessFullscreen(_windowHandle);
+	}
+
+	/// <summary>The size in pixels of the monitor the window is mostly on.</summary>
+	public bool TryGetMonitorResolution(out Int2 resolution)
+	{
+		resolution = Int2.Zero;
+		if (!OperatingSystem.IsWindows())
+		{
+			return false;
+		}
+
+		if (WindowsHelpers.TryGetMonitorSize(_windowHandle, out var width, out var height) == false)
+		{
+			return false;
+		}
+
+		resolution = new Int2(width, height);
+
+		return true;
 	}
 
 	public void SetTitleBarMetrics(WindowTitleBarMetrics metrics)

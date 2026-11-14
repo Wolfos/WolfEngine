@@ -144,7 +144,19 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	private uint _swapchainFlags;
 	private bool _allowTearing;
 	private nint _windowHandle;
+	/// <summary>The swapchain's size, which in fullscreen below native resolution is smaller than the window.</summary>
 	private Int2 _framebufferSize = Int2.Zero;
+
+	/// <summary>The window's client area in pixels.</summary>
+	private Int2 _windowFramebufferSize = Int2.Zero;
+	private volatile bool _vsyncRequested = true;
+	private readonly object _windowConfigurationSync = new();
+	private bool _windowOpened;
+	private WindowConfiguration? _initialWindowConfiguration;
+	private WindowConfiguration? _pendingWindowConfiguration;
+	private bool _fullscreen;
+	private Int2 _fullscreenResolution;
+	private volatile DisplayInfo _displayInfo = DisplayInfo.Unknown;
 	private readonly List<IKeyboard> _keyboards = new();
 	private readonly List<IMouse> _mice = new();
 	private Vector2 _lastMousePosition;
@@ -231,6 +243,39 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		}
 
 		_windowTitle = title;
+	}
+
+	public bool VSyncEnabled
+	{
+		get => _vsyncRequested;
+		set => _vsyncRequested = value;
+	}
+
+	public bool CanConfigureWindow => true;
+
+	public void RequestWindowConfiguration(WindowConfiguration configuration)
+	{
+		lock (_windowConfigurationSync)
+		{
+			if (_windowOpened)
+			{
+				_pendingWindowConfiguration = configuration;
+				return;
+			}
+
+			_initialWindowConfiguration = configuration;
+			var size = configuration.Resolution;
+			if (configuration.Mode == WindowMode.Windowed && size.X > 0 && size.Y > 0)
+			{
+				_width = size.X;
+				_height = size.Y;
+			}
+		}
+	}
+
+	public DisplayInfo GetDisplayInfo()
+	{
+		return _displayInfo;
 	}
 
 	public Task<FrameCapture> CaptureNextFrameAsync(FrameCaptureTarget target, CancellationToken cancellationToken = default)
@@ -373,6 +418,20 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	private void OnWindowLoad()
 	{
 		RetrieveNativeHandle();
+
+		WindowConfiguration? initialConfiguration;
+		lock (_windowConfigurationSync)
+		{
+			initialConfiguration = _initialWindowConfiguration;
+			_windowOpened = true;
+		}
+
+		// Before the swapchain exists, so it is created at the fullscreen size.
+		if (initialConfiguration is { Mode: WindowMode.Fullscreen } fullscreen)
+		{
+			ApplyWindowConfiguration(fullscreen);
+		}
+
 		UpdateFramebufferSize();
 
 		OnLoad();
@@ -400,6 +459,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 		_hasMouseInput = false;
 
+		ApplyPendingWindowConfiguration();
+		PublishDisplayInfo();
 		PollGamepads();
 
 		_updateCallback((float) deltaTime);
@@ -441,7 +502,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		{
 			if (newSize.X > 0 && newSize.Y > 0)
 			{
-				_framebufferSize = new(newSize.X, newSize.Y);
+				_windowFramebufferSize = new(newSize.X, newSize.Y);
+				_framebufferSize = ResolveBackbufferSize();
 			}
 
 			return;
@@ -743,8 +805,98 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		var size = _window.FramebufferSize;
 		if (size.X > 0 && size.Y > 0)
 		{
-			_framebufferSize = new(size.X, size.Y);
+			_windowFramebufferSize = new(size.X, size.Y);
+			_framebufferSize = ResolveBackbufferSize();
 		}
+	}
+
+	private Int2 ResolveBackbufferSize()
+	{
+		if (_fullscreen == false)
+		{
+			return _windowFramebufferSize;
+		}
+
+		return DisplayResolutions.ResolveFullscreen(_fullscreenResolution, _windowFramebufferSize);
+	}
+
+	private void ApplyPendingWindowConfiguration()
+	{
+		WindowConfiguration? pending;
+		lock (_windowConfigurationSync)
+		{
+			pending = _pendingWindowConfiguration;
+			_pendingWindowConfiguration = null;
+		}
+
+		if (pending is not { } configuration)
+		{
+			return;
+		}
+
+		ApplyWindowConfiguration(configuration);
+
+		// A resolution change within fullscreen leaves the window as it is, so no resize event resizes the swapchain.
+		if (_isInitialized)
+		{
+			OnFramebufferResize(_windowFramebufferSize);
+		}
+	}
+
+	/// <summary>
+	/// Fullscreen is a borderless window over the monitor, with a swapchain at the chosen resolution that DXGI
+	/// stretches to cover it. Moving and resizing the window raises framebuffer resizes, which resize the swapchain.
+	/// </summary>
+	private void ApplyWindowConfiguration(WindowConfiguration configuration)
+	{
+		if (configuration.Mode == WindowMode.Fullscreen)
+		{
+			_fullscreenResolution = configuration.Resolution;
+			if (_fullscreen == false)
+			{
+				_fullscreen = true;
+				_windowChromeController.EnterBorderlessFullscreen();
+			}
+
+			return;
+		}
+
+		if (_fullscreen)
+		{
+			_fullscreen = false;
+			_windowChromeController.ExitBorderlessFullscreen();
+		}
+
+		var size = configuration.Resolution;
+		if (size.X <= 0 || size.Y <= 0 || _window is null)
+		{
+			return;
+		}
+
+		_window.Size = new Vector2D<int>(size.X, size.Y);
+		_window.Center();
+	}
+
+	/// <summary>Republishes what the window shows only when it changed, so a steady frame allocates nothing.</summary>
+	private void PublishDisplayInfo()
+	{
+		if (_windowChromeController.TryGetMonitorResolution(out var nativeResolution) == false)
+		{
+			return;
+		}
+
+		var windowSize = GetWindowSize();
+		var windowMode = _fullscreen ? WindowMode.Fullscreen : WindowMode.Windowed;
+		var current = _displayInfo;
+		if (current.WindowMode == windowMode &&
+		    current.WindowSize == windowSize &&
+		    current.OutputResolution == _framebufferSize &&
+		    current.NativeResolution == nativeResolution)
+		{
+			return;
+		}
+
+		_displayInfo = DisplayInfo.Create(windowMode, windowSize, _framebufferSize, nativeResolution);
 	}
 
 	private void PollGamepads()
@@ -1972,14 +2124,21 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		// Command processing is now handled by the render graph
 	}
 
-	private void OnFramebufferResize(Int2 newSize)
+	private void OnFramebufferResize(Int2 windowSize)
 	{
-		if (newSize.X == 0 || newSize.Y == 0)
+		if (windowSize.X == 0 || windowSize.Y == 0)
 		{
 			return;
 		}
 
+		_windowFramebufferSize = windowSize;
 		if (_swapchain.Handle is null || _commandQueue.Handle is null || _fence.Handle is null)
+		{
+			return;
+		}
+
+		var newSize = ResolveBackbufferSize();
+		if (newSize == _framebufferSize)
 		{
 			return;
 		}
@@ -2094,7 +2253,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 		_gfxDevice.Submit(presentCommandList, GpuSubmissionKind.PrimaryFrame);
 
-		var vsyncEnabled = Screen.VSyncEnabled;
+		var vsyncEnabled = _vsyncRequested;
 		var presentInterval = vsyncEnabled ? 1u : 0u;
 		// The tearing flag is only legal at SyncInterval 0 on a swapchain created with SwapChainFlag.AllowTearing.
 		var presentFlags = !vsyncEnabled && _allowTearing ? PresentAllowTearing : 0u;

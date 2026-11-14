@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.AssetPipeline;
 
@@ -47,7 +48,18 @@ public sealed class WolfEngineBuildConfig
 public sealed class CookedRuntimeSettings
 {
 	public string Title { get; set; } = "WolfEngine Game";
+
+	/// <summary>
+	/// How the game starts. Fullscreen covers the display at its native resolution and ignores
+	/// <see cref="Width"/> and <see cref="Height"/>. Settings files written before this existed omit it and start
+	/// fullscreen.
+	/// </summary>
+	public WindowMode WindowMode { get; set; } = WindowMode.Fullscreen;
+
+	/// <summary>The window's width in points when the game starts windowed.</summary>
 	public int Width { get; set; } = 1280;
+
+	/// <summary>The window's height in points when the game starts windowed.</summary>
 	public int Height { get; set; } = 720;
 	public float FixedDeltaTime { get; set; } = 1.0f / 60.0f;
 	public int MaxPhysicsStepsPerFrame { get; set; } = 4;

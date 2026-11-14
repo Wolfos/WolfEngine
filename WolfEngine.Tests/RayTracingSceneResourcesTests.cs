@@ -2075,6 +2075,7 @@ public sealed class RayTracingSceneResourcesTests
 		public IGfxDevice GetGfxDevice() => _device;
 		public Int2 GetFrameBufferSize() => throw new NotSupportedException();
 		public Int2 GetWindowSize() => throw new NotSupportedException();
+		public bool VSyncEnabled { get; set; } = true;
 		public void BeginFrame() => throw new NotSupportedException();
 		public void Render(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle finalColor) => throw new NotSupportedException();
 		public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height) => throw new NotSupportedException();

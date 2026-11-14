@@ -9,10 +9,12 @@ namespace WolfEngine.Editor.UI;
 public class ProfilerWindow: EditorWindow
 {
 	private readonly GpuProfiler _gpuProfiler;
+	private readonly IGraphicsSettings _graphicsSettings;
 
-	public ProfilerWindow(GpuProfiler gpuProfiler)
+	public ProfilerWindow(GpuProfiler gpuProfiler, IGraphicsSettings graphicsSettings)
 	{
 		_gpuProfiler = gpuProfiler;
+		_graphicsSettings = graphicsSettings;
 	}
 
 	public override string Name => "Profiler";
@@ -64,12 +66,13 @@ public class ProfilerWindow: EditorWindow
 		ImGui.EndTabBar();
 	}
 
-	private static void DrawCpuProfiler(bool spike)
+	private void DrawCpuProfiler(bool spike)
 	{
-		var vsyncEnabled = Screen.VSyncEnabled;
+		var settings = _graphicsSettings.Current;
+		var vsyncEnabled = settings.VSync;
 		if (ImGui.Checkbox("VSync", ref vsyncEnabled))
 		{
-			Screen.VSyncEnabled = vsyncEnabled;
+			_graphicsSettings.Apply(settings with { VSync = vsyncEnabled });
 		}
 
 		ImGui.Separator();
