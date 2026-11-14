@@ -1,0 +1,14 @@
+@using global::WolfEngine.AssetPipeline
+
+<div style="flex-direction: row; align-items: center; background-color: #102030ff;">
+    <img style="@IconStyle" src="@Icon" />
+    <img src="@Path" />
+</div>
+
+@code {
+    [Parameter] public AssetRef<global::WolfEngine.Texture> Icon { get; set; }
+
+    [Parameter] public string IconStyle { get; set; } = string.Empty;
+
+    [Parameter] public string? Path { get; set; }
+}

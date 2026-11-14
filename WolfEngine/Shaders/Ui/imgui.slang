@@ -47,6 +47,13 @@ PixelInput vertexShader(VertexInput input)
     return output;
 }
 
+float3 LinearToSrgb(float3 linearColor)
+{
+    float3 low = linearColor * 12.92;
+    float3 high = 1.055 * pow(max(linearColor, float3(0.0)), float3(1.0 / 2.4)) - 0.055;
+    return select(linearColor <= float3(0.0031308), low, high);
+}
+
 float4 fragmentShader(PixelInput input) : SV_TARGET
 {
     // Solid geometry can share the atlas batch without being textured.
@@ -71,6 +78,8 @@ float4 fragmentShader(PixelInput input) : SV_TARGET
     }
     // The texture's alpha holds data rather than coverage, so only the vertex alpha blends.
     if (sampleTexture == 3) return float4(input.Color.rgb * sampled.rgb, input.Color.a);
+    // Sampling an sRGB texture decodes it to linear, but the UI blends in sRGB space: encode it back.
+    if (sampleTexture == 4) return input.Color * float4(LinearToSrgb(sampled.rgb), sampled.a);
     return input.Color * sampled;
 }
 

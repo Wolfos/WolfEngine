@@ -19,11 +19,15 @@ internal sealed class UiNode
 	public float Width { get; set; }
 	public float Height { get; set; }
 	public UiTextLayout? TextLayout { get; set; }
+
+	/// <summary>The texture an <c>&lt;img&gt;</c> element shows, resolved from its <c>src</c>.</summary>
+	public Texture? Image { get; set; }
 	public UiInsets ResolvedPadding { get; set; }
 
 	public string? Id => Attributes.TryGetValue("id", out var value) ? value?.ToString() : null;
 	public string? Classes => Attributes.TryGetValue("class", out var value) ? value?.ToString() : null;
 	public bool IsText => string.Equals(Name, "#text", StringComparison.Ordinal);
+	public bool IsImage => string.Equals(Name, "img", StringComparison.Ordinal);
 
 	public void Reset(string name)
 	{
@@ -31,6 +35,7 @@ internal sealed class UiNode
 		Identity = 0; Key = null; Hovered = Active = false; Events.Clear();
 		Text = null;
 		TextLayout = null;
+		Image = null;
 		Attributes.Clear();
 		Children.Clear();
 		Style = ComputedStyle.Default;
@@ -70,10 +75,12 @@ internal static class UiTreeReconciler
 		}
 
 		var textChanged = !string.Equals(retained.Text, updated.Text, StringComparison.Ordinal);
-		var intrinsicSizeChanged = textChanged;
+		var imageChanged = ReferenceEquals(retained.Image, updated.Image) == false;
+		var intrinsicSizeChanged = textChanged || ImageSizeChanged(retained.Image, updated.Image);
 		var layoutChanged = !LayoutStyleEquals(retained.Style, updated.Style);
-		var visualChanged = textChanged || !Equals(retained.Style, updated.Style);
+		var visualChanged = textChanged || imageChanged || !Equals(retained.Style, updated.Style);
 		retained.Text = updated.Text;
+		retained.Image = updated.Image;
 		retained.Identity = updated.Identity; retained.Key = updated.Key;
 		retained.Hovered = updated.Hovered; retained.Active = updated.Active;
 		retained.Events.Clear(); foreach (var pair in updated.Events) retained.Events[pair.Key] = pair.Value;
@@ -89,6 +96,23 @@ internal static class UiTreeReconciler
 			visualChanged |= childChanges.VisualChanged;
 		}
 		return new UiTreeChanges(true, layoutChanged, intrinsicSizeChanged, visualChanged);
+	}
+
+	/// <summary>An image only affects layout through its size, so swapping icons of one size skips Yoga.</summary>
+	private static bool ImageSizeChanged(Texture? previous, Texture? next)
+	{
+		if (ReferenceEquals(previous, next))
+		{
+			return false;
+		}
+
+		if (previous is null || next is null)
+		{
+			return true;
+		}
+
+		return previous.Width != next.Width ||
+		       previous.Height != next.Height;
 	}
 
 	internal static bool LayoutStyleEquals(ComputedStyle left, ComputedStyle right) =>

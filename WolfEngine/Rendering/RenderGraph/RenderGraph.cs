@@ -996,6 +996,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			_gameplayUiFrame = latestGameplayUi;
 		}
 
+		RequestGameplayUiImages(_gameplayUiFrame);
+
 		// The primary view always records, as it did when it was the only one; any other view records
 		// when the published snapshot carries an entry for it. The render thread must not create
 		// entries: the snapshot has been published and belongs to the game thread's view list.
@@ -1277,6 +1279,40 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		lock (_resourceSync)
 		{
 			_pendingTextures.Add(texture);
+		}
+	}
+
+	/// <summary>
+	/// UI images are texture assets, so they are uploaded through the same pending-texture path as material
+	/// textures. Runs every frame rather than only for a new UI frame, because a retained frame can still show
+	/// a texture whose resources were replaced since.
+	/// </summary>
+	private void RequestGameplayUiImages(GameplayUiRenderFrame frame)
+	{
+		RequestUiImages(frame.Screen);
+
+		for (var i = 0; i < frame.TextureSurfaces.Length; i++)
+		{
+			RequestUiImages(frame.TextureSurfaces[i].Frame);
+		}
+	}
+
+	private void RequestUiImages(UiFrameData frame)
+	{
+		for (var i = 0; i < frame.CommandCount; i++)
+		{
+			var image = frame.Commands[i].Image;
+			if (image is null)
+			{
+				continue;
+			}
+
+			if (image.HasGpuResources || image.ResourceRequestPending)
+			{
+				continue;
+			}
+
+			EnsureTextureResources(image);
 		}
 	}
 

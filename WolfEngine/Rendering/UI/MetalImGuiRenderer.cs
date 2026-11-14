@@ -27,6 +27,7 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 	private MetalTexture? _fontTexture;
 	private DescriptorHandle _fontHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
+	private DescriptorHandle _imageSamplerHandle = DescriptorHandle.Invalid;
 	private ShaderPropertyWriter? _projectionWriter;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private readonly List<UiBufferSet> _availableBuffers = new();
@@ -138,6 +139,7 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 			?? throw new InvalidOperationException("Metal ImGui bindless writer was not initialized.");
 		uint activeTextureHandle = 0;
 		var hasActiveTextureHandle = false;
+		uint activeSamplerHandle = 0;
 		uint activeMode = uint.MaxValue;
 		float activeRange = -1;
 
@@ -152,18 +154,36 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 		for (var i = 0; i < frame.CommandCount; i++)
 		{
 			var cmd = frame.Commands[i];
-			var textureHandle = cmd.Atlas?.Resources?.ShaderResourceView.Value ?? ResolveTextureHandle(cmd.TextureId);
-			var mode = cmd.Atlas is not null ? 2u : cmd.Solid ? 0u : !_sampleTexture ? 0u : cmd.Opaque ? 3u : 1u;
-			if (!hasActiveTextureHandle || textureHandle != activeTextureHandle || mode != activeMode || cmd.DistanceRange != activeRange)
+
+			// An image is uploaded by the render graph; until it is, there is nothing to draw.
+			if (cmd.IsWaitingForImage)
+			{
+				continue;
+			}
+
+			var textureHandle = cmd.SampledResources?.ShaderResourceView.Value ?? ResolveTextureHandle(cmd.TextureId);
+			var mode = cmd.ResolveSampleMode(_sampleTexture);
+
+			// Images are usually drawn far below their source size, so they need mip filtering. Atlases are not
+			// mipmapped and keep the plain bilinear sampler.
+			var samplerHandle = cmd.Image is not null
+				? _imageSamplerHandle.Value
+				: _samplerHandle.Value;
+			if (hasActiveTextureHandle == false ||
+			    textureHandle != activeTextureHandle ||
+			    samplerHandle != activeSamplerHandle ||
+			    mode != activeMode ||
+			    cmd.DistanceRange != activeRange)
 			{
 				bindlessWriter.Clear();
 				bindlessWriter.SetUInt("textureHandle", textureHandle);
-				bindlessWriter.SetUInt("samplerHandle", _samplerHandle.Value);
+				bindlessWriter.SetUInt("samplerHandle", samplerHandle);
 				bindlessWriter.SetUInt("sampleTexture", mode);
 				bindlessWriter.SetFloat("distanceRange", cmd.DistanceRange);
 				commandList.SetGraphicsConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 				activeTextureHandle = textureHandle;
 				hasActiveTextureHandle = true;
+				activeSamplerHandle = samplerHandle;
 				activeMode = mode;
 				activeRange = cmd.DistanceRange;
 			}
@@ -364,6 +384,12 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 		{
 			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
 			_samplerHandle = _bindlessRegistry.GetSamplerHandle(sampler);
+		}
+
+		if (_imageSamplerHandle.IsValid == false)
+		{
+			var imageSampler = new SamplerDescriptor(FilterMode.Trilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
+			_imageSamplerHandle = _bindlessRegistry.GetSamplerHandle(imageSampler);
 		}
 	}
 

@@ -57,6 +57,9 @@ public sealed class CookedRuntimeSettings
 public sealed class WolfBootstrapManifest
 {
 	public Dictionary<string, Guid> FontSources { get; set; } = new(StringComparer.Ordinal);
+
+	/// <summary>Texture source paths gameplay UI names, such as <c>Assets/UI/Potion.png</c>, by packed node id.</summary>
+	public Dictionary<string, Guid> TextureSources { get; set; } = new(StringComparer.Ordinal);
 	public const int CurrentVersion = 1;
 	public int Version { get; set; } = CurrentVersion;
 	public string Target { get; set; } = string.Empty;

@@ -112,6 +112,44 @@ clipped quads are skipped, and adjacent geometry with identical clip/material
 state stays batched. Rounded-corner clipping, separate overflow axes and scrolling
 are not implemented yet.
 
+## Images
+
+`<img>` and `background-image` draw texture assets. Reference a texture either way:
+
+```razor
+<img src="/Assets/UI/Potion.png" />   @* a project texture source path *@
+<img src="@item.Icon" />              @* an AssetRef<Texture> *@
+```
+
+```css
+.panel {
+    background-image: url("/Assets/UI/Panel.png");
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+```
+
+A build packs every texture whose path appears whole in the gameplay assembly
+(including Razor markup) or in a CSS `url()`. A path assembled at run time, such as
+`$"/Assets/Icons/{name}.png"`, is only packed if that exact path also appears
+somewhere as a literal; prefer an `AssetRef<Texture>` on the data instead. An
+`AssetRef` arrives as `asset:<node id>`, because Blazor turns every HTML attribute
+value into a string, and is packed through the data that references it. A CSS
+`url()` that names no texture fails the build.
+
+An `<img>` takes its texture's size in CSS pixels. Set one side and the other
+follows the aspect ratio; set both and it stretches (`object-fit: fill`).
+
+Backgrounds follow the browser's initial values: `background-size: auto`,
+`background-position: 0% 0%` and `background-repeat: repeat`. Supported values are
+`background-size: auto | cover | contain | <length-or-%> [<length-or-%>]`,
+one- or two-value `background-position` keywords, percentages and lengths, and
+`background-repeat: repeat | no-repeat | repeat-x | repeat-y`. The background is
+drawn over the background colour and under the children. The `background`
+shorthand, `round`/`space`, edge offsets such as `right 10px`, gradients and
+rounded-corner clipping of images are not supported.
+
 ## Diagnostics
 
 Unsupported properties and unsupported/invalid values emit a warning once per

@@ -232,7 +232,16 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 		for (var i = 0; i < frame.CommandCount; i++)
 		{
 			var cmd = frame.Commands[i];
-			var textureId = cmd.Atlas?.Resources is { } atlasResources ? (nint)atlasResources.ShaderResourceView.Value : cmd.TextureId;
+
+			// An image is uploaded by the render graph; until it is, there is nothing to draw.
+			if (cmd.IsWaitingForImage)
+			{
+				continue;
+			}
+
+			var textureId = cmd.SampledResources is { } sampledResources
+				? (nint)sampledResources.ShaderResourceView.Value
+				: cmd.TextureId;
 			if (hasActiveTexture == false || textureId != activeTextureId)
 			{
 				ResolveTextureBinding(textureId, out var heap, out var textureHandle);
@@ -244,7 +253,7 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 			}
 			var draw = _drawWriter!;
 			draw.Clear();
-			draw.SetUInt("sampleTexture", cmd.Atlas is not null ? 2u : cmd.Solid ? 0u : !_sampleTexture ? 0u : cmd.Opaque ? 3u : 1u);
+			draw.SetUInt("sampleTexture", cmd.ResolveSampleMode(_sampleTexture));
 			draw.SetFloat("distanceRange", cmd.DistanceRange);
 			fixed (byte* constants = draw.AsBytes()) native->SetGraphicsRoot32BitConstants(2, (uint)draw.AsBytes().Length / 4, constants, 0);
 

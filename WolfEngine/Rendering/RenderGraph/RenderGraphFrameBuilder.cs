@@ -3457,6 +3457,13 @@ internal sealed class RenderGraphFrameBuilder
 			target.Texture,
 			clearTarget: true,
 			target.Surface.ClearColor);
+
+		// A surface recorded before its images were uploaded is redrawn once they are.
+		if (target.Surface.Frame.HasPendingImages())
+		{
+			return;
+		}
+
 		_gameplayUiRenderer.MarkRendered(target.Surface);
 	}
 

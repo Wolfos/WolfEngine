@@ -15,7 +15,17 @@ internal sealed class UiFrameBuilder
 	};
 	private readonly UiGeometryBuilder _geometry = new();
 	private readonly UiTextService _text;
-	public UiFrameBuilder(UiTextService? text = null) => _text = text ?? new UiTextService();
+	private readonly UiImageSources _images;
+	private readonly List<UiBackgroundTile> _backgroundTiles = [];
+	private readonly HashSet<string> _tileLimitWarnings = new(StringComparer.Ordinal);
+	private float _viewportWidth;
+	private float _viewportHeight;
+
+	public UiFrameBuilder(UiTextService? text = null, UiImageSources? images = null)
+	{
+		_text = text ?? new UiTextService();
+		_images = images ?? new UiImageSources();
+	}
 
 	/// <summary>
 	/// Turns a laid-out tree into geometry.
@@ -31,6 +41,8 @@ internal sealed class UiFrameBuilder
 	public UiFrameData Build(UiNode root, int outputWidth, int outputHeight, float scale = 1.0f)
 	{
 		_geometry.Prepare();
+		_viewportWidth = root.Width;
+		_viewportHeight = root.Height;
 		try
 		{
 			Append(_geometry, root, 1, scale, new Vector4(0, 0, outputWidth, outputHeight));
@@ -55,6 +67,22 @@ internal sealed class UiFrameBuilder
 				new Vector2(node.Left + node.Width, node.Top + node.Height) * scale,
 				Pack(WithOpacity(node.Style.Background, opacity)),
 				MathF.Max(0, node.Style.BorderRadius) * scale);
+		}
+		if (node.Style.BackgroundImage is { } backgroundReference && node.Width > 0 && node.Height > 0 && opacity > 0.001f)
+		{
+			AppendBackgroundImage(geometry, node, backgroundReference, opacity, scale);
+		}
+		if (node.Image is { } image && node.Width > 0 && node.Height > 0 && opacity > 0.001f)
+		{
+			// The texture is stretched over the border box, which is CSS's default object-fit: fill. With
+			// intrinsic sizing that is the texture's own aspect ratio unless CSS sets both sides.
+			geometry.AddImage(
+				new Vector2(node.Left, node.Top) * scale,
+				new Vector2(node.Left + node.Width, node.Top + node.Height) * scale,
+				Vector2.Zero,
+				Vector2.One,
+				Pack(WithOpacity(new ColorRGBA(1, 1, 1, 1), opacity)),
+				image);
 		}
 		if (node.IsText && !string.IsNullOrEmpty(node.Text))
 		{
@@ -85,6 +113,52 @@ internal sealed class UiFrameBuilder
 		for (var i = 0; i < node.Children.Count; i++) Append(geometry, node.Children[i], opacity, scale, clip);
 	}
 
+	/// <summary>Draws a CSS background image over the element's box, above its background colour.</summary>
+	private void AppendBackgroundImage(UiGeometryBuilder geometry, UiNode node, string reference, float opacity, float scale)
+	{
+		var texture = _images.Resolve(reference);
+		if (texture is null)
+		{
+			return;
+		}
+
+		var style = node.Style;
+		var boxMin = new Vector2(node.Left, node.Top);
+		var boxMax = boxMin + new Vector2(node.Width, node.Height);
+		_backgroundTiles.Clear();
+
+		var laidOut = UiBackgrounds.Layout(
+			boxMin,
+			boxMax,
+			texture.Width,
+			texture.Height,
+			style.BackgroundSize,
+			style.BackgroundPosition,
+			style.BackgroundRepeat,
+			_viewportWidth,
+			_viewportHeight,
+			style.FontSize,
+			style.RootFontSize,
+			_backgroundTiles);
+
+		if (laidOut == false)
+		{
+			if (_tileLimitWarnings.Add(reference))
+			{
+				Console.Error.WriteLine(
+					$"[Gameplay UI] Background '{reference}' would repeat into more than {UiBackgrounds.MaxTiles} tiles and is not drawn. Make it larger with background-size or use no-repeat.");
+			}
+
+			return;
+		}
+
+		var color = Pack(WithOpacity(new ColorRGBA(1, 1, 1, 1), opacity));
+		foreach (var tile in _backgroundTiles)
+		{
+			geometry.AddImage(tile.Min * scale, tile.Max * scale, tile.UvMin, tile.UvMax, color, texture);
+		}
+	}
+
 	private static uint Pack(ColorRGBA value)
 	{
 		var r = (uint)Math.Clamp((int)MathF.Round(value.R * 255), 0, 255);
@@ -110,7 +184,7 @@ internal sealed class UiGeometryBuilder : IDisposable
 	private int _vertexCount;
 	private int _indexCount;
 	private bool _transferred;
-	private readonly List<(Texture? Atlas, float Range, Vector4? Clip, int Start)> _batches = [];
+	private readonly List<(Texture? Atlas, Texture? Image, float Range, Vector4? Clip, int Start)> _batches = [];
 	private Vector4? _clip;
 	public void SetClip(Vector4 clip) => _clip = clip;
 
@@ -135,7 +209,7 @@ internal sealed class UiGeometryBuilder : IDisposable
 	public void AddFilledRect(Vector2 min, Vector2 max, uint color, float radius = 0)
 	{
 		if (max.X <= min.X || max.Y <= min.Y || OutsideClip(min, max)) return;
-		BeginBatch(_batches.Count == 0 ? null : _batches[^1].Atlas, _batches.Count == 0 ? 0 : _batches[^1].Range);
+		BeginSolidBatch();
 		var clampedRadius = MathF.Min(MathF.Max(radius, 0), MathF.Min(max.X - min.X, max.Y - min.Y) * 0.5f);
 		if (clampedRadius < 0.5f)
 		{
@@ -185,16 +259,67 @@ internal sealed class UiGeometryBuilder : IDisposable
 		_indices[_indexCount++] = first + 3;
 	}
 
-	private void BeginBatch(Texture? atlas, float range)
+	private void BeginBatch(Texture? atlas, Texture? image, float range)
 	{
-		if (_batches.Count > 0 && ReferenceEquals(_batches[^1].Atlas, atlas) && _batches[^1].Range == range && _batches[^1].Clip == _clip) return;
-		_batches.Add((atlas, range, _clip, _indexCount));
+		if (_batches.Count > 0 &&
+		    ReferenceEquals(_batches[^1].Atlas, atlas) &&
+		    ReferenceEquals(_batches[^1].Image, image) &&
+		    _batches[^1].Range == range &&
+		    _batches[^1].Clip == _clip)
+		{
+			return;
+		}
+
+		_batches.Add((atlas, image, range, _clip, _indexCount));
+	}
+
+	/// <summary>
+	/// Solid geometry joins the previous font batch, because the shader draws a negative UV untextured whatever
+	/// the batch samples. It never joins an image batch: an image batch is skipped until its texture is uploaded,
+	/// and the solid shapes in it would vanish with it.
+	/// </summary>
+	private void BeginSolidBatch()
+	{
+		if (_batches.Count == 0 || _batches[^1].Image is not null)
+		{
+			BeginBatch(null, null, 0);
+			return;
+		}
+
+		BeginBatch(_batches[^1].Atlas, null, _batches[^1].Range);
+	}
+
+	/// <summary>Adds a quad that samples <paramref name="image"/> from <paramref name="uvMin"/> to <paramref name="uvMax"/>.</summary>
+	public void AddImage(Vector2 min, Vector2 max, Vector2 uvMin, Vector2 uvMax, uint color, Texture image)
+	{
+		ArgumentNullException.ThrowIfNull(image);
+
+		if (max.X <= min.X || max.Y <= min.Y || OutsideClip(min, max))
+		{
+			return;
+		}
+
+		BeginBatch(null, image, 0);
+		EnsureVertices(4);
+		EnsureIndices(6);
+
+		var first = (uint)_vertexCount;
+		_vertices[_vertexCount++] = new UiVertex(min, uvMin, color);
+		_vertices[_vertexCount++] = new UiVertex(new Vector2(max.X, min.Y), new Vector2(uvMax.X, uvMin.Y), color);
+		_vertices[_vertexCount++] = new UiVertex(max, uvMax, color);
+		_vertices[_vertexCount++] = new UiVertex(new Vector2(min.X, max.Y), new Vector2(uvMin.X, uvMax.Y), color);
+		_indices[_indexCount++] = first;
+		_indices[_indexCount++] = first + 1;
+		_indices[_indexCount++] = first + 2;
+		_indices[_indexCount++] = first;
+		_indices[_indexCount++] = first + 2;
+		_indices[_indexCount++] = first + 3;
 	}
 
 	public void AddGlyph(Vector2 min, Vector2 max, Vector2 uvMin, Vector2 uvMax, uint color, Texture atlas, float range)
 	{
 		if (OutsideClip(min, max)) return;
-		BeginBatch(atlas, range);
+		BeginBatch(atlas, null, range);
 		EnsureVertices(4); EnsureIndices(6);
 		var first = (uint)_vertexCount;
 		_vertices[_vertexCount++] = new UiVertex(min, uvMin, color);
@@ -231,7 +356,11 @@ internal sealed class UiGeometryBuilder : IDisposable
 				batch.Start,
 				0,
 				batch.Clip ?? new Vector4(0, 0, width, height),
-				UiTextureIds.FontAtlas, batch.Atlas, batch.Range, solid: batch.Atlas is null);
+				UiTextureIds.FontAtlas,
+				batch.Atlas,
+				batch.Range,
+				solid: batch.Atlas is null && batch.Image is null,
+				image: batch.Image);
 		}
 
 		_transferred = true;

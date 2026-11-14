@@ -124,8 +124,14 @@ public static class GameBuilder
 			AddSerializedDependencies(asset, graph);
 
 		var fontSources = ResolveCssFonts(gameplayDll, database);
+		var textureSources = ResolveUiTextures(gameplayDll, database);
 		var cooker = CreateContentCooker(gameplayDll);
-		var roots = sceneIds.Concat(config.GetExplicitAssetIds()).Concat(fontSources.Values).Distinct().ToArray();
+		var roots = sceneIds
+			.Concat(config.GetExplicitAssetIds())
+			.Concat(fontSources.Values)
+			.Concat(textureSources.Values)
+			.Distinct()
+			.ToArray();
 		var closure = ComputeClosure(roots, database, graph);
 		var contentRoot = Path.Combine(staging, "Content");
 		Directory.CreateDirectory(contentRoot);
@@ -167,6 +173,7 @@ public static class GameBuilder
 		var manifest = new WolfBootstrapManifest
 		{
 			FontSources = fontSources,
+			TextureSources = textureSources,
 			Target = target.Rid,
 			RuntimeVersion = Environment.Version.ToString(),
 			BuildConfiguration = configuration,
@@ -516,6 +523,58 @@ public static class GameBuilder
 				result[source] = candidates[0].Asset.Id;
 			}
 		}
+		return result;
+	}
+
+	/// <summary>
+	/// Textures gameplay UI names by path. A path in a CSS <c>url()</c> must be a texture source, as a font URL must
+	/// be a font. A literal elsewhere in the gameplay assembly is only a candidate: most strings that look like
+	/// paths name something else, so the ones that are not texture sources are ignored.
+	/// </summary>
+	internal static Dictionary<string, Guid> ResolveUiTextures(string assemblyPath, Dictionary<Guid, MountedAsset> database)
+	{
+		var textures = new Dictionary<string, Guid>(StringComparer.Ordinal);
+		foreach (var asset in database.Values)
+		{
+			var isProjectTexture = asset.Mount.Id == "project" &&
+				asset.Asset.Type == AssetType.Texture2D &&
+				string.Equals(asset.Asset.RelativeSourcePath, asset.Asset.RelativeAssetPath, StringComparison.Ordinal);
+			if (isProjectTexture == false)
+			{
+				continue;
+			}
+
+			if (textures.TryAdd(asset.Asset.RelativeSourcePath, asset.Asset.Id) == false)
+			{
+				throw new InvalidOperationException($"Texture source '/{asset.Asset.RelativeSourcePath}' is imported more than once.");
+			}
+		}
+
+		var result = new Dictionary<string, Guid>(StringComparer.Ordinal);
+		var assembly = System.Reflection.Assembly.Load(File.ReadAllBytes(assemblyPath));
+		foreach (var resource in assembly.GetManifestResourceNames().Where(n => n.EndsWith(".css", StringComparison.OrdinalIgnoreCase)))
+		{
+			using var stream = assembly.GetManifestResourceStream(resource)!;
+			using var reader = new StreamReader(stream);
+			foreach (var source in TextureSourceReferences.FindInCss(reader.ReadToEnd()))
+			{
+				if (textures.TryGetValue(source, out var id) == false)
+				{
+					throw new InvalidOperationException($"CSS resource '{resource}' references missing texture '/{source}'.");
+				}
+
+				result[source] = id;
+			}
+		}
+
+		foreach (var source in TextureSourceReferences.FindInAssembly(assemblyPath))
+		{
+			if (textures.TryGetValue(source, out var id))
+			{
+				result[source] = id;
+			}
+		}
+
 		return result;
 	}
 
