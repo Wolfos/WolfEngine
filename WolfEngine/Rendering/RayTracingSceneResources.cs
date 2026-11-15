@@ -233,6 +233,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	/// so it is marked for a full build; the replaced resources are retired, since frames in flight trace them.
 	/// </summary>
 	/// <returns>True when the TLAS was replaced.</returns>
+	[System.Diagnostics.CodeAnalysis.MemberNotNull(nameof(_topLevelAccelerationStructure))]
 	private bool EnsureTopLevelCapacity(IGfxDevice device, int instanceCount)
 	{
 		var deviceChanged = ReferenceEquals(_sidecarDevice, device) == false;

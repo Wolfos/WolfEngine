@@ -36,7 +36,10 @@ public class MetalIndirectCompactionKernelTests
 	[Test]
 	public void CompactionDrawGeometry_MatchesTheKernelsDeclaration()
 	{
+		// Only reflects over the struct layout; no Metal API runs, so this is safe on every platform.
+#pragma warning disable CA1416
 		AssertUintFieldsMatch<Rendering.Backend.Metal.MetalIndirectCommandBuffer.CompactionDrawGeometry>("IndirectDrawGeometry");
+#pragma warning restore CA1416
 	}
 
 	[Test]
