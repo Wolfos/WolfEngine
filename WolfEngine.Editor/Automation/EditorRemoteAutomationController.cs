@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using WolfEngine.Editor.Tooling.Imaging;
 using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
@@ -1166,8 +1165,7 @@ public sealed partial class EditorRemoteAutomationController
 				var fullOutputPath = ResolveOutputPath(outputPath);
 				var capture = await _renderer.CaptureNextFrameAsync(target, cancellationToken).ConfigureAwait(false);
 				Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
-				using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
-				image.SaveAsPng(fullOutputPath);
+				new RgbaImage(capture.Width, capture.Height, capture.Rgba8).SavePng(fullOutputPath);
 				return new FrameCaptureResult(fullOutputPath, capture.Width, capture.Height,
 					_editorFrameCoordinator.CompletedSequence, _renderFrameCoordinator.CompletedSequence);
 			}, cancellationToken).ConfigureAwait(false);

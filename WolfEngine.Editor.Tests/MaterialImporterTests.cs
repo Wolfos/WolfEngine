@@ -2,8 +2,7 @@ using System.Reflection;
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using WolfEngine.Editor.Tooling.Imaging;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Importing;
@@ -44,12 +43,12 @@ public sealed class MaterialImporterTests
 
 		var sourceDirectory = Path.Combine(projectRoot, "SourceTextures");
 		Directory.CreateDirectory(sourceDirectory);
-		var albedoPath = CreateTexture(sourceDirectory, "albedo.png", new Rgba32(255, 0, 0, 255));
-		var normalPath = CreateTexture(sourceDirectory, "normal.png", new Rgba32(128, 128, 255, 255));
-		var metallicPath = CreateTexture(sourceDirectory, "metallic.png", new Rgba32(0, 0, 64, 255));
-		var roughnessPath = CreateTexture(sourceDirectory, "roughness.png", new Rgba32(0, 128, 0, 255));
-		var emissivePath = CreateTexture(sourceDirectory, "emissive.png", new Rgba32(16, 32, 64, 255));
-		var occlusionPath = CreateTexture(sourceDirectory, "occlusion.png", new Rgba32(200, 0, 0, 255));
+		var albedoPath = CreateTexture(sourceDirectory, "albedo.png", new RgbaPixel(255, 0, 0, 255));
+		var normalPath = CreateTexture(sourceDirectory, "normal.png", new RgbaPixel(128, 128, 255, 255));
+		var metallicPath = CreateTexture(sourceDirectory, "metallic.png", new RgbaPixel(0, 0, 64, 255));
+		var roughnessPath = CreateTexture(sourceDirectory, "roughness.png", new RgbaPixel(0, 128, 0, 255));
+		var emissivePath = CreateTexture(sourceDirectory, "emissive.png", new RgbaPixel(16, 32, 64, 255));
+		var occlusionPath = CreateTexture(sourceDirectory, "occlusion.png", new RgbaPixel(200, 0, 0, 255));
 
 		var result = importer.ImportMaterial(new MaterialImportRequest
 		{
@@ -108,11 +107,11 @@ public sealed class MaterialImporterTests
 		Assert.That(settings.TextureSemantic, Is.EqualTo(expectedSemantic));
 	}
 
-	private static string CreateTexture(string directory, string fileName, Rgba32 color)
+	private static string CreateTexture(string directory, string fileName, RgbaPixel color)
 	{
 		var path = Path.Combine(directory, fileName);
-		using var image = new Image<Rgba32>(2, 2, color);
-		image.SaveAsPng(path);
+		var image = new RgbaImage(2, 2, color);
+		image.SavePng(path);
 		return path;
 	}
 

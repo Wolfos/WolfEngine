@@ -2,8 +2,7 @@ using System.Numerics;
 using HarfBuzzSharp;
 using Remora.MSDFGen;
 using Remora.MSDFGen.Graphics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using WolfEngine.Editor.Tooling.Imaging;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using Buffer = HarfBuzzSharp.Buffer;
@@ -90,12 +89,9 @@ public sealed class FontCompiler : IFontCompiler
 		var atlasPath = Path.Combine(outputDirectory, $"atlas-{revision}.png");
 		var previewPath = Path.Combine(outputDirectory, $"preview-{revision}.png");
 		// Opaque RGB export makes the field inspectable; alpha in the artifact is the true signed distance.
-		using (var atlas = Image.LoadPixelData<Rgba32>(pixels, summary.Width, summary.Height))
-		{
-			for (var ay = 0; ay < atlas.Height; ay++) for (var ax = 0; ax < atlas.Width; ax++)
-				atlas[ax, ay] = new Rgba32(atlas[ax, ay].R, atlas[ax, ay].G, atlas[ax, ay].B, 255);
-			atlas.SaveAsPng(atlasPath);
-		}
+		var atlas = new RgbaImage(summary.Width, summary.Height, (byte[])pixels.Clone());
+		for (var alpha = 3; alpha < atlas.Pixels.Length; alpha += 4) atlas.Pixels[alpha] = 255;
+		atlas.SavePng(atlasPath);
 		FontPreview.Write(font, artifact, previewPath);
 		return new FontCompilationResult(artifactPath, atlasPath, previewPath, summary);
 	}

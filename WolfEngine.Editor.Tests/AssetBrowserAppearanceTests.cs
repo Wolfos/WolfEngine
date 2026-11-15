@@ -2,7 +2,7 @@ using NSubstitute;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
-using SixLabors.ImageSharp;
+using WolfEngine.Editor.Tooling.Imaging;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -17,8 +17,8 @@ public sealed class AssetBrowserAppearanceTests
 			var path = Path.Combine(TestContext.CurrentContext.TestDirectory, "Assets", "Icons", appearance.Icon + ".png");
 			Assert.That(appearance.Label, Is.Not.Empty, type.ToString());
 			Assert.That(File.Exists(path), Is.True, path);
-			var info = Image.Identify(path);
-			Assert.That(info.Size, Is.EqualTo(new Size(24, 24)), path);
+			var size = RgbaImage.Identify(path);
+			Assert.That(size, Is.EqualTo((24, 24)), path);
 		}
 	}
 
