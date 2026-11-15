@@ -50,6 +50,30 @@ public sealed class WolfPackTests
 	}
 
 	[Test]
+	public void BuildConfig_KeepsTheEngineSplashScreenWhenTheSettingIsAbsent()
+	{
+		var config = JsonSerializer.Deserialize<WolfEngineBuildConfig>(
+			"""{ "Version": 3, "SceneIds": [] }""",
+			AssetJson.SerializerOptions)!;
+
+		Assert.That(config.ShowEngineSplashScreen, Is.True);
+	}
+
+	[Test]
+	public void BuildConfig_RoundTripsAnEngineSplashScreenOptOut()
+	{
+		var config = new WolfEngineBuildConfig
+		{
+			ShowEngineSplashScreen = false
+		};
+
+		var json = JsonSerializer.Serialize(config, AssetJson.SerializerOptions);
+		var read = JsonSerializer.Deserialize<WolfEngineBuildConfig>(json, AssetJson.SerializerOptions)!;
+
+		Assert.That(read.ShowEngineSplashScreen, Is.False);
+	}
+
+	[Test]
 	public void Writer_IsByteDeterministicAndCanonical()
 	{
 		var a = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");

@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WolfEngine.Editor.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
     <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
     <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />

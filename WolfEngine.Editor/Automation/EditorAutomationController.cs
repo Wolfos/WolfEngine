@@ -1,5 +1,4 @@
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using WolfEngine.Editor.Tooling.Imaging;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
@@ -73,6 +72,11 @@ public sealed class EditorAutomationController
 			{
 				Fail(3, "Gameplay assembly could not be loaded.");
 				return;
+			}
+
+			if (gameplay.BuildFailureOutput is { } buildFailureOutput)
+			{
+				Console.WriteLine(GameplayStaleBuildMessage.Create(buildFailureOutput));
 			}
 
 			var relativeScenePath = NormalizeProjectPath(_options.ScenePath);
@@ -172,8 +176,7 @@ public sealed class EditorAutomationController
 			{
 				var capture = _captureTask.GetAwaiter().GetResult();
 				Directory.CreateDirectory(Path.GetDirectoryName(GetCapturePath())!);
-				using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
-				image.SaveAsPng(GetCapturePath());
+				new RgbaImage(capture.Width, capture.Height, capture.Rgba8).SavePng(GetCapturePath());
 				Console.WriteLine($"capture success scene={_options.ScenePath} frames={_completedFrames} resolution={capture.Width}x{capture.Height} path={GetCapturePath()}");
 				_captureTask = null;
 				_captureCompleted = true;

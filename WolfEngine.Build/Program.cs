@@ -8,6 +8,8 @@ using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Audio;
 using WolfEngine.Editor.Tooling;
+using WolfEngine.Editor.Tooling.Splash;
+using WolfEngine.Rendering.Splash;
 using WolfEngine.Serialization;
 
 namespace WolfEngine.Build;
@@ -40,6 +42,7 @@ public static class GameBuilder
 	private static readonly Guid GameplayAssemblyId = new("ca55e2d4-f348-5e92-a173-00f3f1d2bda4");
 	private static readonly Guid GameplaySymbolsId = new("ca55e2d4-f348-5e92-a173-00f3f1d2bda5");
 	private static readonly Guid RuntimeSettingsId = new("e1317bc4-b53c-59ea-982f-3b8170b61f10");
+	private static readonly Guid SplashScreenId = new("5a1a5c4e-0b6f-4e57-9c1d-77f0e3a2b8d1");
 
 	public static GameBuildResult Build(GameBuildContext context, GameBuildOptions options)
 	{
@@ -102,7 +105,14 @@ public static class GameBuilder
 		Console.WriteLine($"Building for {target.Rid}.");
 		if (target.PublishesDesktopRuntime)
 		{
-			PublishDesktopRuntime(engineSolutionRoot, configuration, target.Rid, config.SelfContained, staging, options.Debug);
+			PublishDesktopRuntime(
+				engineSolutionRoot,
+				configuration,
+				target.Rid,
+				config.SelfContained,
+				GetExecutableName(projectRoot, config.ExecutableName),
+				staging,
+				options.Debug);
 		}
 
 		var graph = catalog.Mounts.SelectMany(mount => mount.Dependencies)
@@ -114,8 +124,14 @@ public static class GameBuilder
 			AddSerializedDependencies(asset, graph);
 
 		var fontSources = ResolveCssFonts(gameplayDll, database);
+		var textureSources = ResolveUiTextures(gameplayDll, database);
 		var cooker = CreateContentCooker(gameplayDll);
-		var roots = sceneIds.Concat(config.GetExplicitAssetIds()).Concat(fontSources.Values).Distinct().ToArray();
+		var roots = sceneIds
+			.Concat(config.GetExplicitAssetIds())
+			.Concat(fontSources.Values)
+			.Concat(textureSources.Values)
+			.Distinct()
+			.ToArray();
 		var closure = ComputeClosure(roots, database, graph);
 		var contentRoot = Path.Combine(staging, "Content");
 		Directory.CreateDirectory(contentRoot);
@@ -125,6 +141,9 @@ public static class GameBuilder
 			.ToDictionary(group => group.Key, group => group.ToList());
 
 		var shaderSources = CookShaders(provider, target.Backend);
+		// Compute shader assets the game references share the pack with the engine's shaders.
+		if (groups.TryGetValue("shaders", out var computeShaderSources))
+			shaderSources.AddRange(computeShaderSources);
 		groups["shaders"] = shaderSources;
 		groups["bootstrap"] =
 		[
@@ -135,6 +154,16 @@ public static class GameBuilder
 				JsonSerializer.SerializeToUtf8Bytes(config.RuntimeSettings, EngineJsonContext.Default.CookedRuntimeSettings),
 				[])
 		];
+		if (config.ShowEngineSplashScreen)
+		{
+			groups["bootstrap"].Add(new WolfPackSource(
+				SplashScreenId,
+				SplashScreenSerializer.Kind,
+				SplashScreenSerializer.Write(SplashScreenBaker.Bake(
+					SplashScreenBaker.GetSourceDirectory(Path.Combine(engineSolutionRoot, "WolfEngine")))),
+				[]));
+		}
+
 		if (options.Debug)
 		{
 			groups["bootstrap"].Add(
@@ -144,13 +173,15 @@ public static class GameBuilder
 		var manifest = new WolfBootstrapManifest
 		{
 			FontSources = fontSources,
+			TextureSources = textureSources,
 			Target = target.Rid,
 			RuntimeVersion = Environment.Version.ToString(),
 			BuildConfiguration = configuration,
 			InitialSceneId = sceneIds[0],
 			GameplayAssemblyId = GameplayAssemblyId,
 			GameplaySymbolsId = options.Debug ? GameplaySymbolsId : Guid.Empty,
-			RuntimeSettingsId = RuntimeSettingsId
+			RuntimeSettingsId = RuntimeSettingsId,
+			SplashScreenId = config.ShowEngineSplashScreen ? SplashScreenId : Guid.Empty
 		};
 		foreach (var group in groups.OrderBy(group => group.Key, StringComparer.Ordinal))
 		{
@@ -184,7 +215,10 @@ public static class GameBuilder
 			..(options.Debug
 				? new[] { new WolfManifestRoot { Kind = "GameplaySymbols", Id = GameplaySymbolsId } }
 				: []),
-			new WolfManifestRoot { Kind = "RuntimeSettings", Id = RuntimeSettingsId }
+			new WolfManifestRoot { Kind = "RuntimeSettings", Id = RuntimeSettingsId },
+			..(config.ShowEngineSplashScreen
+				? new[] { new WolfManifestRoot { Kind = SplashScreenSerializer.Kind, Id = SplashScreenId } }
+				: [])
 		];
 		File.WriteAllBytes(Path.Combine(contentRoot, "bootstrap.wolfmanifest"),
 			JsonSerializer.SerializeToUtf8Bytes(manifest, EngineJsonContext.Default.WolfBootstrapManifest));
@@ -225,6 +259,12 @@ public static class GameBuilder
 			path = asset.Artifacts.FirstOrDefault(item => item.Kind == ColorLookupTableArtifactSerializer.ArtifactKind)?.RelativePath
 			       ?? throw new InvalidOperationException($"Colour lookup table '{asset.Id}' has no runtime artifact.");
 		}
+		else if (asset.Type == AssetType.ComputeShader)
+		{
+			// Shader targets are named like texture targets, one per backend.
+			path = asset.Artifacts.FirstOrDefault(item => item.Kind == ComputeShaderArtifactSerializer.ArtifactKind && item.Target == textureTarget)?.RelativePath
+			       ?? throw new InvalidOperationException($"Compute shader '{asset.Name}' has no {textureTarget} kernels. Reimport it on this platform.");
+		}
 		else
 		{
 			path = asset.RelativeAssetPath;
@@ -260,9 +300,10 @@ public static class GameBuilder
 		{
 			if (element.ValueKind == JsonValueKind.Object)
 			{
+				var isAssetRefShape = element.EnumerateObject().Count() == 1;
 				foreach (var property in element.EnumerateObject())
 				{
-					var isAssetReference = property.NameEquals("NodeId")
+					var isAssetReference = (property.NameEquals("NodeId") && isAssetRefShape)
 					                       || property.NameEquals("PrefabAssetId")
 					                       || property.NameEquals("CellId")
 					                       || property.NameEquals("GlobalCellId");
@@ -324,11 +365,13 @@ public static class GameBuilder
 	private static string GetPackName(AssetType type) => type switch
 	{
 		AssetType.Texture2D or AssetType.ColorLookupTable => "textures",
-		AssetType.Mesh or AssetType.Model3D or AssetType.Skeleton or AssetType.AnimationClip => "meshes-models",
+		AssetType.Mesh or AssetType.Model3D or AssetType.Skeleton or AssetType.AnimationClip
+			or AssetType.AnimationGraph or AssetType.AnimationSet or AssetType.BoneMask => "meshes-models",
 		AssetType.Scene or AssetType.SceneCell or AssetType.Prefab => "scenes-prefabs",
 		AssetType.Material or AssetType.DataAsset or AssetType.Terrain => "materials-data-terrain",
 		AssetType.AudioClip => "audio",
 		AssetType.Font => "fonts",
+		AssetType.ComputeShader => "shaders",
 		_ => throw new InvalidOperationException($"Asset type '{type}' has no cooked pack class.")
 	};
 
@@ -358,6 +401,7 @@ public static class GameBuilder
 		string configuration,
 		string rid,
 		bool selfContained,
+		string executableName,
 		string staging,
 		bool debug)
 	{
@@ -374,6 +418,12 @@ public static class GameBuilder
 			selfContained ? "true" : "false",
 			"--output",
 			staging,
+			// The executable carries the game's name. A global AssemblyName would also rename every referenced engine
+			// project, so the runtime project maps this property onto its own. The .NET runtime and the managed
+			// assemblies are bundled into it. Native libraries stay beside it: Silk.NET only finds GLFW there, not in
+			// the temporary folder a bundle extracts them to.
+			$"-p:WolfEngineGameName={executableName}",
+			"-p:PublishSingleFile=true",
 			"/m:1"
 		};
 		AddSymbolProperties(publishArgs, debug);
@@ -387,6 +437,42 @@ public static class GameBuilder
 			if (Directory.Exists(leakedPath))
 				Directory.Delete(leakedPath, true);
 		}
+
+		// The self-contained runtime's crash dump writer, which only runs when crash dumps are enabled through
+		// environment variables. A shipped game does not use it.
+		foreach (var createDump in new[] { "createdump", "createdump.exe" })
+		{
+			var createDumpPath = Path.Combine(staging, createDump);
+			if (File.Exists(createDumpPath))
+				File.Delete(createDumpPath);
+		}
+
+		// Native packages such as HarfBuzzSharp ship their own symbols, which a build without debug symbols drops.
+		if (!debug)
+		{
+			foreach (var symbols in Directory.EnumerateFiles(staging, "*.pdb"))
+				File.Delete(symbols);
+		}
+	}
+
+	/// <summary>
+	/// The game's executable is named after its project, whose folder carries the name it was created with. Characters
+	/// MSBuild would read as property separators are replaced.
+	/// </summary>
+	/// <summary>
+	/// The executable's file name: <paramref name="configuredName"/>, or the project folder's name when that is
+	/// empty, with characters that are unsafe in file names replaced.
+	/// </summary>
+	internal static string GetExecutableName(string projectRoot, string? configuredName = null)
+	{
+		var projectName = string.IsNullOrWhiteSpace(configuredName)
+			? Path.GetFileName(Path.TrimEndingDirectorySeparator(projectRoot))
+			: configuredName.Trim();
+		var name = new string(projectName
+			.Select(character => char.IsLetterOrDigit(character) || character is ' ' or '-' or '_' or '.' ? character : '_')
+			.ToArray()).Trim(' ', '.');
+
+		return name.Length == 0 ? "Game" : name;
 	}
 
 	private static string GetCurrentRid()
@@ -437,6 +523,58 @@ public static class GameBuilder
 				result[source] = candidates[0].Asset.Id;
 			}
 		}
+		return result;
+	}
+
+	/// <summary>
+	/// Textures gameplay UI names by path. A path in a CSS <c>url()</c> must be a texture source, as a font URL must
+	/// be a font. A literal elsewhere in the gameplay assembly is only a candidate: most strings that look like
+	/// paths name something else, so the ones that are not texture sources are ignored.
+	/// </summary>
+	internal static Dictionary<string, Guid> ResolveUiTextures(string assemblyPath, Dictionary<Guid, MountedAsset> database)
+	{
+		var textures = new Dictionary<string, Guid>(StringComparer.Ordinal);
+		foreach (var asset in database.Values)
+		{
+			var isProjectTexture = asset.Mount.Id == "project" &&
+				asset.Asset.Type == AssetType.Texture2D &&
+				string.Equals(asset.Asset.RelativeSourcePath, asset.Asset.RelativeAssetPath, StringComparison.Ordinal);
+			if (isProjectTexture == false)
+			{
+				continue;
+			}
+
+			if (textures.TryAdd(asset.Asset.RelativeSourcePath, asset.Asset.Id) == false)
+			{
+				throw new InvalidOperationException($"Texture source '/{asset.Asset.RelativeSourcePath}' is imported more than once.");
+			}
+		}
+
+		var result = new Dictionary<string, Guid>(StringComparer.Ordinal);
+		var assembly = System.Reflection.Assembly.Load(File.ReadAllBytes(assemblyPath));
+		foreach (var resource in assembly.GetManifestResourceNames().Where(n => n.EndsWith(".css", StringComparison.OrdinalIgnoreCase)))
+		{
+			using var stream = assembly.GetManifestResourceStream(resource)!;
+			using var reader = new StreamReader(stream);
+			foreach (var source in TextureSourceReferences.FindInCss(reader.ReadToEnd()))
+			{
+				if (textures.TryGetValue(source, out var id) == false)
+				{
+					throw new InvalidOperationException($"CSS resource '{resource}' references missing texture '/{source}'.");
+				}
+
+				result[source] = id;
+			}
+		}
+
+		foreach (var source in TextureSourceReferences.FindInAssembly(assemblyPath))
+		{
+			if (textures.TryGetValue(source, out var id))
+			{
+				result[source] = id;
+			}
+		}
+
 		return result;
 	}
 

@@ -58,7 +58,7 @@ public sealed class AnimationAssetSerializerTests
 	}
 
 	[Test]
-	public void AnimationClipSerializer_RoundTripsBoneAndPropertyTracks()
+	public void AnimationClipSerializer_RoundTripsTracksCurvesAndMarkers()
 	{
 		var written = new ImportedAnimationClipAssetFile
 		{
@@ -66,6 +66,8 @@ public sealed class AnimationAssetSerializerTests
 			Duration = 1.25f,
 			FramesPerSecond = 24.0f,
 			Loop = true,
+			Curves = [new() { Name = "Glow", Times = [0, 1], Values = [0, 2], Interpolation = CurveInterpolation.CubicHermite, InTangents = [0, 0], OutTangents = [1, 2] }],
+			Markers = [new() { Name = "Step", Time = .5f }],
 			SourceSkeletonName = "rig",
 			SourceBindPoseLocal = [BoneTransform.Identity],
 			TransformTracks =
@@ -96,6 +98,8 @@ public sealed class AnimationAssetSerializerTests
 		Assert.Multiple(() =>
 		{
 			Assert.That(read.Name, Is.EqualTo("walk"));
+			Assert.That(read.ToClip().Curves.Single().OutTangents, Is.EqualTo(new[] { 1f, 2f }));
+			Assert.That(read.ToClip().Markers.Single().Time, Is.EqualTo(.5f));
 			Assert.That(read.Duration, Is.EqualTo(1.25f).Within(1e-6f));
 			Assert.That(read.FramesPerSecond, Is.EqualTo(24.0f).Within(1e-6f));
 			Assert.That(read.SourceSkeletonName, Is.EqualTo("rig"));
@@ -110,6 +114,31 @@ public sealed class AnimationAssetSerializerTests
 			Assert.That(read.PropertyTracks[0].Curve.OutTangents, Is.EqualTo(new[] { 1.0f, 1.0f }));
 			Assert.That(read.ToClip().NonBoneTransformTrackCount, Is.EqualTo(1));
 		});
+	}
+
+	[Test]
+	public void AnimationClipSerializer_ReadsVersionOneWithoutAnnotations()
+	{
+		var path = Path.Combine(_directory, "legacy.anim.bin");
+		using (var writer = new BinaryWriter(File.Create(path)))
+		{
+			writer.Write("WEAN"u8);
+			writer.Write(1);
+			writer.Write("Legacy");
+			writer.Write(1f);
+			writer.Write(30f);
+			writer.Write(true);
+			writer.Write("");
+			writer.Write(0); // Bind pose.
+			writer.Write(0); // Transform tracks.
+			writer.Write(0); // Property tracks.
+		}
+
+		var clip = AnimationClipSerializer.Read(path).ToClip();
+
+		Assert.That(clip.Name, Is.EqualTo("Legacy"));
+		Assert.That(clip.Curves, Is.Empty);
+		Assert.That(clip.Markers, Is.Empty);
 	}
 
 	[Test]

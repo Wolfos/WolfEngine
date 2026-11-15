@@ -4,122 +4,160 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
+public enum EditorReferenceKind
+{
+	Asset,
+	Entity
+}
+
 public class EditorUIUtility
 {
-	private const float MinLabelWidth = 96.0f;
-	private const float MaxLabelWidth = 320.0f;
-	private const float LabelWidthFraction = 0.35f;
-	private const float MinimumControlWidth = 140.0f;
-
 	public static bool DrawLabeledField(string label, Func<bool> drawControl)
 	{
-		BeginLabeledField(label);
-		var changed = drawControl();
-		EndLabeledField();
-		return changed;
+		using var field = new EditorField(label);
+		using var controlStyle = new EditorFieldControlStyle();
+
+		return drawControl();
 	}
 
 	public static bool InputText(string label, ref string value, uint maxLength = 256)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.InputText("##value", ref value, maxLength);
-		EndLabeledField();
-		return changed;
+		using var field = new EditorField(label);
+		using var controlStyle = new EditorFieldControlStyle();
+
+		return ImGui.InputText("##value", ref value, maxLength);
 	}
 
 	public static bool InputFloat(string label, ref float value)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.InputFloat("##value", ref value);
-		EndLabeledField();
-		return changed;
+		using var field = new EditorField(label);
+		using var controlStyle = new EditorFieldControlStyle();
+
+		return ImGui.InputFloat("##value", ref value);
 	}
 
 	public static bool InputInt(string label, ref int value)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.InputInt("##value", ref value);
-		EndLabeledField();
-		return changed;
+		using var field = new EditorField(label);
+		using var controlStyle = new EditorFieldControlStyle();
+
+		return ImGui.InputInt("##value", ref value);
 	}
 
 	public static bool InputDouble(string label, ref double value)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.InputDouble("##value", ref value);
-		EndLabeledField();
-		return changed;
+		using var field = new EditorField(label);
+		using var controlStyle = new EditorFieldControlStyle();
+
+		return ImGui.InputDouble("##value", ref value);
 	}
 
 	public static bool Checkbox(string label, ref bool value)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.Checkbox("##value", ref value);
-		EndLabeledField();
-		return changed;
+		ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(ImGui.GetStyle().FramePadding.X, EditorField.ControlPaddingY));
+		try
+		{
+			return ImGui.Checkbox(label, ref value);
+		}
+		finally
+		{
+			ImGui.PopStyleVar();
+		}
 	}
 
 	public static bool InputVector2(string label, ref Vector2 value)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.InputFloat2("##value", ref value);
-		EndLabeledField();
+		Span<float> components = stackalloc float[] { value.X, value.Y };
+		var changed = EditorCompoundFields.InputVector(label, components);
+		if (changed)
+		{
+			value = new Vector2(components[0], components[1]);
+		}
+
 		return changed;
 	}
 
 	public static bool InputVector3(string label, ref Vector3 value)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.InputFloat3("##value", ref value);
-		EndLabeledField();
+		Span<float> components = stackalloc float[] { value.X, value.Y, value.Z };
+		var changed = EditorCompoundFields.InputVector(label, components);
+		if (changed)
+		{
+			value = new Vector3(components[0], components[1], components[2]);
+		}
+
 		return changed;
 	}
 
 	public static bool InputVector4(string label, ref Vector4 value)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.InputFloat4("##value", ref value);
-		EndLabeledField();
+		Span<float> components = stackalloc float[] { value.X, value.Y, value.Z, value.W };
+		var changed = EditorCompoundFields.InputVector(label, components);
+		if (changed)
+		{
+			value = new Vector4(components[0], components[1], components[2], components[3]);
+		}
+
 		return changed;
 	}
 
 	public static bool ColorEdit4(string label, ref Vector4 value)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.ColorEdit4("##value", ref value);
-		EndLabeledField();
+		using var field = new EditorField(label, compound: true);
+		using var controlStyle = new EditorFieldControlStyle(preserveFrames: true);
+		var compact = EditorCompoundFields.UseCompactColorPreview(field.ContentWidth, 4);
+		var changed = ImGui.ColorEdit4("##value", ref value, compact ? ImGuiColorEditFlags.NoInputs : ImGuiColorEditFlags.None);
+		if (compact)
+		{
+			EditorCompoundFields.DrawColorPreview(value, alpha: true);
+		}
+
 		return changed;
 	}
 
 	public static bool ColorEdit3(string label, ref Vector3 value)
 	{
-		BeginLabeledField(label);
-		var changed = ImGui.ColorEdit3("##value", ref value);
-		EndLabeledField();
+		using var field = new EditorField(label, compound: true);
+		using var controlStyle = new EditorFieldControlStyle(preserveFrames: true);
+		var compact = EditorCompoundFields.UseCompactColorPreview(field.ContentWidth, 3);
+		var changed = ImGui.ColorEdit3("##value", ref value, compact ? ImGuiColorEditFlags.NoInputs : ImGuiColorEditFlags.None);
+		if (compact)
+		{
+			EditorCompoundFields.DrawColorPreview(new Vector4(value, 1.0f), alpha: false);
+		}
+
 		return changed;
 	}
 
 	public static bool Combo(string label, string previewValue, Action drawItems)
 	{
-		BeginLabeledField(label);
-		var isOpen = ImGui.BeginCombo("##value", previewValue);
-		if (isOpen == false)
-		{
-			EndLabeledField();
-			return false;
-		}
-
+		var field = new EditorField(label);
+		var isOpen = false;
 		try
 		{
-			drawItems();
+			using (new EditorFieldControlStyle())
+			{
+				isOpen = ImGui.BeginCombo("##value", previewValue);
+			}
+
+			if (isOpen)
+			{
+				try
+				{
+					drawItems();
+				}
+				finally
+				{
+					ImGui.EndCombo();
+				}
+			}
+
+			return isOpen;
 		}
 		finally
 		{
-			ImGui.EndCombo();
-			EndLabeledField();
+			field.End(isOpen);
 		}
-
-		return true;
 	}
 
 	public static bool PopupButton(
@@ -128,33 +166,50 @@ public class EditorUIUtility
 		string popupId,
 		Vector2 popupSize,
 		Action drawPopupContents,
-		Action? drawTrailingControl = null)
+		Action? drawTrailingControl = null,
+		EditorReferenceKind referenceKind = EditorReferenceKind.Asset)
 	{
-		BeginLabeledField(label);
+		var field = new EditorField(label, referenceKind: referenceKind);
+		var popupOpen = false;
 		try
 		{
-			var trailingControlWidth = drawTrailingControl is null ? 0.0f : ImGui.GetFrameHeight();
-			var itemSpacing = drawTrailingControl is null ? 0.0f : ImGui.GetStyle().ItemSpacing.X;
-			var buttonSize = new Vector2(MathF.Max(1.0f, ImGui.GetContentRegionAvail().X - trailingControlWidth - itemSpacing), 0.0f);
-			ImGui.PushStyleVar(ImGuiStyleVar.ButtonTextAlign, new Vector2(0.0f, 0.5f));
-			try
+			using (new EditorFieldControlStyle())
 			{
-				if (ImGui.Button($"{previewValue}##value", buttonSize))
+				var trailingControlWidth = drawTrailingControl is null ? 0.0f : ImGui.GetFrameHeight();
+				var itemSpacing = drawTrailingControl is null ? 0.0f : ImGui.GetStyle().ItemSpacing.X;
+				var buttonSize = new Vector2(
+					MathF.Max(1.0f, field.ContentWidth - trailingControlWidth - itemSpacing),
+					0.0f);
+				ImGui.PushStyleVar(ImGuiStyleVar.ButtonTextAlign, new Vector2(0.0f, 0.5f));
+				ImGui.PushStyleColor(
+					ImGuiCol.Text,
+					referenceKind == EditorReferenceKind.Asset ? EditorPalette.Primary : EditorPalette.EntityReference);
+				try
 				{
-					ImGui.OpenPopup(popupId);
+					if (ImGui.Button($"{previewValue}###value", buttonSize))
+					{
+						ImGui.OpenPopup(popupId);
+					}
+
+					if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal))
+					{
+						ImGui.SetTooltip(previewValue);
+					}
+				}
+				finally
+				{
+					ImGui.PopStyleColor();
+					ImGui.PopStyleVar();
+				}
+
+				if (drawTrailingControl is not null)
+				{
+					ImGui.SameLine(0.0f, itemSpacing);
+					drawTrailingControl();
 				}
 			}
-			finally
-			{
-				ImGui.PopStyleVar();
-			}
 
-			if (drawTrailingControl is not null)
-			{
-				ImGui.SameLine(0.0f, itemSpacing);
-				drawTrailingControl();
-			}
-
+			popupOpen = ImGui.IsPopupOpen(popupId);
 			ImGui.SetNextWindowSize(popupSize, ImGuiCond.Appearing);
 			if (ImGui.BeginPopup(popupId) == false)
 			{
@@ -174,7 +229,7 @@ public class EditorUIUtility
 		}
 		finally
 		{
-			EndLabeledField();
+			field.End(popupOpen);
 		}
 	}
 
@@ -225,38 +280,5 @@ public class EditorUIUtility
 	public static void EndIndentedGroup()
 	{
 		ImGui.Unindent();
-	}
-
-	private static void BeginLabeledField(string label)
-	{
-		ImGui.PushID(label);
-		var startX = ImGui.GetCursorPosX();
-		var labelWidth = CalculateLabelWidth(label);
-		ImGui.AlignTextToFramePadding();
-		ImGui.TextUnformatted(label);
-		ImGui.SameLine();
-		ImGui.SetCursorPosX(startX + labelWidth);
-		ImGui.SetNextItemWidth(MathF.Max(1.0f, ImGui.GetContentRegionAvail().X));
-	}
-
-	private static void EndLabeledField()
-	{
-		ImGui.PopID();
-	}
-
-	private static float CalculateLabelWidth(string label)
-	{
-		var availableWidth = ImGui.GetContentRegionAvail().X;
-		var itemSpacing = ImGui.GetStyle().ItemSpacing.X;
-		var desiredWidth = ImGui.CalcTextSize(label).X + itemSpacing;
-		if (availableWidth <= 0.0f)
-		{
-			return Math.Clamp(desiredWidth, MinLabelWidth, MaxLabelWidth);
-		}
-
-		// Scale the label column with panel width, but keep enough room for the editor control.
-		var responsiveWidth = Math.Clamp(availableWidth * LabelWidthFraction, MinLabelWidth, MaxLabelWidth);
-		var maxAllowedWidth = MathF.Max(MinLabelWidth, availableWidth - MinimumControlWidth);
-		return MathF.Min(MathF.Max(desiredWidth, responsiveWidth), maxAllowedWidth);
 	}
 }

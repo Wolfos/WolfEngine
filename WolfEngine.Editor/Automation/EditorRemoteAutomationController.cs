@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using WolfEngine.Editor.Tooling.Imaging;
 using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
@@ -14,11 +13,12 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Build;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Editor.Automation;
 
 /// <summary>Direct in-process automation API. Mutations are dispatched onto the editor thread.</summary>
-public sealed class EditorRemoteAutomationController
+public sealed partial class EditorRemoteAutomationController
 {
 	private readonly string _projectPath;
 	private readonly EditorCameraSystem _cameraSystem;
@@ -29,6 +29,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorPlaySession _playSession;
 	private readonly SceneLoadRequests _sceneLoadRequests;
+	private readonly IApplicationQuitService _quitService;
 	private readonly IInputSystem _inputSystem;
 	private readonly IImGuiInputSink _imguiInput;
 	private readonly IEditorInteractionState _interactionState;
@@ -50,6 +51,11 @@ public sealed class EditorRemoteAutomationController
 	private bool _initialized;
 
 	private readonly IGameBuildService _gameBuildService;
+	private readonly AnimationClipEditorSession _clipEditor;
+	private readonly VfxService _vfx;
+	private readonly VfxAssetEditor _vfxEditor;
+	private readonly Rendering.Splash.SplashScreen _splashScreen;
+	private readonly Rendering.Shaders.EngineShaderOptions _engineShaderOptions;
 
 	public EditorRemoteAutomationController(
 		string projectPath,
@@ -75,9 +81,21 @@ public sealed class EditorRemoteAutomationController
 		EditorCameraSystem cameraSystem,
 		IImGuiInputSink imguiInput,
 		SceneLoadRequests sceneLoadRequests,
-		IGameBuildService gameBuildService)
+		IApplicationQuitService quitService,
+		IGameBuildService gameBuildService,
+		AnimationClipEditorSession clipEditor,
+		VfxService vfx,
+		VfxAssetEditor vfxEditor,
+		Rendering.Splash.SplashScreen splashScreen,
+		Rendering.Shaders.EngineShaderOptions engineShaderOptions)
 	{
+		_splashScreen = splashScreen;
+		_engineShaderOptions = engineShaderOptions;
+		_clipEditor = clipEditor;
+		_vfx = vfx;
+		_vfxEditor = vfxEditor;
 		_sceneLoadRequests = sceneLoadRequests;
+		_quitService = quitService;
 		_gameBuildService = gameBuildService;
 		_cameraSystem = cameraSystem;
 		_viewportStateBus = viewportStateBus;
@@ -118,15 +136,38 @@ public sealed class EditorRemoteAutomationController
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
-			if (!_workspaces.TryCreate(name, out _, out var error)) throw new InvalidOperationException(error);
+			if (!_workspaces.TryCreate(name, EditorDocumentKind.Scene, out _, out var error)) throw new InvalidOperationException(error);
 			return CreateWorkspaceState();
 		}, cancellationToken);
 
-	public Task<EditorWorkspaceStateResult> RenameWorkspaceAsync(string workspaceId, string name, CancellationToken cancellationToken) =>
+	/// <summary>Renames a workspace and, when <paramref name="ownedDocument"/> is given, changes the document it owns.</summary>
+	public Task<EditorWorkspaceStateResult> ConfigureWorkspaceAsync(
+		string workspaceId,
+		string name,
+		string? ownedDocument,
+		CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
-			if (!Guid.TryParse(workspaceId, out var id)) throw new InvalidOperationException("workspace_id must be a GUID.");
-			if (!_workspaces.TryRename(id, name, out var error)) throw new InvalidOperationException(error);
+			if (Guid.TryParse(workspaceId, out var id) == false)
+			{
+				throw new InvalidOperationException("workspace_id must be a GUID.");
+			}
+
+			var workspace = _workspaces.Workspaces.FirstOrDefault(candidate => candidate.Id == id) ??
+				throw new InvalidOperationException("Workspace was not found.");
+			var kind = workspace.OwnedDocument;
+			if (ownedDocument is not null &&
+			    (Enum.TryParse(ownedDocument, ignoreCase: true, out kind) == false || Enum.IsDefined(kind) == false))
+			{
+				throw new InvalidOperationException(
+					$"owned_document must be one of: {string.Join(", ", Enum.GetNames<EditorDocumentKind>())}.");
+			}
+
+			if (_workspaces.TryConfigure(id, name, kind, out var error) == false)
+			{
+				throw new InvalidOperationException(error);
+			}
+
 			return CreateWorkspaceState();
 		}, cancellationToken);
 
@@ -155,7 +196,11 @@ public sealed class EditorRemoteAutomationController
 	private EditorWorkspaceStateResult CreateWorkspaceState() => new(
 		_workspaces.ActiveWorkspace.Id,
 		_workspaces.Workspaces.Select(workspace => new EditorWorkspaceSummaryResult(
-			workspace.Id, workspace.Name, workspace.OpenWindows.OrderBy(id => id, StringComparer.Ordinal).ToArray())).ToArray(),
+			workspace.Id,
+			workspace.Name,
+			workspace.OwnedDocument.ToString(),
+			_commandService.GetDocument(workspace.OwnedDocument)?.IsDirty == true,
+			workspace.OpenWindows.OrderBy(id => id, StringComparer.Ordinal).ToArray())).ToArray(),
 		EditorPreferences.GetWorkspaceSettings()?.ImGuiSettings.Length ?? 0);
 
 	/// <summary>
@@ -206,6 +251,22 @@ public sealed class EditorRemoteAutomationController
 
 	private static string FormatDockId(uint dockId) => $"0x{dockId:X8}";
 
+	public Task<string> SetViewportFrameLimitAsync(int maxFramesPerSecond, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (maxFramesPerSecond < 0)
+			{
+				throw new ArgumentOutOfRangeException(nameof(maxFramesPerSecond), "The limit cannot be negative.");
+			}
+
+			// Automation runs on isolated preferences, so this does not touch the user's saved settings.
+			EditorPreferences.SetLimitFPS(maxFramesPerSecond > 0);
+			EditorPreferences.SetMaxFPS(maxFramesPerSecond);
+			return maxFramesPerSecond > 0
+				? $"Viewport limited to {EditorPreferences.GetMaxFPS()} FPS."
+				: "Viewport frame limit off.";
+		}, cancellationToken);
+
 	public Task<string> SetAntiAliasingAsync(string mode, bool enabled, bool casSharpening, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
@@ -224,6 +285,56 @@ public sealed class EditorRemoteAutomationController
 			settings.Taa = taa;
 			config.AntiAliasing = settings;
 			return $"Anti-aliasing: {selectedMode}, enabled: {enabled}, CAS: {settings.UsesCasSharpening}. Changed in memory only.";
+		}, cancellationToken);
+
+	public Task<string> SetRenderScaleAsync(float renderScale, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+			{
+				config = entry.First.RenderConfigAsset.Asset;
+			}
+
+			if (config is null)
+			{
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			}
+
+			config.RenderScale = renderScale;
+
+			return $"Render scale: {config.RenderScale}. Changed in memory only.";
+		}, cancellationToken);
+
+	public Task<string> SetFsr3SettingsAsync(
+		float alphaTestReactiveScale,
+		float transparencyAndCompositionMaskScale,
+		bool sharpening,
+		float sharpness,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+			{
+				config = entry.First.RenderConfigAsset.Asset;
+			}
+
+			if (config is null)
+			{
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			}
+
+			var settings = config.AntiAliasing;
+			settings.AlphaTestReactiveScale = alphaTestReactiveScale;
+			settings.TransparencyAndCompositionMaskScale = transparencyAndCompositionMaskScale;
+			settings.EnableSharpening = sharpening;
+			settings.Sharpness = sharpness;
+			config.AntiAliasing = settings;
+
+			return $"FSR3: alpha-test reactive {alphaTestReactiveScale}, composition mask {transparencyAndCompositionMaskScale}, RCAS {sharpening} at {sharpness}. Changed in memory only.";
 		}, cancellationToken);
 
 	public Task<string> SetRenderEffectsAsync(bool ambientOcclusion, bool reflections, bool diffuseGlobalIllumination,
@@ -296,6 +407,41 @@ public sealed class EditorRemoteAutomationController
 			return $"DDGI relocation: {enabled}. Changed in memory only.";
 		}, cancellationToken);
 
+	public Task<string> SetDdgiFinalGatherAsync(bool enabled, string resolution, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (Enum.TryParse<DdgiFinalGatherResolution>(resolution, ignoreCase: true, out var parsedResolution) == false)
+				throw new ArgumentException($"Unknown DDGI final gather resolution '{resolution}'. Use Full, Half or Quarter.", nameof(resolution));
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			var settings = config.DiffuseGlobalIllumination;
+			var finalGather = settings.FinalGather;
+			finalGather.Enabled = enabled;
+			finalGather.Resolution = parsedResolution;
+			settings.FinalGather = finalGather;
+			config.DiffuseGlobalIllumination = settings;
+			return $"DDGI final gather: {enabled} at {parsedResolution} resolution. Changed in memory only.";
+		}, cancellationToken);
+
+	public Task<string> SetIndirectLightMinimumAsync(float minimum, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			var settings = config.Lighting;
+			settings.IndirectLightMinimum = minimum;
+			config.Lighting = settings;
+			return $"Indirect light minimum: {minimum}. Changed in memory only.";
+		}, cancellationToken);
+
 	public Task SetEntityRotationAsync(Guid entityId, Vector3 eulerDegrees, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
@@ -335,7 +481,12 @@ public sealed class EditorRemoteAutomationController
 		try
 		{
 			if (_projectService.OpenProject(_projectPath, out var error) == false) throw new InvalidOperationException(error);
-			_gameplayAssemblyHost.EnsureLoaded();
+			var gameplayLoad = _gameplayAssemblyHost.EnsureLoaded();
+			if (gameplayLoad.BuildFailureOutput is { } buildFailureOutput)
+			{
+				Console.WriteLine(GameplayStaleBuildMessage.Create(buildFailureOutput));
+			}
+
 			_ready.TrySetResult();
 		}
 		catch (Exception exception)
@@ -630,6 +781,16 @@ public sealed class EditorRemoteAutomationController
 	public Task<PlayModeStateResult> EnterPlayModeAsync(CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
+			if (_playSession.State == EditorPlayState.Paused)
+			{
+				if (_playSession.Resume() == false)
+				{
+					throw new InvalidOperationException("Could not resume Play mode.");
+				}
+
+				return GetPlayModeState();
+			}
+
 			if (_playSession.EnterPlay() == false)
 			{
 				throw new InvalidOperationException($"Cannot enter Play mode while the editor is {_playSession.State}.");
@@ -645,6 +806,50 @@ public sealed class EditorRemoteAutomationController
 				throw new InvalidOperationException($"Cannot pause Play mode while the editor is {_playSession.State}.");
 			}
 			return GetPlayModeState();
+		}, cancellationToken);
+
+	/// <summary>
+	/// Holds or releases the game pause reason in bit <paramref name="reasonIndex"/> on the Play-mode world, as gameplay
+	/// code does through <see cref="World.Pause"/> and <see cref="World.Resume"/>. This is the game's own pause, not the
+	/// editor's Pause.
+	/// </summary>
+	public Task<PlayModeStateResult> SetGamePauseAsync(int reasonIndex, bool paused, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var world = _playSession.RuntimeScene?.World ??
+			            throw new InvalidOperationException("Pausing the game requires Play mode.");
+			var reason = new PauseReason(reasonIndex);
+
+			if (paused)
+			{
+				world.Pause(reason);
+			}
+			else
+			{
+				world.Resume(reason);
+			}
+
+			return GetPlayModeState();
+		}, cancellationToken);
+
+	/// <summary>
+	/// Quits the way a gameplay Quit button does, through <see cref="IApplicationQuitService"/>, and reports the Play
+	/// state once the editor has handled the request: Play mode stops, and the editor stays open.
+	/// </summary>
+	public Task<PlayModeStateResult> QuitGameAsync(CancellationToken cancellationToken) =>
+		EnqueueAsync(async () =>
+		{
+			var world = _playSession.RuntimeScene?.World ??
+			            throw new InvalidOperationException("Quitting the game requires Play mode.");
+			_quitService.Quit(world);
+
+			// The editor takes the request later in this frame. The first completed scene frame may be the previous
+			// frame still in flight, so the second is the earliest that was published after the request was handled.
+			await _renderFrameCoordinator
+				.WaitForCompletedSceneFramesAsync(2, cancellationToken)
+				.ConfigureAwait(false);
+
+			return await Enqueue(GetPlayModeState, cancellationToken).ConfigureAwait(false);
 		}, cancellationToken);
 
 	public Task<PlayModeStateResult> StopPlayModeAsync(CancellationToken cancellationToken) =>
@@ -677,6 +882,77 @@ public sealed class EditorRemoteAutomationController
 		return System.Text.Json.JsonSerializer.Serialize(new { state.Visible, state.Focused, state.PointerAvailable, state.PointerCaptured,
 			NativeFocused = _inputSystem.PointerFocused, Origin = new[] { state.ImageMin.X, state.ImageMin.Y }, Size = new[] { state.ImageMax.X - state.ImageMin.X, state.ImageMax.Y - state.ImageMin.Y } });
 	}, cancellationToken);
+
+	public Task SetEditorPointerAsync(
+		Vector2 position,
+		bool? pressed,
+		int button,
+		float wheel,
+		CancellationToken cancellationToken,
+		float wheelX = 0.0f,
+		float magnification = 0.0f,
+		bool? control = null,
+		bool preciseScroll = false) =>
+		Enqueue(() =>
+		{
+			if (button < 0 || button > 2) throw new ArgumentOutOfRangeException(nameof(button));
+			if (float.IsFinite(position.X) == false ||
+				float.IsFinite(position.Y) == false ||
+				float.IsFinite(wheel) == false ||
+				float.IsFinite(wheelX) == false ||
+				float.IsFinite(magnification) == false ||
+				magnification <= -1.0f)
+			{
+				throw new ArgumentException("Pointer input must be finite and magnification must exceed -1.");
+			}
+
+			_imguiInput.SetMousePosition(position);
+			if (pressed.HasValue) _imguiInput.SetMouseButton(button, pressed.Value);
+			if (control.HasValue) _imguiInput.SetKey(ImGuiNET.ImGuiKey.LeftCtrl, control.Value);
+			if (wheel != 0.0f || wheelX != 0.0f)
+			{
+				var scroll = new Vector2(wheelX, wheel);
+				_imguiInput.AddMouseScroll(scroll, preciseScroll ? scroll * 35.0f : null);
+			}
+			if (magnification != 0.0f) _imguiInput.AddMouseMagnification(magnification);
+		}, cancellationToken);
+
+	public Task<AnimationGraphEditorState> GetAnimationEditorStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => AnimationEditor.GetEditorState(), cancellationToken);
+
+	public Task<AssetBrowserState> GetAssetBrowserStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => ((AssetsWindow)_windows.Get(EditorWindowIds.Assets).Window).GetBrowserState(), cancellationToken);
+
+	public Task ConfigureAssetBrowserAsync(
+		string folderPath,
+		string search,
+		Guid? expandedSourceId,
+		string subAssetSearch,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			_workspaces.Activate(EditorWorkspaceService.AssetsWorkspaceId);
+			_workspaces.OpenWindow(EditorWindowIds.Assets);
+			((AssetsWindow)_windows.Get(EditorWindowIds.Assets).Window).ConfigureBrowser(
+				folderPath,
+				search,
+				expandedSourceId,
+				subAssetSearch);
+		}, cancellationToken);
+
+	public Task SetEditorKeyAsync(string key, bool pressed, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (Enum.TryParse<ImGuiNET.ImGuiKey>(key, out var parsed) == false ||
+				Enum.IsDefined(parsed) == false ||
+				parsed < ImGuiNET.ImGuiKey.Tab ||
+				parsed >= ImGuiNET.ImGuiKey.GamepadStart)
+			{
+				throw new ArgumentException("Use an ImGui key name such as LeftShift, Space, Escape or Delete.", nameof(key));
+			}
+
+			_imguiInput.SetKey(parsed, pressed);
+		}, cancellationToken);
 
 	/// <summary>Injects a button binding through the same input system used by gameplay.</summary>
 	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>
@@ -718,10 +994,14 @@ public sealed class EditorRemoteAutomationController
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		EnqueueAsync(async () =>
 		{
-			var renderSequence = await _renderFrameCoordinator
-				.WaitForCompletedFramesAsync(frameCount, cancellationToken)
+			var sceneSequence = await _renderFrameCoordinator
+				.WaitForCompletedSceneFramesAsync(frameCount, cancellationToken)
 				.ConfigureAwait(false);
-			return new RenderFrameWaitResult(frameCount, _editorFrameCoordinator.CompletedSequence, renderSequence);
+			return new RenderFrameWaitResult(
+				frameCount,
+				_editorFrameCoordinator.CompletedSequence,
+				_renderFrameCoordinator.CompletedSequence,
+				sceneSequence);
 		}, cancellationToken);
 
 	public Task<TerrainLayerPaintResult> PaintTerrainLayerAsync(
@@ -792,9 +1072,17 @@ public sealed class EditorRemoteAutomationController
 
 	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
 		Enqueue(() => new EditorUndoResult(
-			_commandService.Undo(),
+			_commandService.SceneDocument.Undo(),
 			_editorFrameCoordinator.CompletedSequence,
 			_renderFrameCoordinator.CompletedSequence), cancellationToken);
+
+	public Task<GameplayStateResult> GetGameplayStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => new GameplayStateResult(
+			_gameplayAssemblyHost.CurrentGeneration,
+			_gameplayAssemblyHost.LoadedAssemblyPath,
+			_gameplayAssemblyHost.CheckSourceStale(),
+			_gameplayAssemblyHost.IsBuildInProgress,
+			_gameplayAssemblyHost.LastBuildFailedForCurrentSource), cancellationToken);
 
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneStateAsync(CancellationToken cancellationToken) =>
 		Enqueue(() =>
@@ -877,8 +1165,7 @@ public sealed class EditorRemoteAutomationController
 				var fullOutputPath = ResolveOutputPath(outputPath);
 				var capture = await _renderer.CaptureNextFrameAsync(target, cancellationToken).ConfigureAwait(false);
 				Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
-				using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
-				image.SaveAsPng(fullOutputPath);
+				new RgbaImage(capture.Width, capture.Height, capture.Rgba8).SavePng(fullOutputPath);
 				return new FrameCaptureResult(fullOutputPath, capture.Width, capture.Height,
 					_editorFrameCoordinator.CompletedSequence, _renderFrameCoordinator.CompletedSequence);
 			}, cancellationToken).ConfigureAwait(false);
@@ -1109,10 +1396,14 @@ public sealed class EditorRemoteAutomationController
 			: Path.Combine(_projectPath, outputPath));
 	}
 
-	private PlayModeStateResult GetPlayModeState() => new(
-		_playSession.State.ToString(),
-		_editorFrameCoordinator.CompletedSequence,
-		_renderFrameCoordinator.CompletedSequence);
+	private PlayModeStateResult GetPlayModeState()
+	{
+		return new PlayModeStateResult(
+			_playSession.State.ToString(),
+			_playSession.RuntimeScene?.World.PauseReasons ?? 0,
+			_editorFrameCoordinator.CompletedSequence,
+			_renderFrameCoordinator.CompletedSequence);
+	}
 
 	private static IReadOnlyList<GpuPassProfileResult> SummarizeGpuFrames(IReadOnlyList<GpuProfileFrame> frames)
 	{

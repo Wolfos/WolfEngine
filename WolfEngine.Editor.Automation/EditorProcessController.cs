@@ -122,6 +122,33 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<AnimationStateResult> GetAnimationStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetAnimationStateAsync(cancellationToken);
 
+	public Task<VfxPlayResult> PlayVfxAsync(
+		string assetPath,
+		System.Numerics.Vector3 position,
+		string? attachToEntityId,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().PlayVfxAsync(assetPath, position, attachToEntityId, cancellationToken);
+
+	public Task<VfxStateResult> GetVfxStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetVfxStateAsync(cancellationToken);
+
+	public Task<VfxStateResult> StopAllVfxAsync(bool immediate, CancellationToken cancellationToken) =>
+		GetRunningEditor().StopAllVfxAsync(immediate, cancellationToken);
+
+	public Task<VfxPreviewStateResult> ConfigureVfxPreviewAsync(
+		string? motion,
+		bool? playing,
+		float? advanceSeconds,
+		System.Numerics.Vector3? orbit,
+		Guid? modelId,
+		string? attachTo,
+		bool restart,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().ConfigureVfxPreviewAsync(motion, playing, advanceSeconds, orbit, modelId, attachTo, restart, cancellationToken);
+
+	public Task<FrameCaptureResult> CaptureVfxPreviewAsync(string outputPath, CancellationToken cancellationToken) =>
+		GetRunningEditor().CaptureVfxPreviewAsync(outputPath, cancellationToken);
+
 	public Task<int> SelectEntitiesAsync(IReadOnlyList<string> entityIds, CancellationToken cancellationToken)
 	{
 		var parsed = new List<Guid>(entityIds.Count);
@@ -153,6 +180,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<PlayModeStateResult> PausePlayModeAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().PausePlayModeAsync(cancellationToken);
 
+	public Task<PlayModeStateResult> SetGamePauseAsync(int reasonIndex, bool paused, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetGamePauseAsync(reasonIndex, paused, cancellationToken);
+
+	public Task<PlayModeStateResult> QuitGameAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().QuitGameAsync(cancellationToken);
+
 	public Task<PlayModeStateResult> StopPlayModeAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().StopPlayModeAsync(cancellationToken);
 
@@ -179,11 +212,58 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<EditorUiStateResult> GetEditorUiStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetEditorUiStateAsync(cancellationToken);
 
+	public Task SetEditorPointerAsync(
+		System.Numerics.Vector2 position,
+		bool? pressed,
+		int button,
+		float wheel,
+		CancellationToken cancellationToken,
+		float wheelX = 0.0f,
+		float magnification = 0.0f,
+		bool? control = null,
+		bool preciseScroll = false) =>
+		GetRunningEditor().SetEditorPointerAsync(
+			position,
+			pressed,
+			button,
+			wheel,
+			cancellationToken,
+			wheelX,
+			magnification,
+			control,
+			preciseScroll);
+
+	public Task<UI.AnimationGraphEditorState> GetAnimationEditorStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetAnimationEditorStateAsync(cancellationToken);
+
+	public Task<UI.AssetBrowserState> GetAssetBrowserStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetAssetBrowserStateAsync(cancellationToken);
+
+	public Task ConfigureAssetBrowserAsync(
+		string folderPath,
+		string search,
+		Guid? expandedSourceId,
+		string subAssetSearch,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().ConfigureAssetBrowserAsync(
+			folderPath,
+			search,
+			expandedSourceId,
+			subAssetSearch,
+			cancellationToken);
+
+	public Task SetEditorKeyAsync(string key, bool pressed, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEditorKeyAsync(key, pressed, cancellationToken);
+
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		GetRunningEditor().CreateWorkspaceAsync(name, cancellationToken);
 
-	public Task<EditorWorkspaceStateResult> RenameWorkspaceAsync(string workspaceId, string name, CancellationToken cancellationToken) =>
-		GetRunningEditor().RenameWorkspaceAsync(workspaceId, name, cancellationToken);
+	public Task<EditorWorkspaceStateResult> ConfigureWorkspaceAsync(
+		string workspaceId,
+		string name,
+		string? ownedDocument,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().ConfigureWorkspaceAsync(workspaceId, name, ownedDocument, cancellationToken);
 
 	public Task<EditorWorkspaceStateResult> ActivateWorkspaceAsync(string workspaceId, CancellationToken cancellationToken) =>
 		GetRunningEditor().ActivateWorkspaceAsync(workspaceId, cancellationToken);
@@ -218,6 +298,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().UndoAsync(cancellationToken);
 
+	public Task<GameplayStateResult> GetGameplayStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetGameplayStateAsync(cancellationToken);
+
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetRayTracingSceneStateAsync(cancellationToken);
 
@@ -227,8 +310,27 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<CpuFrameProfileResult> GetCpuFrameProfileAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetCpuFrameProfileAsync(cancellationToken);
 
+	public Task<string> SetViewportFrameLimitAsync(int maxFramesPerSecond, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetViewportFrameLimitAsync(maxFramesPerSecond, cancellationToken);
+
 	public Task<string> SetAntiAliasingAsync(string mode, bool enabled, bool casSharpening, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetAntiAliasingAsync(mode, enabled, casSharpening, cancellationToken);
+
+	public Task<string> SetFsr3SettingsAsync(
+		float alphaTestReactiveScale,
+		float transparencyAndCompositionMaskScale,
+		bool sharpening,
+		float sharpness,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SetFsr3SettingsAsync(
+			alphaTestReactiveScale,
+			transparencyAndCompositionMaskScale,
+			sharpening,
+			sharpness,
+			cancellationToken);
+
+	public Task<string> SetRenderScaleAsync(float renderScale, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetRenderScaleAsync(renderScale, cancellationToken);
 
 	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetSceneDebugViewAsync(debugViewId, cancellationToken);
@@ -246,6 +348,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<string> SetDdgiRelocationAsync(bool enabled, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetDdgiRelocationAsync(enabled, cancellationToken);
 
+	public Task<string> SetDdgiFinalGatherAsync(bool enabled, string resolution, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetDdgiFinalGatherAsync(enabled, resolution, cancellationToken);
+
+	public Task<string> SetIndirectLightMinimumAsync(float minimum, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetIndirectLightMinimumAsync(minimum, cancellationToken);
+
 	public Task SetEntityScaleAsync(Guid entityId, System.Numerics.Vector3 scale, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetEntityScaleAsync(entityId, scale, cancellationToken);
 
@@ -260,6 +368,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 
 	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureEditorWindowAsync(outputPath, cancellationToken);
+
+	public Task<SplashScreenPreviewResult> PreviewSplashScreenAsync(float? timeSeconds, CancellationToken cancellationToken) =>
+		GetRunningEditor().PreviewSplashScreenAsync(timeSeconds, cancellationToken);
 
 	public Task<GameplayFrameCaptureResult> CaptureGameplayFrameAsync(
 		string outputPath,
@@ -289,6 +400,53 @@ public sealed class EditorProcessController : IAsyncDisposable
 			return _editor ?? throw new InvalidOperationException("WolfEngine Editor is not running.");
 		}
 	}
+
+	public Task<AnimationClipEditorStateResult> OpenClipEditorAsync(Guid assetId, bool discardUnsavedChanges, CancellationToken token) =>
+		GetRunningEditor().OpenClipEditorAsync(assetId, discardUnsavedChanges, token);
+
+	public Task<AnimationClipEditorStateResult> CreateClipAsync(string folder, string name, Guid skeletonId, CancellationToken token) =>
+		GetRunningEditor().CreateClipAsync(folder, name, skeletonId, token);
+
+	public Task<AnimationClipEditorStateResult> DuplicateClipAsync(Guid assetId, CancellationToken token) =>
+		GetRunningEditor().DuplicateClipAsync(assetId, token);
+
+	public Task<AnimationClipEditorStateResult> SelectClipBoneAsync(string? bone, CancellationToken token) =>
+		GetRunningEditor().SelectClipBoneAsync(bone, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipBoneLocalTransformAsync(
+		string bone,
+		System.Numerics.Vector3? position,
+		System.Numerics.Vector3? rotationDegrees,
+		System.Numerics.Vector3? scale,
+		CancellationToken token) =>
+		GetRunningEditor().SetClipBoneLocalTransformAsync(bone, position, rotationDegrees, scale, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipPlayheadAsync(int frame, CancellationToken token) =>
+		GetRunningEditor().SetClipPlayheadAsync(frame, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipAutoKeyAsync(bool enabled, CancellationToken token) =>
+		GetRunningEditor().SetClipAutoKeyAsync(enabled, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipKeyAsync(string? bone, CancellationToken token) =>
+		GetRunningEditor().SetClipKeyAsync(bone, token);
+
+	public Task<AnimationClipEditorStateResult> EditClipKeysAsync(string operation, IReadOnlyList<string> keys, int frameDelta, CancellationToken token) =>
+		GetRunningEditor().EditClipKeysAsync(operation, keys, frameDelta, token);
+
+	public Task<AnimationClipEditorStateResult> SetClipMetadataAsync(string metadataJson, CancellationToken token) =>
+		GetRunningEditor().SetClipMetadataAsync(metadataJson, token);
+
+	public Task<AnimationClipEditorStateResult> ClipHistoryAsync(string operation, CancellationToken token) =>
+		GetRunningEditor().ClipHistoryAsync(operation, token);
+
+	public Task<AnimationClipEditorStateResult> SaveClipAsync(CancellationToken token) =>
+		GetRunningEditor().SaveClipAsync(token);
+
+	public Task<AnimationClipEditorStateResult> GetClipEditorStateAsync(CancellationToken token) =>
+		GetRunningEditor().GetClipEditorStateAsync(token);
+
+	public Task<FrameCaptureResult> CaptureClipPreviewAsync(string path, CancellationToken token) =>
+		GetRunningEditor().CaptureClipPreviewAsync(path, token);
 
 	public ValueTask DisposeAsync()
 	{

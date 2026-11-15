@@ -328,6 +328,39 @@ public class ShaderCompiler : IShaderProvider
 			return cached;
 		}
 
+		var result = CompileCompute(shaderPath, entryPoint, backendKind, defines, includeDirectories: []);
+		_cachedComputeWithReflection[cacheKey] = result;
+		return result;
+	}
+
+	/// <summary>
+	/// Compiles one compute kernel without caching, searching <paramref name="includeDirectories"/> for modules the
+	/// source imports. Used for game shaders, which are compiled once per import.
+	/// </summary>
+	public static CompiledComputeShaderWithReflection CompileComputeShader(
+		string shaderPath,
+		string entryPoint,
+		GraphicsBackendKind backendKind,
+		IReadOnlyList<string> includeDirectories)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(entryPoint);
+		ArgumentNullException.ThrowIfNull(includeDirectories);
+		var resolvedPath = ResolveShaderPath(shaderPath);
+		if (!File.Exists(resolvedPath))
+		{
+			throw new FileNotFoundException($"Shader file '{resolvedPath}' was not found.", resolvedPath);
+		}
+
+		return CompileCompute(resolvedPath, entryPoint, backendKind, [], includeDirectories);
+	}
+
+	private static CompiledComputeShaderWithReflection CompileCompute(
+		string shaderPath,
+		string entryPoint,
+		GraphicsBackendKind backendKind,
+		string[] defines,
+		IReadOnlyList<string> includeDirectories)
+	{
 		List<string> args;
 		if (backendKind == GraphicsBackendKind.Metal)
 		{
@@ -373,6 +406,12 @@ public class ShaderCompiler : IShaderProvider
 			}
 		}
 
+		foreach (var includeDirectory in includeDirectories)
+		{
+			args.Add("-I");
+			args.Add(includeDirectory);
+		}
+
 		var compiled = SlangCompiler.CompileWithReflection(args.ToArray(), out var reflection);
 		if (backendKind == GraphicsBackendKind.Metal)
 		{
@@ -381,9 +420,7 @@ public class ShaderCompiler : IShaderProvider
 
 		var reflectionLayout = ShaderReflectionLayoutBuilder.Build(reflection);
 		var threadGroupSize = ResolveComputeThreadGroupSize(reflection, entryPoint);
-		var result = new CompiledComputeShaderWithReflection(compiled, reflectionLayout, threadGroupSize);
-		_cachedComputeWithReflection[cacheKey] = result;
-		return result;
+		return new CompiledComputeShaderWithReflection(compiled, reflectionLayout, threadGroupSize);
 	}
 
 	public CompiledGraphicsShaderWithReflection GetGraphicsShaderWithReflection(

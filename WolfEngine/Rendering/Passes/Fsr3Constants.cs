@@ -61,7 +61,7 @@ public static class Fsr3Constants
 	/// </summary>
 	public static int GetJitterPhaseCount(int renderWidth, int displayWidth)
 	{
-		if (renderWidth <= 0)
+		if (renderWidth <= 0 || displayWidth <= 0)
 		{
 			return TemporalJitter.DefaultPhaseCount;
 		}
@@ -69,6 +69,21 @@ public static class Fsr3Constants
 		const float basePhaseCount = 8.0f;
 		var ratio = (float)displayWidth / renderWidth;
 		return Math.Max((int)(basePhaseCount * MathF.Pow(ratio, 2.0f)), 1);
+	}
+
+	/// <summary>
+	/// The texture LOD bias FSR3 expects scene materials to sample with: <c>log2(render / display) - 1</c>.
+	/// The ratio term selects the mips the display resolution would pick; the extra -1 supplies the detail
+	/// the jittered accumulation can resolve, and is applied at native resolution too.
+	/// </summary>
+	public static float GetMaterialMipBias(int renderWidth, int displayWidth)
+	{
+		if (renderWidth <= 0 || displayWidth <= 0)
+		{
+			return 0.0f;
+		}
+
+		return MathF.Log2((float)renderWidth / displayWidth) - 1.0f;
 	}
 
 	/// <summary>

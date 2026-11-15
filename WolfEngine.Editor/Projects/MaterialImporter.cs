@@ -1,8 +1,5 @@
 using System.Numerics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
-using StbImageSharp;
+using WolfEngine.Editor.Tooling.Imaging;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
@@ -174,7 +171,7 @@ public sealed class MaterialImporter : IMaterialImporter
 			return Guid.Empty;
 		}
 
-		using var image = LoadSourceImage(sourcePath);
+		var image = LoadSourceImage(sourcePath);
 		return WriteTextureAsset(image, relativeFolderPath, $"{materialName}_{suffix}.png", semantic);
 	}
 
@@ -189,8 +186,8 @@ public sealed class MaterialImporter : IMaterialImporter
 			return Guid.Empty;
 		}
 
-		using var source = LoadSourceImage(sourcePath);
-		using var output = new Image<Rgba32>(source.Width, source.Height);
+		var source = LoadSourceImage(sourcePath);
+		var output = new RgbaImage(source.Width, source.Height);
 		var invertY = normalFormat is MaterialNormalMapFormat.RgbYMinus or MaterialNormalMapFormat.RgYMinus;
 		var deriveZ = normalFormat is MaterialNormalMapFormat.RgYPlus or MaterialNormalMapFormat.RgYMinus;
 
@@ -210,7 +207,7 @@ public sealed class MaterialImporter : IMaterialImporter
 					? MathF.Sqrt(MathF.Max(1.0f - ((nx * nx) + (ny * ny)), 0.0f))
 					: (sourcePixel.B / 255.0f) * 2.0f - 1.0f;
 				var normal = Vector3.Normalize(new Vector3(nx, ny, nz));
-				output[x, y] = new Rgba32(
+				output[x, y] = new RgbaPixel(
 					PackSignedNormalChannel(normal.X),
 					PackSignedNormalChannel(normal.Y),
 					PackSignedNormalChannel(normal.Z),
@@ -240,15 +237,15 @@ public sealed class MaterialImporter : IMaterialImporter
 			return Guid.Empty;
 		}
 
-		using var occlusionImage = hasOcclusion ? LoadSourceImage(occlusionPath!) : null;
-		using var metallicImage = hasMetallic ? LoadSourceImage(metallicPath!) : null;
-		using var roughnessImage = hasRoughness ? LoadSourceImage(roughnessPath!) : null;
+		var occlusionImage = hasOcclusion ? LoadSourceImage(occlusionPath!) : null;
+		var metallicImage = hasMetallic ? LoadSourceImage(metallicPath!) : null;
+		var roughnessImage = hasRoughness ? LoadSourceImage(roughnessPath!) : null;
 		var outputWidth = Math.Max(occlusionImage?.Width ?? 0, Math.Max(metallicImage?.Width ?? 0, roughnessImage?.Width ?? 0));
 		var outputHeight = Math.Max(occlusionImage?.Height ?? 0, Math.Max(metallicImage?.Height ?? 0, roughnessImage?.Height ?? 0));
-		using var occlusionSource = ResizeIfNeeded(occlusionImage, outputWidth, outputHeight);
-		using var metallicSource = ResizeIfNeeded(metallicImage, outputWidth, outputHeight);
-		using var roughnessSource = ResizeIfNeeded(roughnessImage, outputWidth, outputHeight);
-		using var output = new Image<Rgba32>(outputWidth, outputHeight, new Rgba32(255, 255, 255, 255));
+		var occlusionSource = ResizeIfNeeded(occlusionImage, outputWidth, outputHeight);
+		var metallicSource = ResizeIfNeeded(metallicImage, outputWidth, outputHeight);
+		var roughnessSource = ResizeIfNeeded(roughnessImage, outputWidth, outputHeight);
+		var output = new RgbaImage(outputWidth, outputHeight, new RgbaPixel(255, 255, 255, 255));
 
 		for (var y = 0; y < outputHeight; y++)
 		{
@@ -262,21 +259,21 @@ public sealed class MaterialImporter : IMaterialImporter
 					roughnessValue = (byte)(255 - roughnessValue);
 				}
 
-				output[x, y] = new Rgba32(occlusionValue, roughnessValue, metallicValue, 255);
+				output[x, y] = new RgbaPixel(occlusionValue, roughnessValue, metallicValue, 255);
 			}
 		}
 
 		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_ORM.png", TextureSemantic.MetallicRoughness);
 	}
 
-	private Guid WriteTextureAsset(Image<Rgba32> image, string relativeFolderPath, string fileName, TextureSemantic semantic)
+	private Guid WriteTextureAsset(RgbaImage image, string relativeFolderPath, string fileName, TextureSemantic semantic)
 	{
 		var relativeTexturePath = $"{relativeFolderPath}/{fileName}";
 		var absoluteTexturePath = _projectService.GetAbsolutePath(relativeTexturePath);
 		var textureName = Path.GetFileNameWithoutExtension(fileName);
 		var nodeId = Guid.NewGuid();
 
-		image.SaveAsPng(absoluteTexturePath);
+		image.SavePng(absoluteTexturePath);
 		_metadataStore.Save(
 			AssetFileExtensions.GetMetaPath(absoluteTexturePath),
 			CreateTextureMetadata(textureName, nodeId, semantic));
@@ -352,22 +349,17 @@ public sealed class MaterialImporter : IMaterialImporter
 		properties.Textures.Emissive = new AssetRef<Texture> { NodeId = emissiveTextureId };
 	}
 
-	private static Image<Rgba32>? ResizeIfNeeded(Image<Rgba32>? image, int width, int height)
+	private static RgbaImage? ResizeIfNeeded(RgbaImage? image, int width, int height)
 	{
-		if (image is null)
+		if (image is null || (image.Width == width && image.Height == height))
 		{
-			return null;
+			return image;
 		}
 
-		if (image.Width == width && image.Height == height)
-		{
-			return image.Clone();
-		}
-
-		return image.Clone(context => context.Resize(width, height));
+		return image.Resize(width, height);
 	}
 
-	private static byte ReadChannel(Rgba32 pixel, MaterialTextureChannel channel)
+	private static byte ReadChannel(RgbaPixel pixel, MaterialTextureChannel channel)
 	{
 		return channel switch
 		{
@@ -379,17 +371,7 @@ public sealed class MaterialImporter : IMaterialImporter
 		};
 	}
 
-	private static Image<Rgba32> LoadSourceImage(string sourcePath)
-	{
-		if (string.Equals(Path.GetExtension(sourcePath), ".psd", StringComparison.OrdinalIgnoreCase))
-		{
-			var imageData = File.ReadAllBytes(sourcePath);
-			var image = ImageResult.FromMemory(imageData, ColorComponents.RedGreenBlueAlpha);
-			return Image.LoadPixelData<Rgba32>(image.Data, image.Width, image.Height);
-		}
-
-		return Image.Load<Rgba32>(sourcePath);
-	}
+	private static RgbaImage LoadSourceImage(string sourcePath) => RgbaImage.Load(sourcePath);
 
 	private static byte PackSignedNormalChannel(float value)
 	{

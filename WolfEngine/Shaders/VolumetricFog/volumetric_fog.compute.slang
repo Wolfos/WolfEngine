@@ -86,10 +86,11 @@ float VolumeWeight(FogVolumeData volume, float3 worldPosition)
 float ShadowVisibility(float3 relativePosition, float viewDepth, float3 lightDirection)
 {
     if (shadowTexelSizeEnabled.z < 0.5f || viewDepth > shadowMaxDistance) return 1.0f;
+    // A medium sample has no surface: facing the light gives it no normal offset and a flat receiver plane.
     return ComputeCascadedDirectionalShadow(relativePosition, lightDirection, lightDirection, viewDepth,
         shadowViewProjection0, shadowViewProjection1, shadowViewProjection2,
         shadowMapHandle0, shadowMapHandle1, shadowMapHandle2, shadowSamplerHandle,
-        shadowSplitsBlend.xyz, shadowSplitsBlend.w, shadowTexelSizeEnabled.xy, shadowDepthBiases.xyz);
+        shadowSplitsBlend.xyz, shadowSplitsBlend.w, shadowTexelSizeEnabled.xy, shadowDepthBiases.xyz, 0.0f.xxx);
 }
 
 void AddMedium(float mediumExtinction, float3 mediumAlbedo, float mediumAnisotropy,

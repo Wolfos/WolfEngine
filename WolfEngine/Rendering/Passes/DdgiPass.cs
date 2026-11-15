@@ -72,7 +72,6 @@ public sealed class DdgiPass
 	public DdgiPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
-		RenderFrameSharedResources sharedResources,
 		IGfxDevice device,
 		IRenderer renderer,
 		GpuDrawResources gpuDrawResources,
@@ -193,8 +192,8 @@ public sealed class DdgiPass
 			ProbeActivityMarksHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeActivityMarks)),
 			ProbeActivityMarksTexture = context.GetTexture(resources.DdgiProbeActivityMarks),
 			ProbeRelocationDecisionHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeRelocationDecision)),
-			EnvironmentHandle = sharedResources.SkyboxEnvironment.IsValid
-				? _bindlessRegistry.GetTextureHandle(context.GetTexture(sharedResources.SkyboxEnvironment))
+			EnvironmentHandle = resources.SkyboxEnvironment.IsValid
+				? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.SkyboxEnvironment))
 				: DescriptorHandle.Invalid,
 				SamplerHandle = _linearSampler,
 				ErrorTextureHandle = _bindlessRegistry.ErrorTextureHandle,
@@ -223,7 +222,7 @@ public sealed class DdgiPass
 			ProbeUpdateFrames = probeUpdateFrames,
 			ProbeUpdateFrameIndex = probeUpdateFrameIndex,
 			ActiveProbeCount = activeProbeCount,
-			ActiveDrawCommandUpperBound = gpuDrawResources.ActiveDrawCommandUpperBound,
+			ActiveInstanceUpperBound = gpuDrawResources.ActiveInstanceUpperBound,
 			MaxRayDistance = DdgiUtilities.GetMaxRayDistance(config),
 			NormalBias = Math.Max(config.NormalBias, 0.0f),
 			ViewBias = Math.Max(config.ViewBias, 0.0f),
@@ -265,7 +264,9 @@ public sealed class DdgiPass
 		WriteSettingsConstants(_classifyScatterSettingsWriter, commandList, config);
 		commandList.SetComputeReadOnlyBuffer(2, config.DrawCommandBuffer);
 		commandList.SetComputeReadOnlyBuffer(3, config.InstanceBuffer);
-		commandList.Dispatch(Math.Max(config.ActiveDrawCommandUpperBound, 1u), 1u, 1u);
+		var (scatterX, scatterY, scatterZ) =
+			DdgiUtilities.GetActivityScatterDispatchGroupCount(config.ActiveInstanceUpperBound);
+		commandList.Dispatch(scatterX, scatterY, scatterZ);
 		commandList.SynchronizeUnorderedAccess(config.ProbeActivityMarksTexture);
 
 		commandList.BindPipeline(config.ClassifyPipeline);
@@ -465,7 +466,7 @@ public sealed class DdgiPass
 		settingsWriter.SetUInt("frameIndex", config.FrameIndex);
 		settingsWriter.SetUInt("historyValid", config.HistoryValid ? 1u : 0u);
 		settingsWriter.SetUInt("sidecarHitShadingAvailable", config.SidecarHitShadingAvailable ? 1u : 0u);
-		settingsWriter.SetUInt("activeDrawCommandUpperBound", config.ActiveDrawCommandUpperBound);
+		settingsWriter.SetUInt("activeInstanceUpperBound", config.ActiveInstanceUpperBound);
 		settingsWriter.SetUInt(
 			"debugFirstProbeRelocationReadback",
 			config.DebugFirstProbeRelocationReadback ? 1u : 0u);
@@ -552,7 +553,7 @@ public sealed class DdgiPass
 		return new Vector3(values[offset], values[offset + 1], values[offset + 2]);
 	}
 
-	private static (Vector3 Direction, Vector3 ColorIntensity) GetPrimaryDirectionalLight(SceneDrawData sceneData)
+	internal static (Vector3 Direction, Vector3 ColorIntensity) GetPrimaryDirectionalLight(SceneDrawData sceneData)
 	{
 		for (var i = 0; i < sceneData.Lights.Count; i++)
 		{

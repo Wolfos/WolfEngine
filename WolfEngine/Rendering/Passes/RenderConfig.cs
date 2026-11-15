@@ -73,6 +73,9 @@ public struct LightingConfig
 
 	/// <summary>Multiplier for the complete indirect specular contribution, including reflections.</summary>
 	public float SpecularIndirectMultiplier { get; set; } = 1.0f;
+
+	/// <summary>Artistic floor for indirect light</summary>
+	public float IndirectLightMinimum { get; set; } = 0.0f;
 }
 
 public enum ReflectionMode
@@ -200,6 +203,76 @@ public struct DdgiProbeCounts
 	public int Z { get; set; } = 16;
 }
 
+/// <summary>
+/// Per-axis resolution of the DDGI final gather rays. Half traces one quarter as many rays; quarter traces one
+/// sixteenth as many. The result is reconstructed against full-resolution depth and normals.
+/// </summary>
+public enum DdgiFinalGatherResolution
+{
+	Full = 0,
+	Half = 1,
+	Quarter = 2
+}
+
+/// <summary>
+/// Higher quality DDGI shading. Instead of interpolating probes at the visible surface, each pixel traces its first
+/// diffuse bounce and samples the probes where that ray lands. Visibility at the shading point is then exact, which
+/// removes most light bleeding through walls and adds contact detail the probe grid is too coarse to hold. Specular
+/// still samples the probes directly. One ray per pixel is noisy, so the result is denoised with SVGF.
+/// </summary>
+public struct DdgiFinalGatherSettings
+{
+	public DdgiFinalGatherSettings()
+	{
+	}
+
+	public bool Enabled { get; set; } = false;
+	public DdgiFinalGatherResolution Resolution { get; set; } = DdgiFinalGatherResolution.Half;
+
+	/// <summary>
+	/// World-space length of the gather rays. A ray that reaches it without hitting anything takes the probe
+	/// radiance at its end point instead. Covering the range where probe interpolation leaks is enough to remove
+	/// bleeding, but longer rays reach more emissive surfaces directly, which the probes resolve poorly.
+	/// </summary>
+	public float MaxRayDistance { get; set; } = 12.0f;
+
+	/// <summary>
+	/// Minimum offset of a gather ray's origin from the surface. The trace already pushes the origin off by at
+	/// least a pixel's footprint, so this only matters close to the camera.
+	/// </summary>
+	public float Bias { get; set; } = 0.001f;
+
+	/// <summary>
+	/// Luminance ceiling for a single gather sample, in the gather's irradiance / PI units. Rare rays that hit a
+	/// sunlit or emissive surface otherwise flash as isolated bright pixels. It is absolute, so it is tuned to a
+	/// directional light intensity around 3; scenes lit much brighter need it raised or real bounce light is
+	/// clamped. Zero disables the clamp.
+	/// </summary>
+	public float FireflyClamp { get; set; } = 0.15f;
+
+	/// <summary>
+	/// Spatiotemporal variance-guided filtering (SVGF) of the gather at its trace resolution. Off shows the raw
+	/// one-sample trace, which is only useful for debugging.
+	/// </summary>
+	public bool Denoise { get; set; } = true;
+
+	/// <summary>
+	/// Weight of this frame's sample in the temporal moving average. Lower is smoother and slower to follow
+	/// lighting changes. The SVGF paper uses 0.2, which averages too few frames for one sample per pixel to resolve
+	/// small emissive surfaces. The temporal pass keeps at most 64 frames of history, so values below about 0.016
+	/// behave as 0.016.
+	/// </summary>
+	public float TemporalAlpha { get; set; } = 0.02f;
+
+	/// <summary>
+	/// Levels of the a-trous wavelet filter, each doubling its reach and each costing a full pass over the trace.
+	/// Four covers 33x33 trace pixels, which at the default half-resolution trace is already 66 screen pixels; the
+	/// SVGF paper's five levels are for a full-resolution signal with a much shorter temporal average than this one.
+	/// </summary>
+	public int FilterIterations { get; set; } = 4;
+	public float UpsampleSharpness { get; set; } = 16.0f;
+}
+
 public struct DiffuseGlobalIlluminationConfig
 {
 	public DiffuseGlobalIlluminationConfig()
@@ -222,6 +295,7 @@ public struct DiffuseGlobalIlluminationConfig
 	public float IrradianceTemporalBlendSpeed { get; set; } = 0.08f;
 	public float Hysteresis { get; set; } = 0.95f;
 	public float RecursiveBounceEnergy { get; set; } = DdgiUtilities.DefaultRecursiveBounceEnergy;
+	public DdgiFinalGatherSettings FinalGather { get; set; } = new();
 	public bool ProbeRelocationEnabled { get; set; } = true;
 	public float ProbeMinFrontfaceDistance { get; set; } = 0.2f;
 	public float ProbeBackfaceThreshold { get; set; } = 0.25f;
@@ -424,10 +498,17 @@ public struct AntiAliasingConfig
 	public float Sharpness { get; set; } = 0.2f;
 
 	/// <summary>
-	/// Scales coverage-aware reactivity for surviving alpha-tested samples. One preserves
-	/// the authored coverage signal; zero lets FSR3 treat them as ordinary opaque pixels.
+	/// Scales coverage-aware reactivity for surviving alpha-tested samples. Zero, the default, lets FSR3
+	/// treat them as ordinary opaque pixels; one marks fractional coverage reactive.
 	/// </summary>
-	public float AlphaTestReactiveScale { get; set; } = 1.0f;
+	/// <remarks>
+	/// Leave this at zero unless a material's cutout changes in a way motion vectors cannot describe,
+	/// such as a dissolve or a scrolling alpha texture. Which texels pass the alpha test changes with the
+	/// jitter phase, and accumulating those phases is what anti-aliases a cutout edge. Marking the edge
+	/// reactive makes FSR3 show each frame's own clip result instead, so the edge steps every frame,
+	/// most visibly against a bright sky.
+	/// </remarks>
+	public float AlphaTestReactiveScale { get; set; } = 0.0f;
 
 	/// <summary>Scales the transparent-forward composition mask supplied to FSR3.</summary>
 	public float TransparencyAndCompositionMaskScale { get; set; } = 1.0f;

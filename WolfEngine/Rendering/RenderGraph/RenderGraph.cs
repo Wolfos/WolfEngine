@@ -1,9 +1,12 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using WolfEngine.ECS;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Features;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.Splash;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Profiling;
@@ -18,6 +21,9 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 {
+	/// <summary>The game thread's render features; the snapshot carries them to this graph.</summary>
+	internal RenderFeatureRegistry RenderFeatures { get; }
+
 	private readonly RenderGraphResourceRegistry _resourceRegistry;
 	private readonly RenderGraphFrameBuilder _frameBuilder;
 	private readonly IRenderer _renderer;
@@ -47,8 +53,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly GpuProfiler _gpuProfiler;
-	private readonly IImGuiRenderer _imGuiRenderer;
 	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
+	private readonly UiCompositor _uiCompositor;
+	private readonly SplashScreen _splashScreen;
+	private readonly SplashScreenRenderer _splashScreenRenderer;
 	private long _pendingShaderRevision;
 	private long _appliedShaderRevision;
 	private readonly RenderViewRegistry _viewRegistry = new();
@@ -61,7 +69,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	private FrameSnapshot _currentSnapshot = null!;
 	private FrameSnapshot _activeSnapshot = null!;
 	private long _lastObservedEditorFrameSequence;
+	// Counts frames that ran the graph. Temporal jitter and GPU profiling advance with it, so it does not move on
+	// frames that only present the UI.
 	private int _frameIndex;
+	private GpuProfileFrameCapture? _gpuFrameCapture;
 	private int _gpuCaptureRequested;
 	private bool _gpuCaptureActive;
 	private RayTracingSceneState _latestRayTracingSceneState = RayTracingSceneState.Empty;
@@ -71,6 +82,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	private readonly HashSet<Texture> _pendingTextures = new(new ReferenceComparer<Texture>());
 	private readonly HashSet<Material> _trackedMaterials = new(new ReferenceComparer<Material>());
 	private readonly ConcurrentQueue<Mesh> _ensureMeshQueue = new();
+	// Materials uploaded since the last frame that ran the graph, which the snapshot databases have yet to hear about.
+	private readonly HashSet<Material> _materialsChangedSinceScene = new(new ReferenceComparer<Material>());
 
 	public RenderGraph(
 		RenderGraphResourceRegistry resourceRegistry,
@@ -89,9 +102,13 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		GameplayUiGpuRenderer gameplayUiRenderer,
 		IShaderProvider shaderProvider,
 		BindlessResourceRegistry bindlessResourceRegistry,
-		IGpuDrawBackendBridge gpuDrawBackendBridge,
-		RenderPresentationOptions? presentationOptions = null)
+		IDrawRecordEncoder drawRecordEncoder,
+		IGpuDrawDiagnosticsSampler gpuDrawDiagnosticsSampler,
+		RenderPresentationOptions? presentationOptions = null,
+		RenderFeatureRegistry? renderFeatures = null,
+		SplashScreen? splashScreen = null)
 	{
+		RenderFeatures = renderFeatures ?? new RenderFeatureRegistry();
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
@@ -101,20 +118,22 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			bindlessResourceRegistry,
 			gpuDrawResources,
 			hardeningStats,
-			gpuDrawBackendBridge);
+			drawRecordEncoder,
+			gpuDrawDiagnosticsSampler);
 		_frameBuilder = new(
 			resourceRegistry,
 			renderer,
 			passSet,
 			gpuDrawResources,
-			imGuiRenderer,
 			gameplayUiRenderer,
 			shaderProvider,
 			_viewRegistry);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_gpuProfiler = gpuProfiler ?? throw new ArgumentNullException(nameof(gpuProfiler));
-		_imGuiRenderer = imGuiRenderer ?? throw new ArgumentNullException(nameof(imGuiRenderer));
+		_uiCompositor = new UiCompositor(imGuiRenderer ?? throw new ArgumentNullException(nameof(imGuiRenderer)));
+		_splashScreen = splashScreen ?? new SplashScreen();
+		_splashScreenRenderer = new SplashScreenRenderer(shaderProvider, bindlessResourceRegistry, renderer);
 		_gameplayUiRenderer = gameplayUiRenderer ?? throw new ArgumentNullException(nameof(gameplayUiRenderer));
 		_uiFrameProvider = uiFrameProvider;
 		_gameplayUiFrameProvider = gameplayUiFrameProvider ?? throw new ArgumentNullException(nameof(gameplayUiFrameProvider));
@@ -202,7 +221,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			_frameBuilder.PrepareSceneViewport(viewProjection);
 		}
 
-		_frameBuilder.ResolveUiViewportTextures();
 		SelectView(boundView);
 
 		var device = _renderer.GetGfxDevice();
@@ -243,7 +261,9 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			return;
 		}
 
-		var gpuFrameCapture = _gpuProfiler.BeginFrame((ulong)_frameIndex);
+		// Sealed by OnRender once the UI submission that follows the graph has joined it.
+		_gpuFrameCapture = _gpuProfiler.BeginFrame((ulong)_frameIndex);
+		var gpuFrameCapture = _gpuFrameCapture;
 		var commandList = _passes.Count == 0
 			? null
 			: _passes[0].Kind == PassKind.Graphics
@@ -318,8 +338,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			device.Submit(commandList);
 		}
 
-		gpuFrameCapture?.Seal();
-
 		SelectView(boundView);
 		_gpuDrawResources.ActiveViewIndex = boundView.Index;
 		ReleasePasses();
@@ -334,7 +352,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		_frameBuilder.InvalidateShaderPipelines();
 		ShaderPipelineInvalidation.Invalidate(_gpuDrawResources);
 		ShaderPipelineInvalidation.Invalidate(_renderer);
-		_imGuiRenderer.InvalidateShaderPipeline();
+		_uiCompositor.InvalidateShaderPipeline();
+		_splashScreenRenderer.InvalidateShaderPipeline();
 		device.ClearPipelineCache();
 		lock (_resourceSync)
 		{
@@ -358,10 +377,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		sceneData = null;
 		var world = snapshot.CameraWorldTransform.LocalToWorld;
 		var taaEnabled = snapshot.Config.AntiAliasing.Enabled;
-		// FSR3 owns the sequence length. At native resolution this is eight phases; once
-		// render/display sizes split, the display width belongs in the second argument.
+		// FSR3 owns the sequence length: eight phases at native resolution, growing with the square of the
+		// upscale ratio so each display pixel still receives the same number of jittered samples.
 		var phaseCount = snapshot.Config.AntiAliasing.Mode == AntiAliasingMode.Fsr3
-			? Fsr3Constants.GetJitterPhaseCount(_view.SceneRenderSize.X, _view.SceneRenderSize.X)
+			? Fsr3Constants.GetJitterPhaseCount(_view.SceneRenderSize.X, _view.SceneDisplaySize.X)
 			: Math.Max(1, snapshot.Config.AntiAliasing.Taa.PhaseCount);
 		var jitterPixels = taaEnabled
 			? TemporalJitter.GetHaltonJitterPixels(
@@ -438,7 +457,13 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				_view.RenderLights,
 				snapshot.DecalPackets,
 				snapshot.FogVolumePackets,
-				snapshot.OutlinePackets);
+				snapshot.OutlinePackets)
+			{
+				// TAA with a reduced render scale is a spatial upscale, so it keeps the render resolution's mips.
+				MaterialMipBias = snapshot.Config.AntiAliasing.UsesFsr3
+					? Fsr3Constants.GetMaterialMipBias(_view.SceneRenderSize.X, _view.SceneDisplaySize.X)
+					: 0.0f
+			};
 
 			_view.PreviousResolvedProjection = _view.ResolvedProjection;
 			_view.HasPreviousResolvedProjection = true;
@@ -477,6 +502,29 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		}
 
 		return _frameBuilder.GetCaptureColorHandle();
+	}
+
+	/// <summary>
+	/// The image a scene-colour capture reads on a frame that runs no graph: the capture view's last presented
+	/// image, which is what the UI is showing for it. Falls back to the primary view, as on a frame that does.
+	/// </summary>
+	private RenderGraphResourceHandle ResolveHeldSceneCaptureHandle()
+	{
+		var captureView = new RenderViewId(Volatile.Read(ref _sceneCaptureViewValue));
+		if (_viewRegistry.TryGet(captureView, out var state) == false)
+		{
+			state = _viewRegistry.GetOrCreate(RenderViewId.Primary);
+		}
+
+		if (state.PresentedSceneTarget.TryGetCurrent(out var texture, out _, out _) == false)
+		{
+			return default;
+		}
+
+		return _resourceRegistry.ImportTexture(
+			texture,
+			takeOwnership: false,
+			initialState: state.PresentedSceneTarget.CurrentState);
 	}
 
 	/// <summary>The snapshot's existing entry for <paramref name="view"/>, without creating one.</summary>
@@ -684,6 +732,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 			changedMaterials.Clear();
 			ProcessPendingMaterials(changedMaterials);
+			for (var i = 0; i < changedMaterials.Count; i++)
+			{
+				_materialsChangedSinceScene.Add(changedMaterials[i]);
+			}
 
 			while (_ensureMeshQueue.TryDequeue(out var mesh))
 			{
@@ -697,6 +749,25 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		}
 
 		_mainThreadDispatcher.ExecutePending();
+
+		// While the splash owns the window the game is still loading and publishes no frames, so the splash is drawn
+		// without waiting for one. Loading keeps queueing uploads and main-thread work, which run above every frame.
+		var splashFrame = _splashScreen.BeginFrame(Stopwatch.GetTimestamp());
+		if (splashFrame.Exclusive)
+		{
+			// Whoever publishes frames meanwhile (the editor under a held splash) waits for the renderer to take each
+			// frame and its snapshot, so take them without drawing them; the scene resumes from the latest.
+			_lastObservedEditorFrameSequence = _editorFrameCoordinator.ObservePublished();
+			if (_snapshotBuffer.TryConsumeLatest(out var heldSnapshot))
+			{
+				_currentSnapshot = heldSnapshot;
+			}
+
+			PresentSplashScreen(splashFrame);
+			FrameProfiler.Instance.EndFrame();
+			return;
+		}
+
 		bool framePublished;
 		using (FrameProfiler.Instance.Measure("Wait For Editor Frame"))
 		{
@@ -712,7 +783,11 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			return;
 		}
 
-		if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
+		// A frame runs the graph only for a snapshot it has not drawn. Without one it presents the UI over each view's
+		// last image: the editor publishes a snapshot only when the scene is due, so the UI can update more often
+		// than the scene is drawn.
+		var sceneFrame = _snapshotBuffer.TryConsumeLatest(out var snapshot);
+		if (sceneFrame == false)
 		{
 			snapshot = _currentSnapshot;
 		}
@@ -728,6 +803,13 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			return;
 		}
 
+		// A backbuffer view draws the scene into the window target and the UI goes over it, so that target cannot
+		// keep last frame's scene without also keeping last frame's UI. Such a view draws every frame it presents.
+		if (primaryView.Output == RenderViewOutput.Backbuffer)
+		{
+			sceneFrame = true;
+		}
+
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
 		_gpuDrawResources.EnsureCreated(_renderer.GetGfxDevice());
 		_view = _viewRegistry.GetOrCreate(RenderViewId.Primary);
@@ -738,8 +820,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			_renderer.BeginFrame();
 		}
 
-		BeginGpuCaptureIfRequested();
-
+		if (sceneFrame)
+		{
+			BeginGpuCaptureIfRequested();
+		}
 
 		using (FrameProfiler.Instance.Measure("Build Frame"))
 		{
@@ -754,175 +838,60 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 					uiFrame = latestUi;
 				}
 
-				for (var viewIndex = 0; viewIndex < snapshot.Views.Count; viewIndex++)
-				{
-					var database = snapshot.Views[viewIndex].GpuDrawDatabase;
-					for (var i = 0; i < changedMaterials.Count; i++)
-					{
-						database.NotifyMaterialChanged(changedMaterials[i]);
-					}
-				}
-
 				var frameBufferSize = _renderer.GetFrameBufferSize();
-				// Screen UI uses the displayed game view, not the editor window or the scene's
-				// downscaled internal rendering resolution. DPI remains a single uniform scale.
-				var gameplayDisplaySize = ResolveViewDisplaySize(primaryView.Output, frameBufferSize,
-					_viewportStateBus.GetUiState(RenderViewId.Primary), frameBufferSize);
-				_gameplayUiFrameProvider.SetViewportSize(gameplayDisplaySize, ComputeDisplayScale(frameBufferSize));
-				if (_gameplayUiFrameProvider.TryConsumeLatest(out var latestGameplayUi))
+				RenderGraphResourceHandle windowColor;
+				RenderGraphResourceHandle sceneCaptureColor;
+				bool sceneInWindow;
+				if (sceneFrame)
 				{
-					_gameplayUiFrame.Release();
-					_gameplayUiFrame = latestGameplayUi;
+					RenderScene(snapshot, primarySnapshot, primaryView, frameBufferSize);
+					windowColor = _frameBuilder.GetFinalColorHandle();
+					sceneCaptureColor = ResolveSceneCaptureHandle();
+					sceneInWindow = primaryView.Output == RenderViewOutput.Backbuffer &&
+					                primaryView.FrameResources.SceneEnabled;
 				}
-
-				// The primary view always records, as it did when it was the only one; any other view records
-				// when the published snapshot carries an entry for it. The render thread must not create
-				// entries: the snapshot has been published and belongs to the game thread's view list.
-				_recordedViews.Clear();
-				_recordedViews.Add(RenderViewId.Primary);
-				for (var i = 0; i < snapshot.Views.Count; i++)
+				else
 				{
-					var candidate = snapshot.Views[i].View;
-					if (candidate != RenderViewId.Primary && _viewRegistry.TryGet(candidate, out _))
-					{
-						_recordedViews.Add(candidate);
-					}
-				}
-
-				// Shared setup takes its sun and sky from the primary view; see BeginSharedFrame.
-				_frameBuilder.SetGameplayUiFrame(_gameplayUiFrame);
-				_frameBuilder.BeginSharedFrame(
-					frameBufferSize,
-					primarySnapshot.SunDirection,
-					primarySnapshot.SunIntensityScale,
-					primarySnapshot.Config.SkyboxConfig);
-				_frameBuilder.SetUiFrame(uiFrame);
-
-				_sceneColorHandles.Clear();
-				for (var viewIndex = 0; viewIndex < _recordedViews.Count; viewIndex++)
-				{
-					var recordedView = _recordedViews[viewIndex];
-					SelectView(recordedView);
-					var viewSnapshot = recordedView == RenderViewId.Primary
-						? primarySnapshot
-						: FindView(snapshot, recordedView);
-					if (!IsViewSnapshotCurrent(_view, viewSnapshot))
-					{
-						// A rebind can precede publication. Never draw or bootstrap RT from the outgoing world's snapshot.
-						_view.FrameResources = new RenderViewResources { FramebufferSize = frameBufferSize, Config = viewSnapshot.Config };
-						_view.SceneDebugViews.Clear();
-						_view.SceneDebugViewOptions = [];
-						_view.ResolvedSceneViewportState = SceneViewportRenderState.Empty;
-						_recordedViews.RemoveAt(viewIndex--);
-						continue;
-					}
-					if (_view.HistoryBindingGeneration != _view.BindingGeneration)
-					{
-						_view.ResetHistoryForNewBinding();
-					}
-					var sceneViewportState = _viewportStateBus.GetUiState(recordedView);
-					var renderSceneToWindow = _view.Output == RenderViewOutput.Backbuffer;
-					var renderScale = viewSnapshot.Config.RenderScale;
-					var sceneEnabled = renderSceneToWindow
-						? TryComputeFullWindowSceneRenderSize(frameBufferSize, renderScale, out var sceneRenderSize)
-						: TryComputeSceneRenderSize(sceneViewportState, renderScale, out sceneRenderSize);
-					if (recordedView == RenderViewId.Primary)
-					{
-						var currentResolution = sceneEnabled ? sceneRenderSize : frameBufferSize;
-						if (currentResolution.X > 0 && currentResolution.Y > 0)
-						{
-							Screen.CurrentResolution = currentResolution;
-						}
-					}
-					else if (sceneEnabled == false)
-					{
-						// A hidden secondary view records nothing this frame and keeps its history for when it returns.
-						_recordedViews.RemoveAt(viewIndex);
-						viewIndex--;
-						continue;
-					}
-
-					_view.SceneRenderSize = sceneRenderSize;
-					var renderSceneToViewport = sceneEnabled && !renderSceneToWindow;
-					var sceneColorHandle = default(RenderGraphResourceHandle);
-					if (renderSceneToViewport)
-					{
-						var sceneTarget = _view.SceneRenderTarget.EnsureTarget(_renderer.GetGfxDevice(), sceneRenderSize);
-						sceneColorHandle = _resourceRegistry.ImportTexture(
-							sceneTarget,
-							takeOwnership: false,
-							initialState: _view.SceneRenderTarget.CurrentState);
-					}
-
-					_sceneColorHandles[recordedView] = sceneColorHandle;
-					if (!Matrix4x4.Decompose(
-						    viewSnapshot.CameraWorldTransform.LocalToWorld,
-						    out _,
-						    out _,
-						    out var viewCameraPosition))
-					{
-						viewCameraPosition = viewSnapshot.Config.DiffuseGlobalIllumination.Origin;
-					}
-
-					var viewDisplaySize = ResolveViewDisplaySize(_view.Output, frameBufferSize, sceneViewportState, sceneRenderSize);
-					_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
-					_frameBuilder.BeginViewFrame(
-						recordedView,
-						viewDisplaySize,
-						sceneRenderSize,
-						sceneColorHandle,
-						renderSceneToViewport || renderSceneToWindow,
-						viewSnapshot.DecalPackets.Count > 0,
-						viewSnapshot.Config,
-						viewCameraPosition);
-				}
-
-				// Every view is set up before anything is recorded: the shared draw update records first and
-				// has to know which views draw this frame. View state is per view, so setting up the next view
-				// does not disturb one already set up.
-				_frameBuilder.RecordSharedPreparation(this);
-				for (var viewIndex = 0; viewIndex < _recordedViews.Count; viewIndex++)
-				{
-					SelectView(_recordedViews[viewIndex]);
-					_frameBuilder.RecordBoundView(this);
-				}
-
-				// The primary view is bound for execution: it runs the shared passes and owns presentation.
-				SelectView(RenderViewId.Primary);
-				_frameBuilder.RecordSharedPresentation(this);
-				Execute();
-				var sceneCaptureHandle = ResolveSceneCaptureHandle();
-				var windowCaptureHandle = _frameBuilder.GetFinalColorHandle();
-				if (sceneCaptureHandle.IsValid || windowCaptureHandle.IsValid)
-				{
-					_renderer.CompletePendingFrameCapture(_resourceRegistry, sceneCaptureHandle, windowCaptureHandle);
-				}
-
-				for (var viewIndex = 0; viewIndex < _recordedViews.Count; viewIndex++)
-				{
-					SelectView(_recordedViews[viewIndex]);
-					_frameBuilder.CompleteFrame();
-					var viewSceneColor = _sceneColorHandles[_recordedViews[viewIndex]];
-					if (viewSceneColor.IsValid)
-					{
-						_view.SceneRenderTarget.SetCurrentState(_resourceRegistry.GetResourceState(viewSceneColor));
-					}
+					_frameBuilder.KeepPersistentViewportOutputs();
+					windowColor = _resourceRegistry.ImportTexture(
+						_frameBuilder.WindowColorTarget.EnsureTarget(_renderer.GetGfxDevice(), frameBufferSize),
+						takeOwnership: false,
+						initialState: _frameBuilder.WindowColorTarget.CurrentState);
+					sceneCaptureColor = ResolveHeldSceneCaptureHandle();
+					sceneInWindow = false;
 				}
 
 				SelectView(RenderViewId.Primary);
-				_renderer.Render(_resourceRegistry, _frameBuilder.GetFinalColorHandle());
-				foreach (var liveView in _viewRegistry.Views)
+				using (FrameProfiler.Instance.Measure("UI"))
 				{
-					// A view that did not record this frame publishes nothing, so the UI cannot sample a texture
-					// resolved on an earlier frame.
-					if (_recordedViews.Contains(liveView.View) == false)
-					{
-						liveView.ResolvedSceneViewportState = SceneViewportRenderState.Empty;
-					}
-
-					_viewportStateBus.PublishRenderState(liveView.View, liveView.ResolvedSceneViewportState);
+					_frameBuilder.ResolveUiViewportTextures(uiFrame);
+					_uiCompositor.Compose(
+						_renderer.GetGfxDevice(),
+						uiFrame,
+						_resourceRegistry.GetTexture(windowColor),
+						clearTarget: sceneInWindow == false,
+						_gpuFrameCapture);
 				}
 
+				// The splash fades out over the game's first frames; with nothing showing this releases its textures.
+				_splashScreenRenderer.Compose(
+					_renderer.GetGfxDevice(),
+					_resourceRegistry.GetTexture(windowColor),
+					splashFrame,
+					clearTarget: false);
+				if (splashFrame.IsVisible && sceneFrame)
+				{
+					_splashScreen.MarkDrawnOverGame(Stopwatch.GetTimestamp());
+				}
+
+				_gpuFrameCapture?.Seal();
+				_gpuFrameCapture = null;
+				if (sceneCaptureColor.IsValid || windowColor.IsValid)
+				{
+					_renderer.CompletePendingFrameCapture(_resourceRegistry, sceneCaptureColor, windowColor);
+				}
+
+				_renderer.Render(_resourceRegistry, windowColor);
 				_resourceRegistry.EndFrame();
 			}
 			finally
@@ -931,17 +900,257 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			}
 		}
 
-		EndGpuCaptureIfActive();
+		if (sceneFrame)
+		{
+			EndGpuCaptureIfActive();
+		}
 
 		// Clear for next frame
 		_arenaAllocator.Reset();
-		_frameIndex++;
+		if (sceneFrame)
+		{
+			_frameIndex++;
+		}
+
 		var retirementStats = _renderer.GetGfxDevice().RetirementStats;
 		_hardeningStats.SetDeferredReleaseBacklog(retirementStats.UnsealedCount + retirementStats.PendingCount);
 		LogGpuHardeningStatsIfNeeded();
 		PublishRayTracingSceneState();
-		_renderFrameCoordinator.PublishCompletedFrame();
+		_renderFrameCoordinator.PublishCompletedFrame(sceneFrame);
 		FrameProfiler.Instance.EndFrame();
+	}
+
+	/// <summary>
+	/// Presents a frame of the splash screen alone, in place of the scene and UI. No graph runs: the window image is
+	/// cleared to the splash background and the splash is drawn over it.
+	/// </summary>
+	private void PresentSplashScreen(in SplashScreenFrame splashFrame)
+	{
+		var device = _renderer.GetGfxDevice();
+		var frameBufferSize = _renderer.GetFrameBufferSize();
+		if (frameBufferSize.X <= 0 || frameBufferSize.Y <= 0)
+		{
+			return;
+		}
+
+		_resourceRegistry.SetDevice(device);
+		using (FrameProfiler.Instance.Measure("Begin Frame"))
+		{
+			_renderer.BeginFrame();
+		}
+
+		using (FrameProfiler.Instance.Measure("Splash Screen"))
+		{
+			_resourceRegistry.BeginFrame();
+			try
+			{
+				var windowColor = _resourceRegistry.ImportTexture(
+					_frameBuilder.WindowColorTarget.EnsureTarget(device, frameBufferSize),
+					takeOwnership: false,
+					initialState: _frameBuilder.WindowColorTarget.CurrentState);
+				_splashScreenRenderer.Compose(device, _resourceRegistry.GetTexture(windowColor), splashFrame, clearTarget: true);
+
+				// The splash is the whole picture, so a scene capture taken now reads it too.
+				_renderer.CompletePendingFrameCapture(_resourceRegistry, windowColor, windowColor);
+				_renderer.Render(_resourceRegistry, windowColor);
+			}
+			finally
+			{
+				_resourceRegistry.EndFrame();
+			}
+		}
+
+		_renderFrameCoordinator.PublishCompletedFrame(false);
+	}
+
+	/// <summary>
+	/// Records and executes the graph for <paramref name="snapshot"/>: every view it carries, then the shared passes
+	/// that hand the views' outputs and the window target to the UI. Publishes what each view now shows.
+	/// </summary>
+	private void RenderScene(
+		FrameSnapshot snapshot,
+		RenderViewSnapshot primarySnapshot,
+		RenderViewState primaryView,
+		Int2 frameBufferSize)
+	{
+		// Materials can change on frames that draw no scene; the databases hear about them on the next one that does.
+		for (var viewIndex = 0; viewIndex < snapshot.Views.Count; viewIndex++)
+		{
+			var database = snapshot.Views[viewIndex].GpuDrawDatabase;
+			foreach (var material in _materialsChangedSinceScene)
+			{
+				database.NotifyMaterialChanged(material);
+			}
+		}
+
+		_materialsChangedSinceScene.Clear();
+
+		// Screen UI uses the displayed game view, not the editor window or the scene's
+		// downscaled internal rendering resolution. DPI remains a single uniform scale.
+		var gameplayDisplaySize = ResolveViewDisplaySize(primaryView.Output, frameBufferSize,
+			_viewportStateBus.GetUiState(RenderViewId.Primary), frameBufferSize);
+		_gameplayUiFrameProvider.SetViewportSize(gameplayDisplaySize, ComputeDisplayScale(frameBufferSize));
+		if (_gameplayUiFrameProvider.TryConsumeLatest(out var latestGameplayUi))
+		{
+			_gameplayUiFrame.Release();
+			_gameplayUiFrame = latestGameplayUi;
+		}
+
+		RequestGameplayUiImages(_gameplayUiFrame);
+
+		// The primary view always records, as it did when it was the only one; any other view records
+		// when the published snapshot carries an entry for it. The render thread must not create
+		// entries: the snapshot has been published and belongs to the game thread's view list.
+		_recordedViews.Clear();
+		_recordedViews.Add(RenderViewId.Primary);
+		for (var i = 0; i < snapshot.Views.Count; i++)
+		{
+			var candidate = snapshot.Views[i].View;
+			if (candidate != RenderViewId.Primary && _viewRegistry.TryGet(candidate, out _))
+			{
+				_recordedViews.Add(candidate);
+			}
+		}
+
+		_frameBuilder.SetGameplayUiFrame(_gameplayUiFrame);
+		_frameBuilder.BeginRenderFeatures(RenderFeatures);
+		_frameBuilder.BeginSharedFrame(frameBufferSize);
+
+		var now = Stopwatch.GetTimestamp();
+		_sceneColorHandles.Clear();
+		for (var viewIndex = 0; viewIndex < _recordedViews.Count; viewIndex++)
+		{
+			var recordedView = _recordedViews[viewIndex];
+			SelectView(recordedView);
+			var viewSnapshot = recordedView == RenderViewId.Primary
+				? primarySnapshot
+				: FindView(snapshot, recordedView);
+			if (!IsViewSnapshotCurrent(_view, viewSnapshot))
+			{
+				// A rebind can precede publication. Never draw or bootstrap RT from the outgoing world's snapshot.
+				_view.FrameResources = new RenderViewResources { FramebufferSize = frameBufferSize, Config = viewSnapshot.Config };
+				_view.SceneDebugViews.Clear();
+				_view.SceneDebugViewOptions = [];
+				_view.ResolvedSceneViewportState = SceneViewportRenderState.Empty;
+				_recordedViews.RemoveAt(viewIndex--);
+				continue;
+			}
+			if (_view.HistoryBindingGeneration != _view.BindingGeneration)
+			{
+				_view.ResetHistoryForNewBinding();
+			}
+			var sceneViewportState = _viewportStateBus.GetUiState(recordedView);
+			var renderSceneToWindow = _view.Output == RenderViewOutput.Backbuffer;
+			var renderScale = viewSnapshot.Config.RenderScale;
+			var sceneEnabled = renderSceneToWindow
+				? TryComputeFullWindowSceneRenderSize(frameBufferSize, renderScale, out var sceneRenderSize)
+				: TryComputeSceneRenderSize(sceneViewportState, renderScale, out sceneRenderSize);
+			if (recordedView == RenderViewId.Primary)
+			{
+				var currentResolution = sceneEnabled ? sceneRenderSize : frameBufferSize;
+				if (currentResolution.X > 0 && currentResolution.Y > 0)
+				{
+					Screen.CurrentResolution = currentResolution;
+				}
+			}
+			else if (sceneEnabled == false)
+			{
+				// A hidden secondary view records nothing this frame and keeps its history for when it returns.
+				_recordedViews.RemoveAt(viewIndex);
+				viewIndex--;
+				continue;
+			}
+
+			_view.SceneFrameDeltaSeconds = _view.LastSceneFrameTimestamp == 0
+				? 0.0f
+				: (float)Stopwatch.GetElapsedTime(_view.LastSceneFrameTimestamp, now).TotalSeconds;
+			_view.LastSceneFrameTimestamp = now;
+			var viewDisplaySize = ResolveViewDisplaySize(_view.Output, frameBufferSize, sceneViewportState, sceneRenderSize);
+			_view.SceneRenderSize = sceneRenderSize;
+			_view.SceneDisplaySize = viewDisplaySize;
+			var renderSceneToViewport = sceneEnabled && !renderSceneToWindow;
+			var sceneColorHandle = default(RenderGraphResourceHandle);
+			if (renderSceneToViewport)
+			{
+				// This target receives the temporally resolved colour, which an upscaler produces at display size.
+				var resolvedSceneColorSize = RenderGraphFrameBuilder.GetResolvedSceneColorSize(
+					viewSnapshot.Config.AntiAliasing,
+					viewDisplaySize,
+					sceneRenderSize);
+				var sceneTarget = _view.SceneRenderTarget.EnsureTarget(_renderer.GetGfxDevice(), resolvedSceneColorSize);
+				sceneColorHandle = _resourceRegistry.ImportTexture(
+					sceneTarget,
+					takeOwnership: false,
+					initialState: _view.SceneRenderTarget.CurrentState);
+			}
+
+			_sceneColorHandles[recordedView] = sceneColorHandle;
+			if (!Matrix4x4.Decompose(
+				    viewSnapshot.CameraWorldTransform.LocalToWorld,
+				    out _,
+				    out _,
+				    out var viewCameraPosition))
+			{
+				viewCameraPosition = viewSnapshot.Config.DiffuseGlobalIllumination.Origin;
+			}
+
+			_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
+			_frameBuilder.BeginViewFrame(
+				recordedView,
+				viewDisplaySize,
+				sceneRenderSize,
+				sceneColorHandle,
+				renderSceneToViewport || renderSceneToWindow,
+				viewSnapshot.DecalPackets.Count > 0,
+				viewSnapshot.Config,
+				viewCameraPosition,
+				viewSnapshot.SunDirection,
+				viewSnapshot.SunIntensityScale);
+			_frameBuilder.SetViewRenderFeatures(viewSnapshot.RenderFeatureFrames);
+			_frameBuilder.SetViewVfx(viewSnapshot.VfxFrame);
+		}
+
+		// Every view is set up before anything is recorded: the shared draw update records first and
+		// has to know which views draw this frame. View state is per view, so setting up the next view
+		// does not disturb one already set up.
+		_frameBuilder.RecordSharedPreparation(this);
+		for (var viewIndex = 0; viewIndex < _recordedViews.Count; viewIndex++)
+		{
+			SelectView(_recordedViews[viewIndex]);
+			_frameBuilder.RecordBoundView(this);
+		}
+
+		// The primary view is bound for execution: it runs the shared passes and owns presentation.
+		SelectView(RenderViewId.Primary);
+		_frameBuilder.RecordSharedPresentation(this);
+		Execute();
+		_frameBuilder.WindowColorTarget.SetCurrentState(
+			_resourceRegistry.GetResourceState(_frameBuilder.GetFinalColorHandle()));
+
+		for (var viewIndex = 0; viewIndex < _recordedViews.Count; viewIndex++)
+		{
+			SelectView(_recordedViews[viewIndex]);
+			_frameBuilder.CompleteFrame();
+			var viewSceneColor = _sceneColorHandles[_recordedViews[viewIndex]];
+			if (viewSceneColor.IsValid)
+			{
+				_view.SceneRenderTarget.SetCurrentState(_resourceRegistry.GetResourceState(viewSceneColor));
+			}
+		}
+
+		_frameBuilder.CompleteRenderFeatures();
+
+		foreach (var liveView in _viewRegistry.Views)
+		{
+			// A view that did not record this frame publishes nothing, so the UI cannot sample a texture
+			// resolved on an earlier frame.
+			if (_recordedViews.Contains(liveView.View) == false)
+			{
+				liveView.ResolvedSceneViewportState = SceneViewportRenderState.Empty;
+			}
+
+			_viewportStateBus.PublishRenderState(liveView.View, liveView.ResolvedSceneViewportState);
+		}
 	}
 
 	/// <summary>
@@ -1070,6 +1279,40 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		lock (_resourceSync)
 		{
 			_pendingTextures.Add(texture);
+		}
+	}
+
+	/// <summary>
+	/// UI images are texture assets, so they are uploaded through the same pending-texture path as material
+	/// textures. Runs every frame rather than only for a new UI frame, because a retained frame can still show
+	/// a texture whose resources were replaced since.
+	/// </summary>
+	private void RequestGameplayUiImages(GameplayUiRenderFrame frame)
+	{
+		RequestUiImages(frame.Screen);
+
+		for (var i = 0; i < frame.TextureSurfaces.Length; i++)
+		{
+			RequestUiImages(frame.TextureSurfaces[i].Frame);
+		}
+	}
+
+	private void RequestUiImages(UiFrameData frame)
+	{
+		for (var i = 0; i < frame.CommandCount; i++)
+		{
+			var image = frame.Commands[i].Image;
+			if (image is null)
+			{
+				continue;
+			}
+
+			if (image.HasGpuResources || image.ResourceRequestPending)
+			{
+				continue;
+			}
+
+			EnsureTextureResources(image);
 		}
 	}
 

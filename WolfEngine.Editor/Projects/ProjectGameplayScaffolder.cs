@@ -76,7 +76,6 @@ internal static class ProjectGameplayScaffolder
 			   </PropertyGroup>
 
 			   <ItemGroup>
-			     <FrameworkReference Include="Microsoft.AspNetCore.App" />
 			     <EmbeddedResource Include="UI\**\*.css" />
 			   </ItemGroup>
 
@@ -112,7 +111,7 @@ internal static class ProjectGameplayScaffolder
 			  
 			  public sealed class GameplayModule : IGameplayModule
 			  {
-			  	public IEnumerable<ISystem> CreateSystems()
+			  	public IEnumerable<ISystem> CreateSystems(IServiceProvider serviceProvider)
 			  	{
 			  		yield break;
 			  	}

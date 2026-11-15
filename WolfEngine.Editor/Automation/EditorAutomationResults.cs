@@ -1,6 +1,11 @@
 namespace WolfEngine.Editor.Automation;
 
-public sealed record EditorWorkspaceSummaryResult(Guid Id, string Name, IReadOnlyList<string> OpenWindowIds);
+public sealed record EditorWorkspaceSummaryResult(
+	Guid Id,
+	string Name,
+	string OwnedDocument,
+	bool OwnedDocumentHasUnsavedChanges,
+	IReadOnlyList<string> OpenWindowIds);
 
 public sealed record EditorWorkspaceStateResult(
 	Guid ActiveWorkspaceId,
@@ -43,15 +48,25 @@ public sealed record SceneLoadResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+/// <param name="State">The editor's Play-mode state: Edit, Playing or Paused.</param>
+/// <param name="GamePauseReasons">
+/// The Play-mode world's <see cref="WolfEngine.ECS.World.PauseReasons"/>: one bit per pause reason the game holds; 0
+/// when it isn't paused or there is no Play-mode world. Independent of <paramref name="State"/>: the editor's own Pause
+/// leaves these untouched.
+/// </param>
 public sealed record PlayModeStateResult(
 	string State,
+	uint GamePauseReasons,
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+/// <param name="RenderFrameSequence">Every presented frame, including frames that only drew the UI.</param>
+/// <param name="SceneFrameSequence">Frames that ran the render graph; the wait counts these.</param>
 public sealed record RenderFrameWaitResult(
 	int RequestedFrameCount,
 	long EditorFrameSequence,
-	long RenderFrameSequence);
+	long RenderFrameSequence,
+	long SceneFrameSequence);
 
 public sealed record TerrainLayerPaintResult(
 	Guid TerrainEntityId,
@@ -119,6 +134,13 @@ public sealed record AnimationStateResult(
     public global::WolfEngine.SkinnedGeometryResourceStatistics? PrivateGeometry { get; init; }
     public int LastSkinningDispatchCount { get; init; }
 }
+
+public sealed record GameplayStateResult(
+	long Generation,
+	string? LoadedAssemblyPath,
+	bool IsSourceStale,
+	bool IsBuildInProgress,
+	bool LastBuildFailedForCurrentSource);
 
 public sealed record RayTracingSceneStateResult(
 	string TlasIdentity,
@@ -205,3 +227,39 @@ public sealed record AnimationGraphInspectionResult(string? Diagnostic, float Ti
 {
     public ulong PoseHash { get; init; }
 }
+
+/// <summary>The clip editor as automation sees it: the open clip, selection, playhead, keys and preview pose.</summary>
+/// <param name="KeyFrames">Keyed frames per bone name.</param>
+/// <param name="UnkeyedBones">Bones with edits that are shown but not keyed.</param>
+/// <param name="SelectedBoneLocal">The selected bone's local transform at the playhead, as position, Euler degrees and scale.</param>
+/// <param name="PreviewPoseHash">Hash of the preview pose, or zero without a preview. Changes whenever any bone moves.</param>
+public sealed record AnimationClipEditorStateResult(
+	string? AssetId,
+	string ClipName,
+	string? Diagnostic,
+	bool IsReadOnly,
+	bool IsDirty,
+	bool IsPromptPending,
+	int FramesPerSecond,
+	int LengthFrames,
+	bool Loop,
+	float PlayheadFrame,
+	bool IsPlaying,
+	bool AutoKey,
+	string? SkeletonId,
+	int SkeletonBoneCount,
+	string? PreviewModelId,
+	string? SelectedBone,
+	AnimationClipBoneTransformResult? SelectedBoneLocal,
+	IReadOnlyDictionary<string, int[]> KeyFrames,
+	IReadOnlyList<string> UnkeyedBones,
+	int SelectedKeyCount,
+	bool CanUndo,
+	bool CanRedo,
+	ulong PreviewPoseHash,
+	bool CanEditMetadata,
+	Animation.AnimationCurve[] Curves,
+	Animation.AnimationMarker[] Markers);
+
+public sealed record AnimationClipBoneTransformResult(float[] Position, float[] RotationDegrees, float[] Scale);
+

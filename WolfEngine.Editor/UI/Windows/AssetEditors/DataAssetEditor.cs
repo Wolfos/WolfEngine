@@ -5,11 +5,14 @@ using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Editor.UI;
 
 public sealed class DataAssetEditor
 {
+	private static readonly PropertyInfo AnimationSetClipsProperty = typeof(AnimationSet).GetProperty(nameof(AnimationSet.Clips))!;
+
 	private readonly IEditorProjectService _projectService;
 	private readonly IDataAssetStore _dataAssetStore;
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
@@ -17,13 +20,13 @@ public sealed class DataAssetEditor
 	private readonly IEditorUndoRedoService _undoRedoService;
 	private readonly IIconManager _icons;
 	private readonly IAssetSelectionService _assetSelectionService;
+	private readonly VfxAssetEditor _vfxEditor;
 	private DataAssetLoadResult? _loadedAsset;
 	private Guid? _loadedAssetId;
 	private long _loadedAssetDatabaseRevision = -1;
 	private AssetDatabaseEntry? _loadedAssetEntry;
 	private EditorAssetFileSnapshot? _pendingBeforeSnapshot;
 	private bool _hasPendingChanges;
-	private float _clipScrubTime;
 
 	public DataAssetEditor(
 		IEditorProjectService projectService,
@@ -32,7 +35,8 @@ public sealed class DataAssetEditor
 		IEditorAssetSnapshotService assetSnapshotService,
 		IEditorUndoRedoService undoRedoService,
 		IIconManager icons,
-		IAssetSelectionService assetSelectionService)
+		IAssetSelectionService assetSelectionService,
+		VfxAssetEditor vfxEditor)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
@@ -41,6 +45,7 @@ public sealed class DataAssetEditor
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
 		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
+		_vfxEditor = vfxEditor ?? throw new ArgumentNullException(nameof(vfxEditor));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -64,7 +69,10 @@ public sealed class DataAssetEditor
 			return;
 		}
 
-		if (DrawObjectProperties(loadedAsset.Asset, loadedAsset.DataAssetType, includeHeader: false))
+		var changed = loadedAsset.Asset is VfxAsset vfxAsset
+			? _vfxEditor.Draw(vfxAsset, CreateAssetLinkSelectionButton())
+			: DrawObjectProperties(loadedAsset.Asset, loadedAsset.DataAssetType, includeHeader: false);
+		if (changed)
 		{
 			BeginPendingChange(asset);
 			_hasPendingChanges = true;
@@ -122,17 +130,18 @@ public sealed class DataAssetEditor
 			return DrawTerrainLayerSetProperties(terrainLayerSet, includeHeader: false, headerLabel: null);
 		}
 		if (target is AnimationSet set) return DrawAnimationSet(set);
-		if (target is AnimationSequence sequence) return DrawAnimationSequence(sequence);
 		if (target is BoneMask mask) return DrawBoneMask(mask);
 
 		var changed = false;
-		foreach (var property in GetEditableProperties(targetType))
+		foreach (var property in InspectorLayout.GetEditableProperties(targetType))
 		{
+			InspectorLayout.DrawDecorations(property);
+
 			ImGui.PushID(property.Name);
 			try
 			{
 				var value = property.GetValue(target);
-				var drawResult = DrawValue(property.Name, property.PropertyType, value);
+				var drawResult = DrawValue(property.Name, property.PropertyType, value, property);
 				if (drawResult.Changed)
 				{
 					property.SetValue(target, drawResult.Value);
@@ -150,146 +159,86 @@ public sealed class DataAssetEditor
 
 	private bool DrawAnimationSet(AnimationSet set)
 	{
-		var skeleton = set.SkeletonId;
-		var changed = AnimationWindow.AssetChoice(_projectService, "Skeleton", AssetType.Skeleton, ref skeleton);
-		set.SkeletonId = skeleton;
-		foreach (var slot in set.Clips.Keys.ToArray())
+		var skeleton = set.Skeleton;
+		var changed = DrawAssetRef("Skeleton", ref skeleton);
+		set.Skeleton = skeleton;
+
+		InspectorLayout.DrawDecorations(AnimationSetClipsProperty);
+		var slots = set.Clips.Keys.ToArray();
+		for (var slotIndex = 0; slotIndex < slots.Length; slotIndex++)
 		{
-			ImGui.PushID(slot);
-			var name = slot;
-			if (ImGui.InputText("Slot name", ref name, 128) && !string.IsNullOrWhiteSpace(name) &&
-				!string.Equals(name, slot, StringComparison.Ordinal) && !set.Clips.ContainsKey(name))
+			var slot = slots[slotIndex];
+
+			ImGui.PushID(slotIndex);
+			try
 			{
-				var clip = set.Clips[slot];
-				set.Clips.Remove(slot);
-				set.Clips.Add(name, clip);
-				changed = true;
+				var name = slot;
+				if (EditorUIUtility.InputText("Slot name", ref name, 128) &&
+					string.IsNullOrWhiteSpace(name) == false &&
+					string.Equals(name, slot, StringComparison.Ordinal) == false &&
+					set.Clips.ContainsKey(name) == false)
+				{
+					var renamed = set.Clips[slot];
+					set.Clips.Remove(slot);
+					set.Clips.Add(name, renamed);
+					changed = true;
+				}
+				else
+				{
+					name = slot;
+				}
+
+				var entry = set.Clips[name];
+				var clip = entry.Clip;
+				if (DrawAssetRef("Clip", ref clip))
+				{
+					entry.Clip = clip;
+					changed = true;
+				}
+
+				var speed = entry.PlaybackSpeed;
+				if (EditorUIUtility.InputFloat("Playback speed", ref speed))
+				{
+					entry.PlaybackSpeed = speed;
+					changed = true;
+				}
+
+				if (ImGui.Button("Remove slot"))
+				{
+					set.Clips.Remove(name);
+					changed = true;
+				}
 			}
-			var id = set.Clips.GetValueOrDefault(name, set.Clips.GetValueOrDefault(slot));
-			if (AnimationWindow.DataAssetChoice<AnimationSequence>(_projectService, "Clip", ref id))
+			finally
 			{
-				set.Clips[name] = id;
-				changed = true;
+				ImGui.PopID();
 			}
-			if (ImGui.Button("Remove slot")) { set.Clips.Remove(name); changed = true; }
-			ImGui.PopID();
+
+			InspectorLayout.DrawSpace(12.0f);
+			ImGui.Separator();
+			InspectorLayout.DrawSpace();
 		}
+
 		if (ImGui.Button("Add clip slot"))
 		{
 			var name = "Clip" + set.Clips.Count;
-			while (set.Clips.ContainsKey(name)) name += "_";
-			set.Clips.Add(name, Guid.Empty);
+			while (set.Clips.ContainsKey(name))
+			{
+				name += "_";
+			}
+
+			set.Clips.Add(name, new AnimationSetEntry());
 			changed = true;
 		}
-		return changed;
-	}
 
-	private bool DrawAnimationSequence(AnimationSequence sequence)
-	{
-		var changed = false;
-		var speed = sequence.PlaybackSpeed;
-		if (ImGui.InputFloat("Playback speed", ref speed)) { sequence.PlaybackSpeed = speed; changed = true; }
-		var clipId = sequence.ClipId;
-		changed |= AnimationWindow.AssetChoice(_projectService, "Imported clip", AssetType.AnimationClip, ref clipId);
-		sequence.ClipId = clipId;
-		var duration = sequence.ClipId == Guid.Empty ? 1f : AssetDatabase.GetInstance<AnimationClip>(sequence.ClipId)?.Duration ?? 1f;
-		ImGui.SliderFloat("Timeline seconds", ref _clipScrubTime, 0, Math.Max(duration, .01f));
-		for (var i = 0; i < sequence.Curves.Count; i++)
-		{
-			ImGui.PushID(i);
-			var curve = sequence.Curves[i];
-			ImGui.SeparatorText("Curve " + (i + 1));
-			var name = curve.Name;
-			if (ImGui.InputText("Name", ref name, 128)) { curve.Name = name; changed = true; }
-			var interpolation = (int)curve.Interpolation;
-			if (ImGui.Combo("Interpolation", ref interpolation, "Step\0Linear\0Cubic\0"))
-			{
-				curve.Interpolation = (CurveInterpolation)interpolation;
-				changed = true;
-			}
-			var origin = ImGui.GetCursorScreenPos();
-			var size = new Vector2(Math.Max(100, ImGui.GetContentRegionAvail().X), 80);
-			ImGui.InvisibleButton("Curve plot", size);
-			var draw = ImGui.GetWindowDrawList();
-			draw.AddRectFilled(origin, origin + size, 0xFF242424);
-			try
-			{
-				var sampler = curve.Compile();
-				var minimum = curve.Values.Length == 0 ? 0 : Math.Min(0, curve.Values.Min());
-				var maximum = curve.Values.Length == 0 ? 1 : Math.Max(1, curve.Values.Max());
-				var cursor = 0;
-				var previous = origin;
-				for (var sample = 0; sample <= 100; sample++)
-				{
-					var value = sampler.Evaluate(duration * sample / 100, ref cursor, 0);
-					var position = origin + new Vector2(size.X * sample / 100, size.Y * (1 - (value - minimum) / (maximum - minimum)));
-					if (sample > 0) draw.AddLine(previous, position, 0xFF60D8F0, 2);
-					previous = position;
-				}
-			}
-			catch (Exception exception) { ImGui.TextDisabled("Curve preview: " + exception.Message); }
-			for (var key = 0; key < Math.Min(curve.Times.Length, curve.Values.Length); key++)
-			{
-				ImGui.PushID(key);
-				var time = curve.Times[key]; var value = curve.Values[key];
-				if (ImGui.InputFloat("Time", ref time)) { curve.Times[key] = time; changed = true; }
-				if (ImGui.InputFloat("Value", ref value)) { curve.Values[key] = value; changed = true; }
-				if (curve.Interpolation == CurveInterpolation.CubicHermite)
-				{
-					if (curve.InTangents?.Length != curve.Times.Length) curve.InTangents = new float[curve.Times.Length];
-					if (curve.OutTangents?.Length != curve.Times.Length) curve.OutTangents = new float[curve.Times.Length];
-					var input = curve.InTangents[key]; var output = curve.OutTangents[key];
-					if (ImGui.InputFloat("In tangent", ref input)) { curve.InTangents[key] = input; changed = true; }
-					if (ImGui.InputFloat("Out tangent", ref output)) { curve.OutTangents[key] = output; changed = true; }
-				}
-				if (ImGui.Button("Remove key"))
-				{
-					curve.Times = curve.Times.Where((_, index) => index != key).ToArray();
-					curve.Values = curve.Values.Where((_, index) => index != key).ToArray();
-					curve.InTangents = curve.InTangents?.Where((_, index) => index != key).ToArray();
-					curve.OutTangents = curve.OutTangents?.Where((_, index) => index != key).ToArray();
-					changed = true;
-				}
-				ImGui.PopID();
-			}
-			if (ImGui.Button("Add key at timeline time"))
-			{
-				var times = curve.Times.Append(_clipScrubTime).ToArray();
-				var values = curve.Values.Append(0f).ToArray();
-				var order = Enumerable.Range(0, times.Length).OrderBy(index => times[index]).ToArray();
-				curve.Times = order.Select(index => times[index]).ToArray();
-				curve.Values = order.Select(index => values[index]).ToArray();
-				if (curve.Interpolation == CurveInterpolation.CubicHermite)
-				{
-					curve.InTangents = new float[times.Length]; curve.OutTangents = new float[times.Length];
-				}
-				changed = true;
-			}
-			if (ImGui.Button("Remove curve")) { sequence.Curves.RemoveAt(i); changed = true; }
-			ImGui.PopID();
-		}
-		if (ImGui.Button("Add curve")) { sequence.Curves.Add(new AnimationCurve { Name = "Curve" + sequence.Curves.Count }); changed = true; }
-		for (var i = 0; i < sequence.Markers.Count; i++)
-		{
-			ImGui.PushID("marker" + i);
-			var marker = sequence.Markers[i]; var name = marker.Name; var time = marker.Time;
-			if (ImGui.InputText("Marker", ref name, 128)) { marker.Name = name; changed = true; }
-			if (ImGui.InputFloat("At seconds", ref time)) { marker.Time = time; changed = true; }
-			if (ImGui.Button("Remove marker")) { sequence.Markers.RemoveAt(i); changed = true; }
-			ImGui.PopID();
-		}
-		if (ImGui.Button("Add marker at timeline time"))
-		{
-			sequence.Markers.Add(new AnimationMarker { Name = "Marker", Time = _clipScrubTime }); changed = true;
-		}
 		return changed;
 	}
 
 	private bool DrawBoneMask(BoneMask mask)
 	{
-		var skeleton = mask.SkeletonId;
-		var changed = AnimationWindow.AssetChoice(_projectService, "Skeleton", AssetType.Skeleton, ref skeleton);
-		mask.SkeletonId = skeleton;
+		var skeleton = mask.Skeleton;
+		var changed = DrawAssetRef("Skeleton", ref skeleton);
+		mask.Skeleton = skeleton;
 		for (var i = 0; i < mask.Bones.Count; i++)
 		{
 			ImGui.PushID(i);
@@ -444,25 +393,36 @@ public sealed class DataAssetEditor
 		return true;
 	}
 
-	private PropertyDrawerContext CreatePropertyDrawerContext(string label, Type valueType, object? value)
+	private bool DrawAssetRef<T>(string label, ref AssetRef<T> value)
+	{
+		return _propertyDrawerRegistry.DrawAssetRef(label, ref value, CreateAssetLinkSelectionButton());
+	}
+
+	private PropertyDrawerContext CreatePropertyDrawerContext(string label, Type valueType, object? value, MemberInfo? member = null)
 	{
 		return new PropertyDrawerContext(
 			label,
 			valueType,
 			value,
-			AssetLinkSelectionButton: new AssetLinkSelectionButton(
-				_icons.Get("search"),
-				assetId => _assetSelectionService.Select(assetId)));
+			Member: member,
+			AssetLinkSelectionButton: CreateAssetLinkSelectionButton());
 	}
 
-	internal PropertyDrawerResult DrawValue(string label, Type valueType, object? value)
+	private AssetLinkSelectionButton CreateAssetLinkSelectionButton()
+	{
+		return new AssetLinkSelectionButton(
+			_icons.Get("search"),
+			assetId => _assetSelectionService.Select(assetId));
+	}
+
+	internal PropertyDrawerResult DrawValue(string label, Type valueType, object? value, MemberInfo? member = null)
 	{
 		if (valueType.IsArray)
 		{
 			return DrawArray(label, valueType, value as Array);
 		}
 
-		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, valueType, value));
+		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, valueType, value, member));
 		if (drawResult.Handled)
 		{
 			return drawResult;
@@ -579,15 +539,6 @@ public sealed class DataAssetEditor
 		});
 
 		return new PropertyDrawerResult(true, changed, next);
-	}
-
-	private static IReadOnlyList<PropertyInfo> GetEditableProperties(Type targetType)
-	{
-		return targetType
-			.GetProperties(BindingFlags.Instance | BindingFlags.Public)
-			.Where(property => property.CanRead && property.CanWrite && property.GetIndexParameters().Length == 0)
-			.OrderBy(property => property.Name, StringComparer.OrdinalIgnoreCase)
-			.ToList();
 	}
 
 	private static bool IsNestedObjectType(Type type)

@@ -10,6 +10,7 @@ public readonly struct SharedDrawIndirectEncodeResources
 		IGfxBuffer? drawArgsBuffer,
 		ulong drawArgsBaseOffsetBytes,
 		IGfxBuffer? materialGenerationBuffer,
+		IGfxBuffer? visibleInstanceBuffer,
 		MeshIndexStream indexStream = MeshIndexStream.Main)
 	{
 		InstanceBuffer = instanceBuffer;
@@ -17,6 +18,7 @@ public readonly struct SharedDrawIndirectEncodeResources
 		DrawArgsBuffer = drawArgsBuffer;
 		DrawArgsBaseOffsetBytes = drawArgsBaseOffsetBytes;
 		MaterialGenerationBuffer = materialGenerationBuffer;
+		VisibleInstanceBuffer = visibleInstanceBuffer;
 		IndexStream = indexStream;
 	}
 
@@ -25,10 +27,22 @@ public readonly struct SharedDrawIndirectEncodeResources
 	public IGfxBuffer? DrawArgsBuffer { get; }
 	public ulong DrawArgsBaseOffsetBytes { get; }
 	public IGfxBuffer? MaterialGenerationBuffer { get; }
+
+	/// <summary>
+	/// The visible instance list the draw args index into. Bound whole: each view's args already point into
+	/// that view's slice.
+	/// </summary>
+	public IGfxBuffer? VisibleInstanceBuffer { get; }
+
 	public MeshIndexStream IndexStream { get; }
 
 	internal SharedDrawIndirectEncodeResources ForLane(in GpuDrawExecutionLaneDefinition lane) => new(
-		InstanceBuffer, MaterialBuffer, DrawArgsBuffer, DrawArgsBaseOffsetBytes, MaterialGenerationBuffer,
+		InstanceBuffer,
+		MaterialBuffer,
+		DrawArgsBuffer,
+		DrawArgsBaseOffsetBytes,
+		MaterialGenerationBuffer,
+		VisibleInstanceBuffer,
 		IndexStream == MeshIndexStream.Main || lane.DrawKind != GpuDrawKind.Mesh ? MeshIndexStream.Main
 			: lane.BucketId == GpuDrawBucketId.AlphaTest ? MeshIndexStream.ShadowAlphaTest : MeshIndexStream.ShadowOpaque);
 
@@ -36,7 +50,8 @@ public readonly struct SharedDrawIndirectEncodeResources
 		GpuDrawResources resources,
 		IGfxBuffer? drawArgsBuffer = null,
 		ulong drawArgsBaseOffsetBytes = 0,
-		MeshIndexStream indexStream = MeshIndexStream.Main)
+		MeshIndexStream indexStream = MeshIndexStream.Main,
+		IGfxBuffer? visibleInstanceBuffer = null)
 	{
 		ArgumentNullException.ThrowIfNull(resources);
 		return new SharedDrawIndirectEncodeResources(
@@ -45,6 +60,7 @@ public readonly struct SharedDrawIndirectEncodeResources
 			drawArgsBuffer ?? resources.DrawArgsBuffer,
 			drawArgsBaseOffsetBytes,
 			resources.MaterialGenerationBuffer,
+			visibleInstanceBuffer ?? resources.VisibleInstanceBuffer,
 			indexStream);
 	}
 }

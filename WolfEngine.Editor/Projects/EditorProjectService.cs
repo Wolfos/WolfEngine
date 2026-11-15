@@ -194,6 +194,10 @@ public sealed class EditorProjectService : IEditorProjectService
 			var manifest = EditorProjectManifestFile.Load(fullProjectRoot);
 			ValidateManifest(fullProjectRoot, manifest);
 			var shouldRebuildAssetDatabase = Directory.Exists(libraryPath) == false;
+
+			// Upgrade sources before importing them; the importer cannot read the old reference shape.
+			var migratedAnimationAssets = AnimationSequenceMigration.UpgradeProject(fullProjectRoot) +
+				AnimationAssetRefMigration.UpgradeProject(fullProjectRoot);
 			_projectRootPath = fullProjectRoot;
 			_shaderProvider?.SetProjectRoot(_projectRootPath);
 			_projectManifest = manifest;
@@ -204,6 +208,11 @@ public sealed class EditorProjectService : IEditorProjectService
 			if (shouldRebuildAssetDatabase)
 			{
 				_notificationService?.ReportInfo("Library folder was missing. Rebuilt the asset database from project sources.");
+			}
+
+			if (migratedAnimationAssets > 0)
+			{
+				_notificationService?.ReportInfo($"Upgraded {migratedAnimationAssets} animation assets to the current format.");
 			}
 			ClearUndoHistory();
 			return true;
@@ -463,7 +472,7 @@ public sealed class EditorProjectService : IEditorProjectService
 			throw new FileNotFoundException($"Asset source '{normalizedRelativePath}' was not found.");
 		}
 
-		var suffix = GetAssetSourceSuffix(sourceName);
+		var suffix = AssetSourceSuffix.Get(sourceName);
 		var validatedName = ValidateNewFileSystemName(newName, "Asset name");
 		var newSourceName = validatedName + suffix;
 		var parentPath = ProjectPathUtility.GetFolderPath(normalizedRelativePath);
@@ -704,27 +713,6 @@ public sealed class EditorProjectService : IEditorProjectService
 				OldPath: path,
 				NewPath: ProjectPathUtility.NormalizeRelativePath(newFolderPath + "/" + path[oldPrefix.Length..])))
 			.ToList();
-	}
-
-	private static string GetAssetSourceSuffix(string fileName)
-	{
-		string[] compoundSuffixes =
-		[
-			MaterialAsset.FileExtension,
-			DataAssetFile.FileExtension,
-			EditorSceneAssetFile.FileExtension,
-			PrefabAssetFile.FileExtension
-		];
-
-		for (var i = 0; i < compoundSuffixes.Length; i++)
-		{
-			if (fileName.EndsWith(compoundSuffixes[i], StringComparison.OrdinalIgnoreCase))
-			{
-				return fileName[^compoundSuffixes[i].Length..];
-			}
-		}
-
-		return Path.GetExtension(fileName);
 	}
 
 	private static string ValidateNewFileSystemName(string newName, string label)

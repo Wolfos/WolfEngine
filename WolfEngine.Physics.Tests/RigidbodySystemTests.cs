@@ -766,6 +766,72 @@ public sealed class RigidbodySystemTests
 		return entity;
 	}
 
+	[TestCase(false)]
+	[TestCase(true)]
+	public void PhysicsUpdate_ColliderMovedInFrameUpdateFollowsEntity(bool kinematic)
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Moved Box", Matrix4x4.Identity);
+		world.AddComponent(entity, BoxCollider.CreateDefault());
+		if (kinematic)
+		{
+			var rigidbody = Rigidbody.CreateDefault();
+			rigidbody.BodyType = RigidbodyBodyType.Kinematic;
+			rigidbody.GravityFactor = 0.0f;
+			world.AddComponent(entity, rigidbody);
+		}
+
+		var transforms = new TransformSystem();
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(fixedDeltaTime, world);
+
+		// A frame update moves it, and the frame's transform pass resolves the move before the next fixed step.
+		world.SetLocalPosition(entity, new Vector3(5.0f, 0.0f, 0.0f));
+		transforms.PreRender(fixedDeltaTime, world);
+
+		for (var step = 0; step < 30; step++)
+		{
+			system.PhysicsUpdate(fixedDeltaTime, world);
+		}
+
+		Assert.That(
+			system.TryRaycast(world, new Vector3(5.0f, 5.0f, 0.0f), new Vector3(0.0f, -10.0f, 0.0f), out var hit),
+			Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(entity));
+		Assert.That(
+			system.TryRaycast(world, new Vector3(0.0f, 5.0f, 0.0f), new Vector3(0.0f, -10.0f, 0.0f), out _),
+			Is.False);
+		Assert.That(world.GetComponent<LocalTransform>(entity).LocalPosition.X, Is.EqualTo(5.0f).Within(0.001f));
+	}
+
+	[Test]
+	public void PhysicsUpdate_StaticChildColliderFollowsMovedParent()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = new World(WorldTag.Game);
+		var parent = world.CreateEntity("Parent", Matrix4x4.Identity);
+		var child = world.CreateEntity("Child Box", Matrix4x4.Identity);
+		world.SetParent(child, parent);
+		world.AddComponent(child, BoxCollider.CreateDefault());
+		var transforms = new TransformSystem();
+		using var system = new RigidbodySystem();
+		transforms.PreRender(fixedDeltaTime, world);
+		system.PhysicsUpdate(fixedDeltaTime, world);
+
+		world.SetLocalPosition(parent, new Vector3(0.0f, 0.0f, 4.0f));
+		transforms.PreRender(fixedDeltaTime, world);
+		system.PhysicsUpdate(fixedDeltaTime, world);
+
+		Assert.That(
+			system.TryRaycast(world, new Vector3(0.0f, 5.0f, 4.0f), new Vector3(0.0f, -10.0f, 0.0f), out var hit),
+			Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(child));
+		Assert.That(
+			system.TryRaycast(world, new Vector3(0.0f, 5.0f, 0.0f), new Vector3(0.0f, -10.0f, 0.0f), out _),
+			Is.False);
+	}
+
 	[Test]
 	public void TryMoveKinematicBody_MovesBodyWithoutRecreation()
 	{
@@ -902,6 +968,58 @@ public sealed class RigidbodySystemTests
 		Assert.That(hit.Normal.X, Is.LessThan(-0.5f));
 	}
 
+	[TestCase(5.0f)]
+	[TestCase(1.25f)]
+	[TestCase(0.5f)]
+	public void TryCastCapsule_FractionIsRelativeToTheCastDisplacement(float castLength)
+	{
+		// The wall face is at x = 1.5 and the capsule radius is 0.5, so contact happens after 1 m of travel
+		// whatever the cast length. Short casts that stop short of the wall still report a hit when they reach it.
+		var world = new World(WorldTag.Game);
+		var wall = world.CreateEntity("Wall", Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		var wallCollider = BoxCollider.CreateDefault();
+		wallCollider.HalfExtents = new Vector3(0.5f, 2.0f, 2.0f);
+		world.AddComponent(wall, wallCollider);
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var start = new Vector3(Math.Max(0.0f, 1.0f - castLength * 0.8f), 0.0f, 0.0f);
+		var expectedTravel = 1.0f - start.X;
+
+		var castHit = system.TryCastCapsule(
+			world,
+			start,
+			Quaternion.Identity,
+			CapsuleCollider.CreateDefault(),
+			new Vector3(castLength, 0.0f, 0.0f),
+			out var hit);
+
+		Assert.That(castHit, Is.True);
+		Assert.That(hit.Fraction * castLength, Is.EqualTo(expectedTravel).Within(0.01f));
+	}
+
+	[Test]
+	public void TryCastCapsule_StartsFromTheGivenPosition()
+	{
+		var world = new World(WorldTag.Game);
+		var wall = world.CreateEntity("Wall", Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		var wallCollider = BoxCollider.CreateDefault();
+		wallCollider.HalfExtents = new Vector3(0.5f, 2.0f, 2.0f);
+		world.AddComponent(wall, wallCollider);
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var passesBeside = system.TryCastCapsule(
+			world,
+			new Vector3(0.0f, 0.0f, 10.0f),
+			Quaternion.Identity,
+			CapsuleCollider.CreateDefault(),
+			new Vector3(5.0f, 0.0f, 0.0f),
+			out _);
+
+		Assert.That(passesBeside, Is.False);
+	}
+
 	[Test]
 	public void PhysicsUpdate_DynamicBodyWithCapsuleCenterOffsetPreservesEntityTransform()
 	{
@@ -941,6 +1059,66 @@ public sealed class RigidbodySystemTests
 		Assert.That(count, Is.EqualTo(1));
 		Assert.That(hits[0].Entity, Is.EqualTo(obstacle));
 		Assert.That(hits[0].PenetrationDepth, Is.GreaterThanOrEqualTo(0.0f));
+	}
+
+	[TestCase(1.3f, 0.0f, true)]
+	[TestCase(0.9f, 0.0f, false)]
+	[TestCase(1.3f, 10.0f, false)]
+	public void OverlapCapsule_UsesTheGivenPositionAwayFromTheOrigin(float x, float z, bool overlaps)
+	{
+		// The wall face is at x = 1.5 and the capsule radius is 0.5: at x = 1.3 the capsule is 0.3 m inside the wall,
+		// at x = 0.9 it is 0.1 m clear of it, and at z = 10 it is well beside it.
+		var world = new World(WorldTag.Game);
+		var wall = world.CreateEntity("Wall", Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		var wallCollider = BoxCollider.CreateDefault();
+		wallCollider.HalfExtents = new Vector3(0.5f, 2.0f, 2.0f);
+		world.AddComponent(wall, wallCollider);
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var hits = new List<PhysicsOverlapHit>();
+		var count = system.OverlapCapsule(
+			world,
+			new Vector3(x, 0.0f, z),
+			Quaternion.Identity,
+			CapsuleCollider.CreateDefault(),
+			hits);
+
+		if (overlaps == false)
+		{
+			Assert.That(count, Is.Zero);
+
+			return;
+		}
+
+		Assert.That(count, Is.EqualTo(1));
+		Assert.That(hits[0].Entity, Is.EqualTo(wall));
+		Assert.That(hits[0].PenetrationDepth, Is.EqualTo(0.3f).Within(0.02f));
+		Assert.That(MathF.Abs(hits[0].Normal.X), Is.GreaterThan(0.9f));
+	}
+
+	[Test]
+	public void OverlapCapsule_AppliesTheGivenRotation()
+	{
+		// At x = 0.7 an upright capsule reaches x = 1.2, short of the wall face at 1.5. Lying along X,
+		// its half height of 0.5 plus radius 0.5 reaches x = 1.7, inside the wall.
+		var world = new World(WorldTag.Game);
+		var wall = world.CreateEntity("Wall", Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		var wallCollider = BoxCollider.CreateDefault();
+		wallCollider.HalfExtents = new Vector3(0.5f, 2.0f, 2.0f);
+		world.AddComponent(wall, wallCollider);
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var hits = new List<PhysicsOverlapHit>();
+		var position = new Vector3(0.7f, 0.0f, 0.0f);
+		var lying = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 2);
+
+		var upright = system.OverlapCapsule(world, position, Quaternion.Identity, CapsuleCollider.CreateDefault(), hits);
+		var onItsSide = system.OverlapCapsule(world, position, lying, CapsuleCollider.CreateDefault(), hits);
+
+		Assert.That(upright, Is.Zero);
+		Assert.That(onItsSide, Is.EqualTo(1));
 	}
 
 	[Test]

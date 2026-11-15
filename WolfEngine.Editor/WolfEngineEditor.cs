@@ -8,6 +8,7 @@ using WolfEngine.Input;
 using WolfEngine.Logging;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Features;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Animation;
@@ -16,6 +17,7 @@ using WolfEngine.Editor.Projects;
 using WolfEngine.Physics;
 using WolfEngine.Editor.Automation;
 using WolfEngine.Audio;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Editor;
 
@@ -56,10 +58,16 @@ public class WolfEngineEditor
 	private readonly List<ISystem> _registeredGameplaySystems = new();
 	private readonly FixedStepAccumulator _physicsAccumulator = new(PhysicsFixedDeltaTime, PhysicsMaxStepsPerFrame);
 	private readonly IServiceProvider _serviceProvider;
+	private readonly IRenderFeatureRegistry? _renderFeatures;
 	private readonly RigidbodySystem _rigidbodySystem;
 	private readonly IAudioRuntime _audioRuntime;
 	private readonly GameplayExceptionReporter _gameplayExceptionReporter;
 	private EditorPlayState _lastAudioPlayState = EditorPlayState.Edit;
+	private readonly ViewportFrameLimiter _viewportFrameLimiter = new();
+	// Time the editor has advanced since it last published a scene snapshot, which is what preview views advance by.
+	private float _unpublishedSceneTime;
+	// The world the last scene snapshot showed. A new one is drawn at once rather than when the limit next allows.
+	private World? _lastPublishedSceneWorld;
 
 	private EditorScene _currentScene = null!;
 
@@ -132,7 +140,9 @@ public class WolfEngineEditor
 		_audioRuntime = audioRuntime ?? throw new ArgumentNullException(nameof(audioRuntime));
 		_gameplayExceptionReporter = new GameplayExceptionReporter(logService);
 		_worldManager.SetExceptionHandler(SystemExecutionGroup.Gameplay, _gameplayExceptionReporter.ReportSystem);
-		_editorRenderViews = serviceProvider?.GetService(typeof(EditorRenderViews)) as EditorRenderViews;
+		ArgumentNullException.ThrowIfNull(serviceProvider);
+		_editorRenderViews = serviceProvider.GetService(typeof(EditorRenderViews)) as EditorRenderViews;
+		_renderFeatures = serviceProvider.GetService(typeof(IRenderFeatureRegistry)) as IRenderFeatureRegistry;
 		_serviceProvider = serviceProvider;
 		_rigidbodySystem = serviceProvider.GetRequiredService<RigidbodySystem>();
 	}
@@ -181,6 +191,10 @@ public class WolfEngineEditor
         _worldManager.AddSystem(new BindPoseAnimationSystem(), SystemExecutionGroup.Shared);
         _worldManager.AddSystem(new AnimationSystem(WorldTag.Game), SystemExecutionGroup.Gameplay);
 		_worldManager.AddSystem<TransformSystem>();
+		// After transforms, so attached effects follow this frame's poses; gameplay group, so they pause with Play.
+		_worldManager.AddSystem(
+			new VfxSystem(_serviceProvider.GetRequiredService<VfxService>()),
+			SystemExecutionGroup.Gameplay);
 		_editorCameraSystem = _serviceProvider.GetRequiredService<EditorCameraSystem>();
 		_worldManager.AddSystem(_editorCameraSystem);
 		_worldManager.AddSystem(_boxColliderGizmoDrawer);
@@ -236,6 +250,9 @@ public class WolfEngineEditor
 			if (_operationService.Current.IsActive == false)
 			{
 				HandleGameplayBuildAndReload();
+				_serviceProvider.GetRequiredService<IEditorCommandService>().ProcessDeferredSceneLoad();
+				// Before scene loads: stopping Play mode cancels a load requested in the same frame.
+				ProcessQuitRequest();
 				ProcessSceneLoadRequest();
 				SyncCurrentScene();
 				ValidateSelection();
@@ -259,7 +276,16 @@ public class WolfEngineEditor
 
 			using (FrameProfiler.Instance.Measure("Publish Snapshot"))
 			{
-				PublishSnapshot(deltaTime);
+				PublishCamera();
+				// Stay one frame ahead of the renderer. A snapshot write waits for its slot, but that slot is freed
+				// by the last scene frame, not by a UI-only frame published since, so it is not enough on its own.
+				_editorFrameCoordinator.WaitUntilObserved();
+				_unpublishedSceneTime += deltaTime;
+				if (IsSceneFrameDue(frameStart))
+				{
+					PublishSnapshot(_unpublishedSceneTime);
+					_unpublishedSceneTime = 0.0f;
+				}
 			}
 
 			using (FrameProfiler.Instance.Measure("UI"))
@@ -282,61 +308,77 @@ public class WolfEngineEditor
 			}
 
 			FrameProfiler.Instance.EndFrame();
-			ApplyEditorFrameCap(stopwatch, frameStart);
-		}
-	}
-
-	private static void ApplyEditorFrameCap(Stopwatch stopwatch, TimeSpan frameStart)
-	{
-		if (EditorPreferences.GetLimitFPS() == false)
-		{
-			Thread.Sleep(0);
-			return;
-		}
-
-		var maxFPS = EditorPreferences.GetMaxFPS();
-		if (maxFPS <= 0)
-		{
-			Thread.Sleep(0);
-			return;
-		}
-
-		var targetFrameDuration = TimeSpan.FromSeconds(1.0 / maxFPS);
-		while (true)
-		{
-			var elapsed = stopwatch.Elapsed - frameStart;
-			var remaining = targetFrameDuration - elapsed;
-			if (remaining <= TimeSpan.Zero)
-			{
-				break;
-			}
-
-			if (remaining > TimeSpan.FromMilliseconds(2))
-			{
-				Thread.Sleep(1);
-				continue;
-			}
-
 			Thread.Sleep(0);
 		}
 	}
 
-	private void PublishSnapshot(float deltaTime)
+	/// <summary>
+	/// Whether this frame draws the 3D views. The editor UI is drawn every frame; the views only as often as the
+	/// viewport frame limit allows, and the renderer shows their last image in between.
+	/// </summary>
+	private bool IsSceneFrameDue(TimeSpan now)
 	{
-		ref var editorCamera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
-		ref var editorCameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
-		var (camera, cameraWorldTransform) = GetViewportCamera(
-			_playSession.State,
-			_currentScene,
-			editorCamera,
-			editorCameraWorldTransform);
+		// A new world is drawn at once, so a scene load or Play-mode switch never shows the old one for a frame.
+		var worldChanged = ReferenceEquals(_lastPublishedSceneWorld, _currentScene.World) == false;
+		// A debug view samples a texture that lives only for the frame that drew it, so it cannot be held.
+		var showsDebugView = string.Equals(
+			_viewportStateBus.GetUiState(RenderViewId.Primary).RequestedDebugViewId,
+			SceneDebugViewIds.FinalColor,
+			StringComparison.Ordinal) == false;
+		if (EditorPreferences.GetLimitFPS() == false ||
+		    worldChanged ||
+		    showsDebugView)
+		{
+			_viewportFrameLimiter.Reset();
+			return true;
+		}
+
+		return _viewportFrameLimiter.TryBeginFrame(now, EditorPreferences.GetMaxFPS());
+	}
+
+	/// <summary>Publishes the viewport camera for editor tools. Every frame, including frames that draw no scene.</summary>
+	private void PublishCamera()
+	{
+		var (camera, cameraWorldTransform) = GetCurrentViewportCamera();
 		_cameraContext.Publish(camera, cameraWorldTransform);
+	}
+
+	private void PublishSnapshot(float sceneDeltaTime)
+	{
+		var (camera, cameraWorldTransform) = GetCurrentViewportCamera();
 		// The scene view renders the current scene's world only; the editor camera lives in the editor world and is
 		// passed here explicitly, so that world contributes no draws and needs no view of its own.
 		_viewSubmissions.Clear();
 		_viewSubmissions.Add(new RenderViewSubmission(RenderViewId.Primary, camera, cameraWorldTransform, GetConfig()));
-		_editorRenderViews?.AppendSubmissions(deltaTime, _viewSubmissions);
+		_editorRenderViews?.AppendSubmissions(sceneDeltaTime, _viewSubmissions);
 		_renderPipeline.PublishSnapshot(_viewSubmissions);
+		_lastPublishedSceneWorld = _currentScene.World;
+	}
+
+	private (Camera Camera, WorldTransform CameraWorldTransform) GetCurrentViewportCamera()
+	{
+		ref var editorCamera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
+		ref var editorCameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
+		return GetViewportCamera(
+			_playSession.State,
+			_currentScene,
+			editorCamera,
+			editorCameraWorldTransform);
+	}
+
+	/// <summary>
+	/// Gameplay quitting from Play mode, such as from its main menu, stops Play mode. The editor itself stays open.
+	/// </summary>
+	private void ProcessQuitRequest()
+	{
+		var requests = _serviceProvider.GetRequiredService<ApplicationQuitRequests>();
+		if (requests.TryTake(_playSession.RuntimeScene?.World) == false)
+		{
+			return;
+		}
+
+		UnbindGameplayModule();
+		_playSession.Stop();
 	}
 
 	private void ProcessSceneLoadRequest()
@@ -387,6 +429,13 @@ public class WolfEngineEditor
 			return;
 		}
 
+		// The gameplay module's own update is game logic, so it stops with the world; menus that must run while
+		// paused are systems tagged WorldTag.AnyGame.
+		if (runtimeScene.World.IsPaused)
+		{
+			return;
+		}
+
 		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.Update),
 			() => _boundGameplayModule?.Update(deltaTime, runtimeScene.World));
@@ -414,8 +463,21 @@ public class WolfEngineEditor
 			return;
 		}
 
+		// A paused world doesn't advance physics time. Unlike the editor's own Pause, the accumulator keeps its
+		// value, so interpolated poses hold still and resuming continues from the same step.
+		if (runtimeScene.World.IsPaused)
+		{
+			return;
+		}
+
 		_physicsAccumulator.Execute(deltaTime, fixedDeltaTime =>
 		{
+			// Gameplay can pause during a step; the rest of this frame's steps are dropped rather than run paused.
+			if (runtimeScene.World.IsPaused)
+			{
+				return;
+			}
+
 			_gameplayExceptionReporter.Run(
 				nameof(IGameplayModule.PhysicsUpdate),
 				() => _boundGameplayModule?.PhysicsUpdate(fixedDeltaTime, runtimeScene.World));
@@ -467,6 +529,11 @@ public class WolfEngineEditor
 		}
 
 		UnbindGameplayModule();
+
+		// The systems that held the pause reasons are gone with the old module, and the new ones start with no
+		// record of them, so nothing could resume the world.
+		runtimeScene.World.ClearPauseReasons();
+
 		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.CreateSystems),
 			() => RegisterGameplaySystems(loadResult.Module?.CreateSystems(_serviceProvider)));
@@ -558,18 +625,7 @@ public class WolfEngineEditor
 
 	private void RestoreSelectedEntities(EditorScene scene, IReadOnlyList<Guid> selectedEntityIds)
 	{
-		EditorGui.ClearEntitySelection();
-		foreach (var entityId in selectedEntityIds)
-		{
-			foreach (var entry in scene.EntityIds)
-			{
-				if (entry.Value == entityId)
-				{
-					EditorGui.AddEntitySelection(entry.Key, scene.World);
-					break;
-				}
-			}
-		}
+		EditorGui.RestoreEntitySelection(scene, selectedEntityIds);
 	}
 
 	private RenderConfig GetConfig()
@@ -703,6 +759,8 @@ public class WolfEngineEditor
 		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.OnUnloading),
 			() => _boundGameplayModule?.OnUnloading(_boundGameplayWorld));
+		// Features the module forgot to unregister must not outlive it: they hold its types.
+		_renderFeatures?.UnregisterWorld(_boundGameplayWorld);
 		_audioRuntime.StopAll();
 		for (var index = _registeredGameplaySystems.Count - 1; index >= 0; index--)
 		{

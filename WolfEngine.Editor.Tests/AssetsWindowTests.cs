@@ -387,7 +387,7 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
-	public void GetFolderContents_SearchActive_DoesNotMatchPathsTypesOrSubAssetNames()
+	public void GetFolderContents_SearchActive_MatchesSubAssetNamesButNotPathsOrRawTypes()
 	{
 		using var assetsRoot = new TemporaryAssetsRoot();
 		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "PathOnly"));
@@ -422,7 +422,8 @@ public sealed class AssetsWindowTests
 		Assert.That(typeContents.Folders, Is.Empty);
 		Assert.That(typeContents.Sources, Is.Empty);
 		Assert.That(subAssetContents.Folders, Is.Empty);
-		Assert.That(subAssetContents.Sources, Is.Empty);
+		Assert.That(subAssetContents.Sources, Has.Count.EqualTo(1));
+		Assert.That(subAssetContents.Sources[0].SourceId, Is.EqualTo(sourceId));
 	}
 
 	[Test]
@@ -643,6 +644,16 @@ public sealed class AssetsWindowTests
 		Assert.That(renamedAsset.RelativeSourcePath, Is.EqualTo(renamedPath));
 	}
 
+	[TestCase("Walk.anim.json", ".anim.json")]
+	[TestCase("Locomotion.animgraph.json", ".animgraph.json")]
+	[TestCase("global.cell.json", ".cell.json")]
+	[TestCase("FogOfWar.compute.slang", ".compute.slang")]
+	[TestCase("Hero.fbx", ".fbx")]
+	public void AssetSourceSuffix_KeepsTheWholeImporterExtension(string fileName, string expectedSuffix)
+	{
+		Assert.That(AssetSourceSuffix.Get(fileName), Is.EqualTo(expectedSuffix));
+	}
+
 	[Test]
 	public void RenameFolder_MovesNestedAssetsAndPreservesIds()
 	{
@@ -813,6 +824,56 @@ public sealed class AssetsWindowTests
 		Assert.That(movedFolderPath, Is.EqualTo("Assets/Vehicles/Models"));
 		projectService.Received(1).MoveAssetSourceToFolder("Assets/Models/Car.glb", "Assets/Vehicles");
 		projectService.Received(1).MoveFolderToFolder("Assets/Models", "Assets/Vehicles");
+	}
+
+	[Test]
+	public void AssetsWindow_DroppingAnAssetOnAFolder_StaysInTheCurrentFolder()
+	{
+		var carId = Guid.NewGuid();
+		var projectRoot = Directory.CreateTempSubdirectory("AssetsWindowDrop").FullName;
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets", "Models"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets", "Vehicles"));
+		var projectService = Substitute.For<IEditorProjectService>();
+		projectService.HasOpenProject.Returns(true);
+		projectService.GetAbsolutePath(Arg.Any<string>())
+			.Returns(callInfo => Path.Combine(projectRoot, callInfo.Arg<string>()));
+		projectService.TryGetAsset(carId, out Arg.Any<AssetDatabaseEntry>())
+			.Returns(callInfo =>
+			{
+				callInfo[1] = new AssetDatabaseEntry
+				{
+					Id = carId,
+					Name = "Car",
+					Type = AssetType.Model3D,
+					RelativeSourcePath = "Assets/Vehicles/Car.glb"
+				};
+				return true;
+			});
+		var selection = new AssetSelectionService();
+		var window = new AssetsWindow(
+			projectService,
+			Substitute.For<IProjectAssetPipelineService>(),
+			Substitute.For<IAssetThumbnailLoader>(),
+			selection,
+			Substitute.For<IEditorAssetHandlerRegistry>(),
+			Substitute.For<IIconManager>(),
+			new EditorInteractionState(),
+			Substitute.For<IEditorCommandService>(),
+			Substitute.For<IFileManagerService>());
+		window.SetSelectedFolderForTesting("Assets/Models");
+		selection.Select(carId, requestFocus: false);
+
+		window.CompleteSourceMoveForTesting("Assets/Models/Car.glb", "Assets/Vehicles/Car.glb");
+
+		try
+		{
+			Assert.That(window.SelectedFolderForTesting, Is.EqualTo("Assets/Models"));
+			Assert.That(selection.SelectedAssetId, Is.EqualTo(carId));
+		}
+		finally
+		{
+			Directory.Delete(projectRoot, recursive: true);
+		}
 	}
 
 	[Test]

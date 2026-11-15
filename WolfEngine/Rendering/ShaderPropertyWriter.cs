@@ -16,6 +16,8 @@ internal sealed class ShaderPropertyWriter
 
 	public uint RegisterIndex => _layout.RegisterIndex;
 
+	public ShaderConstantBufferLayout Layout => _layout;
+
 	public void Clear() => Array.Clear(_data);
 
 	public ReadOnlySpan<byte> AsBytes() => _data;

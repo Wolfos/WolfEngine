@@ -16,7 +16,9 @@ public static class Program
 	{
 		if (args.Length == 2 && args[0] == "--migrate-animation")
         {
-            Console.WriteLine($"Migrated {AnimationLegacyMigration.UpgradeProject(Path.GetFullPath(args[1]))} animator components and animation assets.");
+            var projectRoot = Path.GetFullPath(args[1]);
+            Console.WriteLine($"Migrated {AnimationLegacyMigration.UpgradeProject(projectRoot)} animator components and animation assets.");
+            Console.WriteLine($"Upgraded {AnimationAssetRefMigration.UpgradeProject(projectRoot)} animation assets to asset references.");
             return;
         }
         using var application = EditorApplication.Create();
@@ -85,6 +87,7 @@ public static class Program
 		services.AddSingleton<IAudioAssetImporter, AudioAssetImporter>();
 		services.AddSingleton<IFontAssetImporter, FontAssetImporter>();
 		services.AddSingleton<IFontContentProvider, EditorFontContentProvider>();
+		services.AddSingleton<ITextureSourceProvider, EditorTextureSourceProvider>();
 		services.AddSingleton<EditorAudioContentProvider>();
 		services.AddSingleton<IAudioContentProvider>(provider => provider.GetRequiredService<EditorAudioContentProvider>());
 		services.AddSingleton<AudioService>();
@@ -97,6 +100,7 @@ public static class Program
 		services.AddSingleton<IMaterialRuntimeAssetResolver, MaterialRuntimeAssetResolver>();
 		services.AddSingleton<ITextureRuntimeAssetResolver, TextureRuntimeAssetResolver>();
 		services.AddSingleton<IColorLookupTableRuntimeResolver, ColorLookupTableRuntimeAssetResolver>();
+		services.AddSingleton<IComputeShaderRuntimeResolver, ComputeShaderRuntimeAssetResolver>();
 		services.AddSingleton<IMeshRuntimeAssetResolver, MeshRuntimeAssetResolver>();
 		services.AddSingleton<ISkeletonRuntimeAssetResolver, SkeletonRuntimeAssetResolver>();
 		services.AddSingleton<IAnimationClipRuntimeAssetResolver, AnimationClipRuntimeAssetResolver>();
@@ -107,17 +111,24 @@ public static class Program
 		services.AddSingleton<AudioAssetEditor>();
 		services.AddSingleton<TerrainAssetEditor>();
 		services.AddSingleton<MaterialAssetEditor>();
+		services.AddSingleton<VfxAssetEditor>();
 		services.AddSingleton<DataAssetEditor>();
 		services.AddSingleton<SceneAssetEditor>();
 		services.AddSingleton<PrefabAssetEditor>();
 		services.AddSingleton<ModelAssetEditor>();
         services.AddSingleton<AnimationWindow>();
+		services.AddSingleton<AnimationClipEditorSession>();
+		services.AddSingleton<IEditorDocumentEditor>(provider => provider.GetRequiredService<AnimationClipEditorSession>());
+		services.AddSingleton<IEditorDocument>(provider => provider.GetRequiredService<AnimationClipEditorSession>());
+		services.AddSingleton<IEditorDocument>(provider => provider.GetRequiredService<AnimationWindow>());
+		services.AddSingleton<IEditorAssetHandler, AnimationClipEditorAssetHandler>();
         foreach (var type in new[] { AssetType.AnimationGraph })
             services.AddSingleton<IEditorAssetHandler>(provider => new AnimationEditorAssetHandler(type,
                 provider.GetRequiredService<AnimationWindow>(), provider.GetRequiredService<IEditorProjectService>(), provider.GetRequiredService<IProjectAssetPipelineService>()));
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, AudioEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, ColorLookupTableEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, ComputeShaderEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, FontEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, DataEditorAssetHandler>();
@@ -164,5 +175,9 @@ public static class Program
 			provider.GetRequiredService<IEditorLogStore>(),
 			provider.GetRequiredService<IIconManager>()));
 		services.AddSingleton<SceneWindow>();
+		services.AddSingleton<AnimationClipViewportWindow>();
+		services.AddSingleton<AnimationClipBonesWindow>();
+		services.AddSingleton<AnimationClipInspectorWindow>();
+		services.AddSingleton<AnimationClipTimelineWindow>();
 	}
 }

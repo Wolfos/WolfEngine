@@ -13,7 +13,7 @@ public readonly struct TransparentExecutionBucket
 		SharedDrawGraphicsBufferBindings bufferBindings,
 		GraphicsPassBindingSet passBindings,
 		IGfxPipeline pipeline,
-		ReadOnlyMemory<SharedDrawIndirectCommandPage> indirectCommandPages)
+		ReadOnlyMemory<DrawRecordPage> indirectCommandPages)
 	{
 		DrawKind = drawKind;
 		BucketId = bucketId;
@@ -32,7 +32,7 @@ public readonly struct TransparentExecutionBucket
 	public SharedDrawGraphicsBufferBindings BufferBindings { get; }
 	public GraphicsPassBindingSet PassBindings { get; }
 	public IGfxPipeline Pipeline { get; }
-	public ReadOnlyMemory<SharedDrawIndirectCommandPage> IndirectCommandPages { get; }
+	public ReadOnlyMemory<DrawRecordPage> IndirectCommandPages { get; }
 }
 
 /// <summary>
@@ -78,6 +78,7 @@ public struct TransparentForwardPassConfig
 	public required float ShadowCascadeBlendDistance { get; init; }
 	public required int ShadowedDirectionalLightIndex { get; init; }
 	public required Vector3 ShadowDepthBiases { get; init; }
+	public required Vector3 ShadowNormalOffsets { get; init; }
 	public required float ShadowStrength { get; init; }
 	public required bool ShadowsEnabled { get; init; }
 	public required float ShadowMaxDistance { get; init; }
@@ -89,6 +90,7 @@ public struct TransparentForwardPassConfig
 	public required IGfxBuffer? InstanceBuffer { get; init; }
 	public required IGfxBuffer? MaterialBuffer { get; init; }
 	public required IGfxBuffer? DrawArgsBuffer { get; init; }
+	public required IGfxBuffer? VisibleInstanceBuffer { get; init; }
 	public required IGfxBuffer? CameraBuffer { get; init; }
 	public required IGfxBuffer? TransparentEnvironmentBuffer { get; init; }
 	public required IGfxBuffer? TransparentLightingBuffer { get; init; }

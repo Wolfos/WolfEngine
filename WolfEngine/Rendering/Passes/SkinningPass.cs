@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 
@@ -143,7 +145,12 @@ public sealed class SkinningPass
 	private Matrix4x4[] _boneMatrixStaging = [];
 
 	private IGfxBuffer? _skinnedInstanceBuffer;
-	private readonly List<uint> _publishedInstanceSlots = new();
+	// CPU copy of the instance table. A D3D12 buffer write is a blocking GPU round trip, so entries are
+	// staged here and only the changed range is uploaded, once per frame.
+	private GpuSkinnedInstanceData[] _instanceShadow = [];
+	private int _dirtyInstanceMinimum = int.MaxValue;
+	private int _dirtyInstanceMaximum = -1;
+	private readonly HashSet<uint> _publishedInstanceSlots = new();
 	private readonly List<uint> _previouslyPublishedInstanceSlots = new();
 
 	private int _lastDispatchedInstanceCount;
@@ -177,7 +184,8 @@ public sealed class SkinningPass
 
 		_lastDispatchedInstanceCount = 0;
         _frameSubmission = device.LastPrimarySubmission.Value;
-		if (EnsureResources(device) == false)
+		if (EnsureResources(device) == false ||
+		    EnsureSkinnedInstanceCapacity(device, drawDatabase.MeshSlotCount) == false)
 		{
 			return;
 		}
@@ -189,11 +197,15 @@ public sealed class SkinningPass
 			return;
 		}
 
-		if (TryEnsureSkinVertices(device, packets) == false ||
-		    TryUploadBoneMatrices(device, packets, boneMatrices, out var boneMatrixOffsets) == false)
+		uint[] boneMatrixOffsets;
+		using (FrameProfiler.Instance.Measure("Skinning.Upload"))
 		{
-			RetireStaleSkinnedInstances();
-			return;
+			if (TryEnsureSkinVertices(device, packets) == false ||
+			    TryUploadBoneMatrices(device, packets, boneMatrices, out boneMatrixOffsets) == false)
+			{
+				RetireStaleSkinnedInstances();
+				return;
+			}
 		}
 
 		var pipeline = EnsurePipeline(device);
@@ -208,6 +220,8 @@ public sealed class SkinningPass
 		commandList.SetComputeReadOnlyBuffer(3, _boneMatrixBuffer!);
 
 		_publishedInstanceSlots.Clear();
+		var dispatchScope = FrameProfiler.Instance.Measure("Skinning.Dispatch");
+		var publishTicks = 0L;
 
 		for (var i = 0; i < packets.Count; i++)
 		{
@@ -248,6 +262,7 @@ public sealed class SkinningPass
             history.Generation = packet.PoseGeneration;
             history.VertexBuffer = instance.VertexBuffer; history.BaseVertex = instance.PackedBaseVertex; history.Initialized = true;
 
+			var publishStart = Stopwatch.GetTimestamp();
 			PublishSkinnedInstance(
 				drawDatabase,
 				instance,
@@ -256,9 +271,16 @@ public sealed class SkinningPass
 				boneMatrixOffset + (uint)packet.BoneCount,
 				(uint)packet.BoneCount,
 				vertexCount);
+			publishTicks += Stopwatch.GetTimestamp() - publishStart;
 		}
 
-		RetireStaleSkinnedInstances();
+		FrameProfiler.Instance.RecordElapsed("Skinning.Publish instances", publishTicks);
+		dispatchScope.Dispose();
+
+		using (FrameProfiler.Instance.Measure("Skinning.Retire stale"))
+		{
+			RetireStaleSkinnedInstances();
+		}
 
 		if (_lastDispatchedInstanceCount > 0)
 		{
@@ -358,20 +380,10 @@ public sealed class SkinningPass
 	public bool EnsureResources(IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(device);
-		if (_skinnedInstanceBuffer is null)
+		if (_skinnedInstanceBuffer is null &&
+		    EnsureSkinnedInstanceCapacity(device, GpuDrawResources.InitialMeshCapacity) == false)
 		{
-			var buffer = device.CreateBuffer(new BufferDescriptor(
-				(ulong)GpuDrawResources.MaxMeshCount * (ulong)Marshal.SizeOf<GpuSkinnedInstanceData>(),
-				BufferUsage.Structured,
-				BufferFlags.AllowShaderResource,
-				"SkinnedInstanceBuffer"));
-			if (buffer is not IWritableGpuBuffer writableInstances)
-			{
-				return false;
-			}
-
-			writableInstances.Write<GpuSkinnedInstanceData>(new GpuSkinnedInstanceData[GpuDrawResources.MaxMeshCount]);
-			_skinnedInstanceBuffer = buffer;
+			return false;
 		}
 
 		if (_skinVertexBuffer is null && TryCreateSkinVertexBuffer(device, 1u) == false)
@@ -384,6 +396,45 @@ public sealed class SkinningPass
 			return false;
 		}
 
+		return true;
+	}
+
+	/// <summary>
+	/// Grows the skinned instance table, which is indexed by mesh handle, to hold <paramref name="meshSlotCount"/>
+	/// slots. The replacement is filled from the CPU copy, and the replaced table is retired since frames in
+	/// flight read it.
+	/// </summary>
+	private bool EnsureSkinnedInstanceCapacity(IGfxDevice device, int meshSlotCount)
+	{
+		if (_skinnedInstanceBuffer is not null && meshSlotCount <= _instanceShadow.Length)
+		{
+			return true;
+		}
+
+		var capacity = GpuDrawResources.GrowCapacity(
+			_instanceShadow.Length,
+			meshSlotCount,
+			GpuDrawResources.InitialMeshCapacity,
+			GpuDrawResources.MaxMeshCount);
+		var buffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)capacity * (ulong)Marshal.SizeOf<GpuSkinnedInstanceData>(),
+			BufferUsage.Structured,
+			BufferFlags.AllowShaderResource,
+			"SkinnedInstanceBuffer"));
+		if (buffer is not IWritableGpuBuffer writableInstances)
+		{
+			return false;
+		}
+
+		Array.Resize(ref _instanceShadow, capacity);
+		writableInstances.Write<GpuSkinnedInstanceData>(_instanceShadow);
+		var previousBuffer = _skinnedInstanceBuffer;
+		if (previousBuffer is not null)
+		{
+			device.Retire(() => (previousBuffer as IDisposable)?.Dispose(), "SkinnedInstanceBuffer");
+		}
+
+		_skinnedInstanceBuffer = buffer;
 		return true;
 	}
 
@@ -444,30 +495,26 @@ public sealed class SkinningPass
 		uint boneCount,
 		uint vertexCount)
 	{
-		if (_skinnedInstanceBuffer is not IWritableGpuBuffer writable ||
+		if (_skinnedInstanceBuffer is not IWritableGpuBuffer ||
 		    drawDatabase.TryGetMeshHandle(instance, out var meshHandle) == false ||
 		    meshHandle.IsValid == false ||
-		    meshHandle.Index >= GpuDrawResources.MaxMeshCount)
+		    meshHandle.Index >= _instanceShadow.Length)
 		{
 			return;
 		}
 
 		var slot = (uint)meshHandle.Index;
-		Span<GpuSkinnedInstanceData> entry =
-		[
-			new GpuSkinnedInstanceData(
-				meshHandle.Value,
-				skinVertexBase,
-				boneMatrixOffset,
-				previousBoneMatrixOffset,
-				boneCount,
-				vertexCount)
-		];
-		writable.Write<GpuSkinnedInstanceData>(entry, slot);
+		StageInstance(slot, new GpuSkinnedInstanceData(
+			meshHandle.Value,
+			skinVertexBase,
+			boneMatrixOffset,
+			previousBoneMatrixOffset,
+			boneCount,
+			vertexCount));
 		_publishedInstanceSlots.Add(slot);
 	}
 
-	/// <summary>Clears stale entries because mesh handles are recycled.</summary>
+	/// <summary>Clears stale entries because mesh handles are recycled, then uploads this frame's changes.</summary>
 	private void RetireStaleSkinnedInstances()
 	{
 		if (_skinnedInstanceBuffer is IWritableGpuBuffer writable)
@@ -475,19 +522,40 @@ public sealed class SkinningPass
 			for (var i = 0; i < _previouslyPublishedInstanceSlots.Count; i++)
 			{
 				var slot = _previouslyPublishedInstanceSlots[i];
-				if (_publishedInstanceSlots.Contains(slot))
+				if (_publishedInstanceSlots.Contains(slot) == false)
 				{
-					continue;
+					StageInstance(slot, default);
 				}
+			}
 
-				Span<GpuSkinnedInstanceData> cleared = [default];
-				writable.Write<GpuSkinnedInstanceData>(cleared, slot);
+			if (_dirtyInstanceMaximum >= 0)
+			{
+				var count = _dirtyInstanceMaximum - _dirtyInstanceMinimum + 1;
+				writable.Write<GpuSkinnedInstanceData>(
+					_instanceShadow.AsSpan(_dirtyInstanceMinimum, count),
+					(ulong)_dirtyInstanceMinimum);
 			}
 		}
 
+		_dirtyInstanceMinimum = int.MaxValue;
+		_dirtyInstanceMaximum = -1;
 		_previouslyPublishedInstanceSlots.Clear();
 		_previouslyPublishedInstanceSlots.AddRange(_publishedInstanceSlots);
 		_publishedInstanceSlots.Clear();
+	}
+
+	private void StageInstance(uint slot, in GpuSkinnedInstanceData data)
+	{
+		ref var current = ref _instanceShadow[slot];
+		if (MemoryMarshal.AsBytes(new ReadOnlySpan<GpuSkinnedInstanceData>(in current))
+		    .SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<GpuSkinnedInstanceData>(in data))))
+		{
+			return;
+		}
+
+		current = data;
+		_dirtyInstanceMinimum = Math.Min(_dirtyInstanceMinimum, (int)slot);
+		_dirtyInstanceMaximum = Math.Max(_dirtyInstanceMaximum, (int)slot);
 	}
 
 	/// <summary>Packs current and previous matrices for GPU upload.</summary>

@@ -7,6 +7,25 @@ namespace WolfEngine;
 public interface IRenderer : IFrameCaptureSource
 {
 	void SetWindowSize(Int2 size) => throw new PlatformNotSupportedException("Window configuration is not supported by this renderer.");
+
+	/// <summary>The title the window is created with. Set before the renderer starts.</summary>
+	void SetWindowTitle(string title) => throw new PlatformNotSupportedException("Window configuration is not supported by this renderer.");
+
+	/// <summary>Whether <see cref="RequestWindowConfiguration"/> can change the window, which a host-owned view cannot.</summary>
+	bool CanConfigureWindow => false;
+
+	/// <summary>
+	/// Asks for a window mode and size, from any thread. Before the renderer starts it sets the window the renderer
+	/// opens; afterwards the render thread applies the latest request before its next frame.
+	/// </summary>
+	void RequestWindowConfiguration(WindowConfiguration configuration) =>
+		throw new PlatformNotSupportedException("Window configuration is not supported by this renderer.");
+
+	/// <summary>What the window is showing and the display it is on, published by the render thread each frame.</summary>
+	DisplayInfo GetDisplayInfo() => DisplayInfo.Unknown;
+
+	/// <summary>Whether frames wait for the display to refresh. Read by the render thread every frame; set from any thread.</summary>
+	bool VSyncEnabled { get; set; }
 	void Run(Action startup, Action<float> update, Action<float> render);
 
 	/// <summary>
@@ -45,6 +64,12 @@ public interface IRenderer : IFrameCaptureSource
 	SkinnedGeometryResourceStatistics? GetSkinnedGeometryResourceStatistics() => null;
 	IGfxBuffer GetPackedMeshVertexBuffer();
 	IGfxBuffer GetPackedMeshIndexBuffer();
+
+	/// <summary>
+	/// Increases each time a packed geometry buffer is replaced. Anything that captured the identity of the
+	/// previous buffers, such as an encoded draw record or an uploaded bindless handle, is stale once it moves.
+	/// </summary>
+	ulong PackedGeometryGeneration { get; }
 
 	/// <summary>
 	/// Gives a skinned instance its own vertex range in the packed buffer, seeded with the source

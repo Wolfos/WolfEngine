@@ -51,6 +51,15 @@ internal sealed record ComputedStyle
 	public bool NoWrap { get; init; }
 	public UiTextAlign TextAlign { get; init; }
 	public float BorderRadius { get; init; }
+
+	/// <summary>
+	/// The reference inside <c>background-image: url(…)</c>, as authored: a project path or an
+	/// <c>asset:</c> reference. Resolved to a texture when the frame is built.
+	/// </summary>
+	public string? BackgroundImage { get; init; }
+	public UiBackgroundSize BackgroundSize { get; init; } = UiBackgroundSize.Auto;
+	public UiBackgroundPosition BackgroundPosition { get; init; } = UiBackgroundPosition.TopLeft;
+	public UiBackgroundRepeat BackgroundRepeat { get; init; } = UiBackgroundRepeat.Both;
 }
 
 internal sealed class CssStyleSheet
@@ -118,6 +127,10 @@ internal sealed class CssStyleSheet
 		public UiTextAlign TextAlign;
 		private readonly UiTextAlign _inheritedTextAlign;
 		public float BorderRadius;
+		public string? BackgroundImage;
+		public UiBackgroundSize BackgroundSize;
+		public UiBackgroundPosition BackgroundPosition;
+		public UiBackgroundRepeat BackgroundRepeat;
 
 		public StyleAccumulator(ComputedStyle inherited)
 		{
@@ -156,6 +169,10 @@ internal sealed class CssStyleSheet
 			NoWrap = inherited.NoWrap;
 			TextAlign = _inheritedTextAlign = inherited.TextAlign;
 			BorderRadius = 0;
+			BackgroundImage = null;
+			BackgroundSize = UiBackgroundSize.Auto;
+			BackgroundPosition = UiBackgroundPosition.TopLeft;
+			BackgroundRepeat = UiBackgroundRepeat.Both;
 		}
 
 		public void Apply(in Declaration declaration) => Apply(declaration.Name, declaration.Value);
@@ -215,6 +232,22 @@ internal sealed class CssStyleSheet
 					_ => UiTextAlign.Left
 				}; break;
 				case "border-radius": BorderRadius = Number(value, BorderRadius); break;
+
+				case "background-image":
+					UiBackgrounds.TryParseImage(value, out BackgroundImage);
+					break;
+
+				case "background-size":
+					UiBackgrounds.TryParseSize(value, out BackgroundSize);
+					break;
+
+				case "background-position":
+					UiBackgrounds.TryParsePosition(value, out BackgroundPosition);
+					break;
+
+				case "background-repeat":
+					UiBackgrounds.TryParseRepeat(value, out BackgroundRepeat);
+					break;
 			}
 		}
 
@@ -257,7 +290,11 @@ internal sealed class CssStyleSheet
 			LineHeightPixels = LineHeightPixels,
 			NoWrap = NoWrap,
 			TextAlign = TextAlign,
-			BorderRadius = BorderRadius
+			BorderRadius = BorderRadius,
+			BackgroundImage = BackgroundImage,
+			BackgroundSize = BackgroundSize,
+			BackgroundPosition = BackgroundPosition,
+			BackgroundRepeat = BackgroundRepeat
 		};
 		}
 	}
@@ -298,7 +335,7 @@ internal sealed class CssStyleSheet
 				if (separator <= 0) continue;
 				var name = source[..separator].Trim().ToLowerInvariant();
 				var value = source[(separator + 1)..].Trim();
-				declarationList.Add(new Declaration(name, name is "font-family" or "src" ? value : value.ToLowerInvariant()));
+				declarationList.Add(new Declaration(name, KeepsCase(name) ? value : value.ToLowerInvariant()));
 			}
 
 			var declarations = declarationList.ToArray();
@@ -386,7 +423,7 @@ internal sealed class CssStyleSheet
 			if (separator <= 0) continue;
 			var name = source[..separator].Trim().ToLowerInvariant();
 			var value = source[(separator + 1)..].Trim();
-			if (name != "font-family") value = value.ToLowerInvariant();
+			if (KeepsCase(name) == false) value = value.ToLowerInvariant();
 			if (Valid(name, value)) accumulator.Apply(name, value);
 			else Warn(name, value);
 		}
@@ -398,6 +435,12 @@ internal sealed class CssStyleSheet
 		var message = $"[Gameplay UI CSS] Unsupported property or value '{name}: {value}'; declaration ignored.";
 		_diagnostics.Add(message);
 		Console.Error.WriteLine(message);
+	}
+
+	/// <summary>Values that name something case-sensitive, such as a font family or an asset path.</summary>
+	private static bool KeepsCase(string name)
+	{
+		return name is "font-family" or "src" or "background-image";
 	}
 
 	private static bool Valid(string name, string value)
@@ -435,6 +478,10 @@ internal sealed class CssStyleSheet
 			case "white-space": return value is "normal" or "nowrap" or "pre";
 			case "pointer-events": return value is "auto" or "none";
 			case "text-align": return value is "left" or "center" or "right" or "inherit";
+			case "background-image": return UiBackgrounds.TryParseImage(value, out _);
+			case "background-size": return UiBackgrounds.TryParseSize(value, out _);
+			case "background-position": return UiBackgrounds.TryParsePosition(value, out _);
+			case "background-repeat": return UiBackgrounds.TryParseRepeat(value, out _);
 			case "color": case "background-color":
 				return value is "white" or "black" or "transparent" || name == "color" && value == "inherit" ||
 					value.Length is 7 or 9 && value[0] == '#' && uint.TryParse(value.AsSpan(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out _);

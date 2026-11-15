@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using SharpMetal.ObjectiveCCore;
 using Silk.NET.Core.Native;
@@ -14,9 +15,14 @@ namespace WolfEngine.Rendering.Backend.Metal;
 [SupportedOSPlatform("macos")]
 internal sealed unsafe class SdlMetalSurface : IMetalSurface
 {
-	private const string WindowTitle = "WolfEngine";
 	private const int MacTitlebarDoubleClickHeight = 28;
 	private const int MacTrafficLightExclusionWidth = 70;
+
+	private static readonly Selector ScreenSelector = new("screen");
+	private static readonly Selector FrameSelector = new("frame");
+	private static readonly Selector SafeAreaInsetsSelector = new("safeAreaInsets");
+	private static readonly Selector BackingScaleFactorSelector = new("backingScaleFactor");
+	private static readonly Selector RespondsToSelectorSelector = new("respondsToSelector:");
 
 	private readonly IMacOSInputHandler _inputHandler;
 	private readonly Sdl _sdl;
@@ -25,7 +31,10 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 	private IntPtr _nativeWindow = IntPtr.Zero;
 	private Int2 _requestedSize;
 	private bool _hasRequestedDrawableSize;
+	private bool _fullscreen;
+	private Int2 _fullscreenResolution;
 	private Event _event;
+	private MacOSGestureResponder? _gestureResponder;
 
 	public SdlMetalSurface(IMacOSInputHandler inputHandler)
 	{
@@ -35,7 +44,11 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 
 	public bool CanDisableVSync => true;
 
-	public IntPtr Initialize(Int2 initialSize, bool exactDrawableSize)
+	public bool CanConfigureWindow => true;
+
+	public WindowMode WindowMode => _fullscreen ? WindowMode.Fullscreen : WindowMode.Windowed;
+
+	public IntPtr Initialize(Int2 initialSize, bool exactDrawableSize, string title)
 	{
 		_requestedSize = initialSize;
 		_hasRequestedDrawableSize = exactDrawableSize;
@@ -44,7 +57,9 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 			throw new InvalidOperationException("Failed to initialise SDL video subsystem.");
 		}
 
-		var titlePtr = SilkMarshal.StringToPtr(WindowTitle, NativeStringEncoding.UTF8);
+		MacOSGestureResponder.EnableMomentumScrolling();
+
+		var titlePtr = SilkMarshal.StringToPtr(title, NativeStringEncoding.UTF8);
 		try
 		{
 			var flags = WindowFlags.Resizable | WindowFlags.AllowHighdpi | WindowFlags.Metal;
@@ -68,6 +83,15 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 
 		CreateMetalView();
 		ConfigureNativeWindowChrome();
+		var contentView = ObjectiveC.IntPtr_objc_msgSend(_nativeWindow, "contentView");
+		if (contentView != IntPtr.Zero)
+		{
+			_gestureResponder = new MacOSGestureResponder(
+				contentView,
+				_inputHandler.HandleMagnification,
+				_inputHandler.HandleNativeScroll);
+			_inputHandler.UseNativeUiScroll = true;
+		}
 
 		return GetLayer();
 	}
@@ -75,7 +99,8 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 	/// <summary>
 	/// The drawable size SDL reports, except that a size a host requested explicitly is kept exactly so automation
 	/// captures do not depend on the display scale. That stops as soon as the user resizes the window; from then on,
-	/// SDL's drawable size is authoritative.
+	/// SDL's drawable size is authoritative. In fullscreen, a resolution below native is the drawable size, and the
+	/// layer scales it up to cover the display.
 	/// </summary>
 	public bool TryGetDrawableSize(out Int2 size)
 	{
@@ -85,9 +110,19 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 			return false;
 		}
 
-		var drawableWidth = 0;
-		var drawableHeight = 0;
-		_sdl.MetalGetDrawableSize(_window, ref drawableWidth, ref drawableHeight);
+		if (TryGetWindowPixelSize(out var windowPixels) == false)
+		{
+			return false;
+		}
+
+		if (_fullscreen)
+		{
+			size = DisplayResolutions.ResolveFullscreen(_fullscreenResolution, windowPixels);
+			return true;
+		}
+
+		var drawableWidth = windowPixels.X;
+		var drawableHeight = windowPixels.Y;
 
 		if (_hasRequestedDrawableSize)
 		{
@@ -134,9 +169,118 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 		return true;
 	}
 
+	public void ApplyWindowConfiguration(WindowConfiguration configuration)
+	{
+		if (_window is null)
+		{
+			return;
+		}
+
+		if (configuration.Mode == WindowMode.Fullscreen)
+		{
+			_fullscreenResolution = configuration.Resolution;
+			if (_fullscreen == false)
+			{
+				SetFullscreen(true);
+			}
+
+			return;
+		}
+
+		if (_fullscreen)
+		{
+			SetFullscreen(false);
+		}
+
+		var size = configuration.Resolution;
+		if (size.X <= 0 || size.Y <= 0)
+		{
+			return;
+		}
+
+		_sdl.SetWindowSize(_window, size.X, size.Y);
+		_sdl.SetWindowPosition(_window, Sdl.WindowposCentered, Sdl.WindowposCentered);
+
+		// A size asked for explicitly is rendered at exactly that many pixels, as at startup.
+		_requestedSize = size;
+		_hasRequestedDrawableSize = true;
+	}
+
+	/// <summary>
+	/// The size a fullscreen window gets on the window's display, in pixels of its backing store, so rendering at it
+	/// maps one pixel to one pixel. On displays with a camera housing, macOS keeps fullscreen windows below it, so the
+	/// screen's safe area is used rather than its whole frame.
+	/// </summary>
+	public bool TryGetNativeResolution(out Int2 resolution)
+	{
+		resolution = default;
+		if (_nativeWindow == IntPtr.Zero)
+		{
+			return false;
+		}
+
+		// The safe area is in fractional points, so the window macOS actually gives is the exact answer once there.
+		if (_fullscreen && TryGetWindowPixelSize(out resolution))
+		{
+			return true;
+		}
+
+		var screen =ObjectiveC.IntPtr_objc_msgSend(_nativeWindow, ScreenSelector);
+		if (screen == IntPtr.Zero)
+		{
+			return false;
+		}
+
+		var frame = MsgSendRect(screen, FrameSelector.SelPtr);
+		var insets = default(NativeEdgeInsets);
+		if (MsgSendRespondsToSelector(screen, RespondsToSelectorSelector.SelPtr, SafeAreaInsetsSelector.SelPtr) != 0)
+		{
+			insets = MsgSendEdgeInsets(screen, SafeAreaInsetsSelector.SelPtr);
+		}
+
+		var scale = MsgSendDouble(screen, BackingScaleFactorSelector.SelPtr);
+		var width = (frame.Width - insets.Left - insets.Right) * scale;
+		var height = (frame.Height - insets.Top - insets.Bottom) * scale;
+		if (width <= 0 || height <= 0)
+		{
+			return false;
+		}
+
+		resolution = new Int2((int)Math.Round(width), (int)Math.Round(height));
+		return true;
+	}
+
+	/// <summary>
+	/// The window's size in pixels of its backing store. SDL's Metal drawable size is the layer's drawable size, which
+	/// the renderer sets itself below native resolution, so it cannot tell how large the window really is.
+	/// </summary>
+	private bool TryGetWindowPixelSize(out Int2 size)
+	{
+		size = default;
+		if (TryGetWindowSize(out var points) == false)
+		{
+			return false;
+		}
+
+		var scale = _nativeWindow == IntPtr.Zero ? 0.0 : MsgSendDouble(_nativeWindow, BackingScaleFactorSelector.SelPtr);
+		if (scale <= 0.0)
+		{
+			var drawableWidth = 0;
+			var drawableHeight = 0;
+			_sdl.MetalGetDrawableSize(_window, ref drawableWidth, ref drawableHeight);
+			size = new Int2(drawableWidth, drawableHeight);
+
+			return drawableWidth > 0 && drawableHeight > 0;
+		}
+
+		size = new Int2((int)Math.Round(points.X * scale), (int)Math.Round(points.Y * scale));
+		return true;
+	}
+
 	public MetalSurfaceEvents PumpEvents()
 	{
 		var events = MetalSurfaceEvents.None;
+		_gestureResponder?.EnsureAttached();
 		_inputHandler.StartInputFrame();
 
 		while (_sdl.PollEvent(ref _event) != 0)
@@ -150,6 +294,7 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 				case EventType.Windowevent:
 					_inputHandler.HandleInputEvents(ref _event);
 					events |= ReadWindowEvent(_event);
+					SyncFullscreenState();
 					break;
 
 				case EventType.Mousebuttondown:
@@ -167,6 +312,7 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 			}
 		}
 
+		_gestureResponder?.EnsureAttached();
 		_inputHandler.EndInputFrame();
 
 		return events;
@@ -174,6 +320,10 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 
 	public void Shutdown()
 	{
+		_gestureResponder?.Dispose();
+		_gestureResponder = null;
+		_inputHandler.UseNativeUiScroll = false;
+
 		if (_metalView is not null)
 		{
 			_sdl.MetalDestroyView(_metalView);
@@ -187,6 +337,30 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 		}
 
 		_sdl.Quit();
+	}
+
+	/// <summary>
+	/// Uses SDL's desktop fullscreen, which on macOS moves the window into its own Space with the system animation.
+	/// The window's size changes over the following frames, which arrive as resize events.
+	/// </summary>
+	private void SetFullscreen(bool fullscreen)
+	{
+		var flags = fullscreen ? (uint)WindowFlags.FullscreenDesktop : 0u;
+		if (_sdl.SetWindowFullscreen(_window, flags) != 0)
+		{
+			Console.Error.WriteLine($"Could not {(fullscreen ? "enter" : "leave")} fullscreen: {_sdl.GetErrorS()}");
+			return;
+		}
+
+		_fullscreen = fullscreen;
+	}
+
+	/// <summary>The player can also leave fullscreen through the system, such as the window's green button.</summary>
+	private void SyncFullscreenState()
+	{
+		var flags = _sdl.GetWindowFlags(_window);
+		var fullscreenDesktop = (uint)WindowFlags.FullscreenDesktop;
+		_fullscreen = (flags & fullscreenDesktop) == fullscreenDesktop;
 	}
 
 	private static MetalSurfaceEvents ReadWindowEvent(Event windowEvent)
@@ -265,5 +439,35 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 
 		ObjectiveC.objc_msgSend(_nativeWindow, "zoom:", IntPtr.Zero);
 		return true;
+	}
+
+	[DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+	private static extern double MsgSendDouble(IntPtr receiver, IntPtr selector);
+
+	[DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+	private static extern byte MsgSendRespondsToSelector(IntPtr receiver, IntPtr selector, IntPtr queriedSelector);
+
+	[DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+	private static extern NativeRect MsgSendRect(IntPtr receiver, IntPtr selector);
+
+	[DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+	private static extern NativeEdgeInsets MsgSendEdgeInsets(IntPtr receiver, IntPtr selector);
+
+	[StructLayout(LayoutKind.Sequential)]
+	private struct NativeRect
+	{
+		public double X;
+		public double Y;
+		public double Width;
+		public double Height;
+	}
+
+	[StructLayout(LayoutKind.Sequential)]
+	private struct NativeEdgeInsets
+	{
+		public double Top;
+		public double Left;
+		public double Bottom;
+		public double Right;
 	}
 }

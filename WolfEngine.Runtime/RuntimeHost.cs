@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Audio;
@@ -13,8 +14,10 @@ using WolfEngine.Physics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Shaders;
+using WolfEngine.Rendering.Splash;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Serialization;
+using WolfEngine.Vfx;
 
 namespace WolfEngine.Runtime;
 
@@ -50,6 +53,24 @@ public sealed class RuntimeHostOptions
 	/// it, turn this off; rigidbodies, colliders and vehicles then stay where they were placed.
 	/// </summary>
 	public bool EnablePhysics { get; init; } = true;
+
+	/// <summary>
+	/// Whether gameplay may close the game through <see cref="IApplicationQuitService"/>. Platforms whose apps are
+	/// closed only by the user, such as iOS, turn this off.
+	/// </summary>
+	public bool IsQuitSupported { get; init; } = true;
+
+	/// <summary>
+	/// Whether to show the engine splash screen, when the build carries one, while the initial scene loads. The
+	/// platform host must render while <see cref="RuntimeHost.Tick"/> loads, from another thread.
+	/// </summary>
+	public bool ShowSplashScreen { get; init; }
+
+	/// <summary>
+	/// Adjusts the graphics settings the game starts with, which come from the project's settings, such as to start an
+	/// automated run windowed and without vsync.
+	/// </summary>
+	public Func<CookedRuntimeSettings, GraphicsSettings, GraphicsSettings>? ConfigureGraphicsSettings { get; init; }
 }
 
 /// <summary>
@@ -61,8 +82,11 @@ public sealed class RuntimeHost : IDisposable
 	private readonly ServiceProvider _services;
 	private readonly IGameplayModule _gameplay;
 	private readonly GameplayWorldSession _session;
-	private readonly RenderViewId _primaryView;
-	private readonly World _initialWorld;
+	private readonly RenderGraph _renderGraph;
+	private readonly SplashScreen _splashScreen;
+	private readonly Guid _initialSceneId;
+	private RenderViewId _primaryView;
+	private World? _initialWorld;
 	private readonly int _frameCount;
 	private readonly int _memoryReportFrame = ReadMemoryReportFrame();
 	private readonly IWorldManager _worldManager;
@@ -74,6 +98,7 @@ public sealed class RuntimeHost : IDisposable
 	private readonly IInputSystem _input;
 	private readonly IPointerInputRouter _pointerRouter;
 	private readonly SceneLoadRequests _sceneRequests;
+	private readonly ApplicationQuitRequests _quitRequests;
 	private readonly IRuntimeSceneLoader _sceneLoader;
 	private readonly Stopwatch _clock = new();
 	private TimeSpan _lastFrameTime;
@@ -96,19 +121,32 @@ public sealed class RuntimeHost : IDisposable
 		_input = services.GetRequiredService<IInputSystem>();
 		_pointerRouter = services.GetRequiredService<IPointerInputRouter>();
 		_sceneRequests = services.GetRequiredService<SceneLoadRequests>();
+		_quitRequests = services.GetRequiredService<ApplicationQuitRequests>();
 		_sceneLoader = services.GetRequiredService<IRuntimeSceneLoader>();
 
-		_renderer.SetWindowSize(new Int2(settings.Width, settings.Height));
+		var graphicsSettings = CreateInitialGraphicsSettings(settings);
+		if (options.ConfigureGraphicsSettings is { } configureGraphicsSettings)
+		{
+			graphicsSettings = configureGraphicsSettings(settings, graphicsSettings);
+		}
+
+		// Before the renderer starts, so the window opens in this mode rather than switching on its first frame.
+		services.GetRequiredService<IGraphicsSettings>().Apply(graphicsSettings);
+		if (string.IsNullOrWhiteSpace(settings.Title) == false)
+		{
+			_renderer.SetWindowTitle(settings.Title);
+		}
 		AssetDatabase.SetInstanceRegistry(services.GetRequiredService<IAssetInstanceRegistry>());
 
-		var initialSceneId = options.Catalog.Manifest.InitialSceneId;
-		_initialWorld = _sceneLoader.Load(initialSceneId);
-		Console.WriteLine($"runtime loaded scene {initialSceneId:D}");
+		_renderGraph = services.GetRequiredService<RenderGraph>();
+		_splashScreen = services.GetRequiredService<SplashScreen>();
+		_initialSceneId = options.Catalog.Manifest.InitialSceneId;
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
 		_worldManager.AddSystem(new AnimationRenderResourceLifecycle(services.GetRequiredService<RenderGraph>()));
 		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
-		_worldManager.AddSystem<AnimationSystem>();
+		// Tagged Game, not the default All, so animation holds its pose while the world is paused.
+		_worldManager.AddSystem(new AnimationSystem(WorldTag.Game));
 		if (_rigidbodySystem is not null)
 		{
 			// Register before TransformSystem so interpolated child poses propagate this frame.
@@ -121,9 +159,10 @@ public sealed class RuntimeHost : IDisposable
 		}
 
 		_worldManager.AddSystem<TransformSystem>();
+		// After transforms, so attached effects follow this frame's poses.
+		_worldManager.AddSystem(new VfxSystem(services.GetRequiredService<VfxService>()), SystemExecutionGroup.Gameplay);
 
-		var renderGraph = services.GetRequiredService<RenderGraph>();
-		_primaryView = renderGraph.CreateView(new RenderViewDescriptor(_initialWorld, "game", RenderViewOutput.Backbuffer));
+		var renderGraph = _renderGraph;
 		_session = new GameplayWorldSession(
 			_worldManager,
 			_gameplay,
@@ -139,6 +178,24 @@ public sealed class RuntimeHost : IDisposable
 	}
 
 	public CookedRuntimeSettings Settings { get; }
+
+	/// <summary>
+	/// The project's startup settings: fullscreen at the display's native resolution, or a window of the project's size.
+	/// </summary>
+	public static GraphicsSettings CreateInitialGraphicsSettings(CookedRuntimeSettings settings)
+	{
+		ArgumentNullException.ThrowIfNull(settings);
+
+		var resolution = settings.WindowMode == WindowMode.Windowed
+			? new Int2(settings.Width, settings.Height)
+			: Int2.Zero;
+
+		return new GraphicsSettings
+		{
+			WindowMode = settings.WindowMode,
+			Resolution = resolution
+		};
+	}
 
 	public IServiceProvider Services => _services;
 
@@ -166,13 +223,22 @@ public sealed class RuntimeHost : IDisposable
 
 		var services = new ServiceCollection();
 		WolfEngine.ConfigureServices(services);
-		AddRuntimeServices(services, catalog);
+		AddRuntimeServices(services, catalog, options.IsQuitSupported);
 		options.ConfigureServices?.Invoke(services);
 
 		var provider = services.BuildServiceProvider();
 		try
 		{
-			return new RuntimeHost(options, settings, provider);
+			var host = new RuntimeHost(options, settings, provider);
+			if (options.ShowSplashScreen &&
+			    catalog.Manifest.SplashScreenId != Guid.Empty)
+			{
+				// Shown before rendering starts, so the first frame the window presents is the splash.
+				var splash = SplashScreenSerializer.Read(catalog.Read(catalog.Manifest.SplashScreenId));
+				host._splashScreen.Show(splash);
+			}
+
+			return host;
 		}
 		catch
 		{
@@ -184,16 +250,30 @@ public sealed class RuntimeHost : IDisposable
 
 	/// <summary>
 	/// Steps gameplay by one frame: scene load requests, fixed physics steps, gameplay and system updates, then
-	/// publishes a render snapshot. Returns false once a fixed <see cref="RuntimeHostOptions.FrameCount"/> has run.
+	/// publishes a render snapshot. Returns false once a fixed <see cref="RuntimeHostOptions.FrameCount"/> has run,
+	/// or when gameplay asked to quit during the previous frame; the host then calls <see cref="Stop"/>.
 	/// </summary>
+	/// <remarks>
+	/// The first call loads the initial scene, which the renderer covers with the splash screen when one is
+	/// showing. Gameplay starts once the splash has played its intro; until then each call waits briefly and
+	/// returns without stepping, publishing nothing, so the splash keeps the window.
+	/// </remarks>
 	public bool Tick()
 	{
 		if (_started == false)
 		{
-			_session.Replace(_initialWorld);
-			_clock.Start();
-			_lastFrameTime = _clock.Elapsed;
-			_started = true;
+			if (TryStart() == false)
+			{
+				return true;
+			}
+		}
+
+		// Before scene loads, so a quit wins over a load requested in the same frame; Stop cancels the load.
+		if (_quitRequests.TryTake(_session.World))
+		{
+			Console.WriteLine("runtime quit requested by gameplay");
+
+			return false;
 		}
 
 		ProcessSceneLoadRequest();
@@ -204,7 +284,14 @@ public sealed class RuntimeHost : IDisposable
 			? Settings.FixedDeltaTime
 			: Math.Clamp((float)(now - _lastFrameTime).TotalSeconds, 0, 0.1f);
 		_lastFrameTime = now;
-		_accumulator += delta;
+
+		// A paused world doesn't advance physics time, so resuming continues from the same step with no catch-up
+		// burst. The accumulator keeps its value, so interpolated poses hold still rather than snap.
+		var paused = world.IsPaused;
+		if (paused == false)
+		{
+			_accumulator += delta;
+		}
 
 		var windowSize = _renderer.GetWindowSize();
 		_input.ProcessPointerInput(
@@ -212,17 +299,32 @@ public sealed class RuntimeHost : IDisposable
 			new PointerInputContext(true, true, true, System.Numerics.Vector2.Zero, new(windowSize.X, windowSize.Y)));
 
 		var steps = 0;
-		while (_accumulator >= Settings.FixedDeltaTime && steps++ < Settings.MaxPhysicsStepsPerFrame)
+		while (paused == false &&
+		       _accumulator >= Settings.FixedDeltaTime &&
+		       steps++ < Settings.MaxPhysicsStepsPerFrame)
 		{
 			_gameplay.PhysicsUpdate(Settings.FixedDeltaTime, world);
 			_worldManager.PhysicsUpdate(Settings.FixedDeltaTime, WorldTag.Game, SystemExecutionGroup.All);
 			_accumulator -= Settings.FixedDeltaTime;
+
+			// Gameplay can pause during a step; the rest of this frame's steps wait for the resume.
+			if (world.IsPaused)
+			{
+				break;
+			}
 		}
 
 		// The accumulator left over after this frame's steps is how far the frame being rendered has
 		// advanced past the last one, which is what rigidbody interpolation blends by.
 		_rigidbodySystem?.PublishFixedStepAccumulator(world, _accumulator, Settings.FixedDeltaTime);
-		_gameplay.Update(delta, world);
+
+		// The gameplay module's own update is game logic, so it stops with the world; menus that must run while
+		// paused are systems tagged WorldTag.AnyGame.
+		if (world.IsPaused == false)
+		{
+			_gameplay.Update(delta, world);
+		}
+
 		_worldManager.Update(delta, WorldTag.Game, SystemExecutionGroup.All);
 		_audio.Update(delta);
 		_worldManager.OnPreRender(delta, WorldTag.Game, SystemExecutionGroup.All);
@@ -241,6 +343,31 @@ public sealed class RuntimeHost : IDisposable
 		}
 
 		return _frameCount <= 0 || _frames < _frameCount;
+	}
+
+	private bool TryStart()
+	{
+		if (_initialWorld is null)
+		{
+			_initialWorld = _sceneLoader.Load(_initialSceneId);
+			Console.WriteLine($"runtime loaded scene {_initialSceneId:D}");
+			_primaryView = _renderGraph.CreateView(
+				new RenderViewDescriptor(_initialWorld, "game", RenderViewOutput.Backbuffer));
+		}
+
+		if (_splashScreen.WaitForIntro(TimeSpan.FromMilliseconds(16)) == false)
+		{
+			return false;
+		}
+
+		// From here the game publishes frames, and the splash fades out over the first of them.
+		_splashScreen.Reveal();
+		_session.Replace(_initialWorld);
+		_clock.Start();
+		_lastFrameTime = _clock.Elapsed;
+		_started = true;
+
+		return true;
 	}
 
 	/// <summary>
@@ -301,8 +428,9 @@ public sealed class RuntimeHost : IDisposable
 		}
 	}
 
-	private static void AddRuntimeServices(IServiceCollection services, WolfPackCatalog catalog)
+	private static void AddRuntimeServices(IServiceCollection services, WolfPackCatalog catalog, bool isQuitSupported)
 	{
+		services.Replace(ServiceDescriptor.Singleton(new ApplicationQuitRequests(isQuitSupported)));
 		services.AddSingleton(new RenderPresentationOptions { OutputMode = RenderOutputMode.FullWindow });
 		var packagedShaders = new PackagedShaderProvider(catalog);
 		services.AddSingleton<IShaderProvider>(packagedShaders);
@@ -314,6 +442,7 @@ public sealed class RuntimeHost : IDisposable
 		services.AddSingleton<IImGuiRenderer>(NullImGuiRenderer.Instance);
 		services.AddSingleton(catalog);
 		services.AddSingleton<IFontContentProvider>(new WolfPackFontContentProvider(catalog));
+		services.AddSingleton<ITextureSourceProvider>(new WolfPackTextureSourceProvider(catalog));
 		services.AddSingleton<IAudioContentProvider>(new WolfPackAudioContentProvider(catalog));
 		services.AddSingleton<AudioService>();
 		services.AddSingleton<IAudioService>(provider => provider.GetRequiredService<AudioService>());

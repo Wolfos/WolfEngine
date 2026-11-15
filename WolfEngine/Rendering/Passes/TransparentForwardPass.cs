@@ -15,7 +15,10 @@ public sealed class TransparentForwardPass
 	private readonly Dictionary<GpuDrawExecutionKey, IGfxPipeline> _pipelinesByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, SharedDrawGraphicsBufferBindings> _bufferBindingsByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, ShaderReflectionLayout> _reflectionByExecutionKey = new();
-	private readonly PerViewIndirectCommandSets _indirectCommandSets = new();
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly PerViewIndirectCommandSets _indirectCommandSets;
+	// Raised whenever a lane pipeline is created, so records encoded against the previous pipelines re-encode.
+	private ulong _laneBindingGeneration;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private GraphicsBackendKind? _reflectionBackendKind;
@@ -24,18 +27,27 @@ public sealed class TransparentForwardPass
 	private ShaderPropertyWriter? _ddgiDebugWriter;
 	private uint _cameraRegisterIndex = 2;
 
-	public TransparentForwardPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public TransparentForwardPass(
+		IShaderProvider shaderCompiler,
+		BindlessResourceRegistry bindlessRegistry,
+		IndirectDrawRecords records,
+		GpuDrawResources gpuDrawResources)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_indirectCommandSets = new PerViewIndirectCommandSets(
+			records,
+			DrawPassParticipation.ForwardTransparent,
+			new LaneBindings(this));
 	}
 
 	/// <summary>The given view's command set; see <see cref="PerViewIndirectCommandSets"/>.</summary>
-	public SharedDrawIndirectCommandSet GetIndirectCommandSet(int viewIndex) => _indirectCommandSets.Get(viewIndex);
+	public DrawRecordSet GetIndirectCommandSet(int viewIndex) => _indirectCommandSets.Get(viewIndex);
 
-	/// <summary>Removes a destroyed view's command set, for the caller to retire.</summary>
-	internal IReadOnlyList<SharedDrawIndirectCommandSet> TakeViewCommandSets(int viewIndex) =>
-		_indirectCommandSets.Take(viewIndex);
+	/// <summary>Releases and retires a destroyed view's command set.</summary>
+	internal void ReleaseViewCommandSets(int viewIndex, IGfxDevice device) =>
+		_indirectCommandSets.ReleaseView(viewIndex, device);
 
 	public void EnsureIndirectResources(IGfxDevice device, int viewIndex)
 	{
@@ -51,24 +63,26 @@ public sealed class TransparentForwardPass
 
 	public bool HasIndirectLane(GpuDrawExecutionLaneDefinition lane) => _pipelinesByExecutionKey.ContainsKey(lane.Key);
 
-	public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+	private IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) =>
+		_pipelinesByExecutionKey.TryGetValue(lane.Key, out var pipeline) ? pipeline : null;
+
+	private SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
 		_bufferBindingsByExecutionKey.TryGetValue(lane.Key, out var bindings) ? bindings : null;
 
-	public GraphicsPassBindingSet? GetPassBindingSet(GpuDrawExecutionLaneDefinition lane, GpuDrawResources resources)
+	private GraphicsPassBindingSet? GetPassBindingSet(GpuDrawExecutionLaneDefinition lane)
 	{
-		ArgumentNullException.ThrowIfNull(resources);
 		if (_reflectionByExecutionKey.TryGetValue(lane.Key, out var reflection) == false)
 			return null;
 		return GraphicsPassBindingSet.FromReflection(reflection,
 			new Dictionary<string, IGfxBuffer?>(StringComparer.Ordinal)
 			{
-				["CameraParams"] = resources.CameraBuffer,
-				["TransparentEnvironmentParams"] = resources.TransparentEnvironmentBuffer,
-				["LightingParams"] = resources.TransparentLightingBuffer,
-				["DdgiDebugParams"] = resources.DdgiDebugBuffer,
-				["g_PointLights"] = resources.ClusterPointLightBuffer,
-				["g_ClusterHeaders"] = resources.ClusterHeaderBuffer,
-				["g_ClusterLightIndices"] = resources.ClusterLightIndexBuffer
+				["CameraParams"] = _gpuDrawResources.CameraBuffer,
+				["TransparentEnvironmentParams"] = _gpuDrawResources.TransparentEnvironmentBuffer,
+				["LightingParams"] = _gpuDrawResources.TransparentLightingBuffer,
+				["DdgiDebugParams"] = _gpuDrawResources.DdgiDebugBuffer,
+				["g_PointLights"] = _gpuDrawResources.ClusterPointLightBuffer,
+				["g_ClusterHeaders"] = _gpuDrawResources.ClusterHeaderBuffer,
+				["g_ClusterLightIndices"] = _gpuDrawResources.ClusterLightIndexBuffer
 			},
 			SharedDrawPerDrawBindings.ResourceNames);
 	}
@@ -128,9 +142,9 @@ public sealed class TransparentForwardPass
 			ShadowMapDepth0 = shadowMap0,
 			ShadowMapDepth1 = shadowMap1,
 			ShadowMapDepth2 = shadowMap2,
-			SkyboxEnvironment = ResolveSkyboxHandle(context, sharedResources.SkyboxEnvironment),
-			SkyboxIrradiance = ResolveSkyboxHandle(context, sharedResources.SkyboxIrradiance),
-			SkyboxPrefilter = ResolveSkyboxHandle(context, sharedResources.SkyboxPrefilter),
+			SkyboxEnvironment = ResolveSkyboxHandle(context, resources.SkyboxEnvironment),
+			SkyboxIrradiance = ResolveSkyboxHandle(context, resources.SkyboxIrradiance),
+			SkyboxPrefilter = ResolveSkyboxHandle(context, resources.SkyboxPrefilter),
 			SkyboxBrdfLut = ResolveSkyboxHandle(context, sharedResources.SkyboxBrdfLut),
 			LinearSampler = _linearSampler,
 			ShadowMapHandle0 = _bindlessRegistry.RegisterTexture(shadowMap0),
@@ -156,6 +170,7 @@ public sealed class TransparentForwardPass
 			ShadowCascadeBlendDistance = shadowData.CascadeBlendDistance,
 			ShadowedDirectionalLightIndex = shadowData.ShadowedDirectionalLightIndex,
 			ShadowDepthBiases = shadowData.DepthBiases,
+			ShadowNormalOffsets = shadowData.NormalOffsets,
 			ShadowStrength = shadowData.Strength,
 			ShadowsEnabled = shadowData.Enabled,
 			ShadowMaxDistance = shadowData.MaxDistance,
@@ -166,6 +181,7 @@ public sealed class TransparentForwardPass
 			InstanceBuffer = gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = gpuDrawResources.MaterialBuffer,
 			DrawArgsBuffer = gpuDrawResources.DrawArgsBuffer,
+			VisibleInstanceBuffer = gpuDrawResources.VisibleInstanceBuffer,
 			CameraBuffer = gpuDrawResources.CameraBuffer,
 			TransparentEnvironmentBuffer = gpuDrawResources.TransparentEnvironmentBuffer,
 			TransparentLightingBuffer = gpuDrawResources.TransparentLightingBuffer,
@@ -204,6 +220,7 @@ public sealed class TransparentForwardPass
 		if (config.InstanceBuffer is null ||
 		    config.MaterialBuffer is null ||
 		    config.DrawArgsBuffer is null ||
+		    config.VisibleInstanceBuffer is null ||
 		    config.CameraBuffer is null)
 		{
 			commandList.EndPass();
@@ -273,6 +290,7 @@ public sealed class TransparentForwardPass
 				0.0f,
 				config.ShadowStrength));
 		lightingWriter.SetVector4("shadowDepthBiases", new Vector4(config.ShadowDepthBiases, 0.0f));
+		lightingWriter.SetVector4("shadowNormalOffsets", new Vector4(config.ShadowNormalOffsets, 0.0f));
 		lightingWriter.SetUInt(
 			"shadowLightIndex",
 			config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0u);
@@ -332,6 +350,7 @@ public sealed class TransparentForwardPass
 				commandList.BindConstantBuffer(bucket.BufferBindings.InstanceRegisterIndex, config.InstanceBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.MaterialRegisterIndex, config.MaterialBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.DrawArgsRegisterIndex, config.DrawArgsBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.VisibleInstanceRegisterIndex, config.VisibleInstanceBuffer);
 				if (config.MaterialGenerationBuffer is not null)
 				{
 					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
@@ -390,7 +409,7 @@ public sealed class TransparentForwardPass
 				laneDefinition.ExecutionIndex,
 				laneDefinition.DebugName,
 				_bufferBindingsByExecutionKey[laneDefinition.Key],
-				GetPassBindingSet(laneDefinition, gpuDrawResources)
+				GetPassBindingSet(laneDefinition)
 					?? throw new InvalidOperationException($"Missing pass bindings for transparent lane '{laneDefinition.DebugName}'."),
 				pipeline,
 				indirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
@@ -434,6 +453,7 @@ public sealed class TransparentForwardPass
 			lane.PreprocessorDefine);
 		pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
 		_pipelinesByExecutionKey[lane.Key] = pipeline;
+		_laneBindingGeneration++;
 		_bufferBindingsByExecutionKey[lane.Key] = SharedDrawGraphicsBufferBindings.FromTransparentReflection(compiled.ReflectionLayout);
 		_reflectionByExecutionKey[lane.Key] = compiled.ReflectionLayout;
 		return pipeline;
@@ -490,4 +510,26 @@ public sealed class TransparentForwardPass
 		return _bindlessRegistry.GetTextureHandle(texture);
 	}
 
+	/// <summary>The lanes of this pass's draw record sets.</summary>
+	private sealed class LaneBindings : ILaneBindingProvider
+	{
+		private readonly TransparentForwardPass _pass;
+
+		public LaneBindings(TransparentForwardPass pass)
+		{
+			_pass = pass;
+		}
+
+		public ulong Generation => _pass._laneBindingGeneration;
+
+		public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => _pass.HasIndirectLane(lane);
+
+		public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass.GetBufferBindings(lane);
+
+		public GraphicsPassBindingSet? GetPassBindings(GpuDrawExecutionLaneDefinition lane) =>
+			_pass.GetPassBindingSet(lane);
+
+		public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) => _pass.GetPipeline(lane);
+	}
 }

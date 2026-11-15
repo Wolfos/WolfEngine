@@ -1,7 +1,8 @@
 // GPU draw data layouts for bindless/indirect rendering.
 
-static const uint WOLF_HANDLE_INDEX_MASK = 0xFFFF;
-static const uint WOLF_HANDLE_GEN_SHIFT = 16;
+// Mirrors GpuDrawHandle in GpuDrawHandles.cs: a 20-bit index and a 12-bit generation.
+static const uint WOLF_HANDLE_INDEX_MASK = 0xFFFFF;
+static const uint WOLF_HANDLE_GEN_SHIFT = 20;
 
 uint GetHandleIndex(uint handle)
 {
@@ -95,11 +96,23 @@ struct GpuMeshData
     uint pad2;
 };
 
+// Indexed by instance index. batchIndex names the batch whose visible list culling appends the instance to.
 struct GpuDrawCommand
 {
     uint instanceHandle;
-    uint drawHandle;
+    uint batchIndex;
     uint flags;
+    uint pad0;
+};
+
+// Indexed by batch index, which is also the draw index of the batch's records. A batch's visible instances live
+// at [visibleOffset, visibleOffset + capacity) of each view's slice of the visible instance list. Capacity is
+// zero for a batch with no members.
+struct GpuDrawBatchData
+{
+    uint visibleOffset;
+    uint capacity;
+    uint laneIndex;
     uint pad0;
 };
 
@@ -123,7 +136,7 @@ struct GpuDrawInstanceUpdateData
     float4 terrainChunkOriginSize;
     float4 terrainHeightmapUvScaleOffset;
     uint32_t type;
-    uint32_t drawHandle;
+    uint32_t batchIndex;
     uint32_t instanceHandle;
     uint32_t drawKind;
     uint32_t meshHandle;

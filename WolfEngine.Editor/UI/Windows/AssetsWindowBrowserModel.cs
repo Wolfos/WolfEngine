@@ -363,7 +363,8 @@ internal static class AssetsWindowBrowserModelBuilder
 		{
 			var source = folder.Sources[i];
 			if (MatchesSearch(source.DisplayName, searchText) ||
-			    MatchesSearch(source.PrimaryAsset.Name, searchText))
+			    MatchesSearch(source.PrimaryAsset.Name, searchText) ||
+			    source.SubAssets.Any(asset => MatchesSearch(asset.Name, searchText)))
 			{
 				matchingSources.Add(source);
 			}

@@ -13,6 +13,9 @@ internal interface IMacOSInputHandler
 	internal void StartInputFrame();
 	internal void EndInputFrame();
 	internal void HandleInputEvents(ref Event @event);
+	internal void HandleMagnification(float delta);
+	internal void HandleNativeScroll(Vector2 scroll, Vector2? preciseDelta);
+	internal bool UseNativeUiScroll { get; set; }
 }
 
 public class MacOsInputHandler: IMacOSInputHandler
@@ -20,6 +23,7 @@ public class MacOsInputHandler: IMacOSInputHandler
 	private readonly IInputSystem _inputSystem;
 	private readonly IImGuiInputSink _imguiInputSink;
 	private bool _hasMouseInput;
+	public bool UseNativeUiScroll { get; set; }
 	
 	public MacOsInputHandler(IInputSystem inputSystem, IImGuiInputSink imguiInputSink)
 	{
@@ -38,6 +42,16 @@ public class MacOsInputHandler: IMacOSInputHandler
 		{
 			_inputSystem.SetAxis2D(InputActionBinding.MouseDelta, Vector2.Zero);
 		}
+	}
+
+	public void HandleMagnification(float delta)
+	{
+		_imguiInputSink.AddMouseMagnification(delta);
+	}
+
+	public void HandleNativeScroll(Vector2 scroll, Vector2? preciseDelta)
+	{
+		_imguiInputSink.AddMouseScroll(scroll, preciseDelta);
 	}
 	
 	public void HandleInputEvents(ref Event @event)
@@ -171,6 +185,12 @@ public class MacOsInputHandler: IMacOSInputHandler
 			scroll = new Vector2(wheelEvent.X, wheelEvent.Y);
 		}
 
+		// Cocoa's wheel X is reversed by SDL. Preserve the user's natural scrolling direction for UI.
+		if (UseNativeUiScroll == false)
+		{
+			_imguiInputSink.AddMouseScroll(new Vector2(-scroll.X, scroll.Y));
+		}
+
 		var direction = (MouseWheelDirection)wheelEvent.Direction;
 		if (direction == MouseWheelDirection.Flipped)
 		{
@@ -178,7 +198,6 @@ public class MacOsInputHandler: IMacOSInputHandler
 		}
 
 		_inputSystem.SetAxis2D(InputActionBinding.MouseScroll, scroll);
-		_imguiInputSink.AddMouseScroll(scroll);
 	}
 
 	private static bool TryMapMouseButton(byte button, out InputActionBinding binding)

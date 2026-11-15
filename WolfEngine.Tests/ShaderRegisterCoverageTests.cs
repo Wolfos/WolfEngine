@@ -92,11 +92,14 @@ public class ShaderRegisterCoverageTests
 			// Metal maps a register index straight onto a buffer index, and the bindless argument
 			// buffers occupy the top of the range. A shader register at or above the lowest of those
 			// silently collides with the descriptor heaps.
+			// Only reads Metal's index constants; no Metal API runs, so this is safe on every platform.
+#pragma warning disable CA1416
 			Assert.That(register, Is.LessThan(MetalDescriptorTable.BindlessArgumentBufferIndexCounts),
 				$"{Path.GetFileName(shaderPath)} line {line} declares register({kind}{register}), which collides " +
 				$"with Metal's bindless argument buffers at indices " +
 				$"{MetalDescriptorTable.BindlessArgumentBufferIndexCounts}-" +
 				$"{MetalDescriptorTable.BindlessArgumentBufferIndexSamplers}.");
+#pragma warning restore CA1416
 		}
 	}
 

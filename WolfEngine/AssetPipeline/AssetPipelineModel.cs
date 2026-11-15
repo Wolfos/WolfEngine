@@ -24,6 +24,7 @@ public static class AssetImporterIds
 	public const string Texture = "texture";
 	public const string Audio = "audio";
 	public const string ColorLookupTable = "color-lookup-table";
+	public const string ComputeShader = "compute-shader";
 	public const string Material = "material";
 	public const string DataAsset = "data";
 	public const string Terrain = "terrain";
@@ -31,6 +32,7 @@ public static class AssetImporterIds
 	public const string EditorScene = "editor-scene";
 	public const string SceneCell = "scene-cell";
 	public const string EditorPrefab = "editor-prefab";
+	public const string AnimationClip = "animation-clip";
 }
 
 public sealed class AssetSourceMetaFile

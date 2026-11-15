@@ -138,7 +138,7 @@ public class WorldManager: IWorldManager
 
 				try
 				{
-					if ((updateable.GetTag() & world.Tag) != 0)
+					if ((updateable.GetTag() & world.ExecutionTag) != 0)
 					{
 						using(FrameProfiler.Instance.Measure(updateable.GetType().Name))
 						{
@@ -174,7 +174,7 @@ public class WorldManager: IWorldManager
 
 				try
 				{
-					if ((physicsUpdate.GetTag() & world.Tag) != 0)
+					if ((physicsUpdate.GetTag() & world.ExecutionTag) != 0)
 					{
 						using (FrameProfiler.Instance.Measure(physicsUpdate.GetType().Name))
 						{
@@ -210,7 +210,7 @@ public class WorldManager: IWorldManager
 
 				try
 				{
-					if ((preRender.GetTag() & world.Tag) != 0)
+					if ((preRender.GetTag() & world.ExecutionTag) != 0)
 					{
 						using (FrameProfiler.Instance.Measure(preRender.GetType().Name))
 						{
@@ -252,7 +252,7 @@ public class WorldManager: IWorldManager
 
 				try
 				{
-					if ((gizmoDrawer.GetTag() & world.Tag) != 0)
+					if ((gizmoDrawer.GetTag() & world.ExecutionTag) != 0)
 					{
 						gizmoDrawer.OnDrawGizmos(world);
 					}

@@ -12,7 +12,7 @@ public enum GpuDrawKind : uint
 
 /// <summary>
 /// Layout of <c>GpuDrawCommand.flags</c>. Mirrored by the <c>DRAW_FLAG_*</c> constants in
-/// <c>gpu_draw_cull.compute.slang</c> and <c>gpu_draw_compact.compute.slang</c>; change them together.
+/// <c>gpu_draw_cull.compute.slang</c>; change them together.
 /// </summary>
 public static class GpuDrawFlags
 {
@@ -247,12 +247,38 @@ public readonly struct GpuMeshData
 	private readonly uint _pad2;
 }
 
+/// <summary>
+/// One instance's entry in the command table, which is indexed by instance index. Culling reads it to find the
+/// batch whose visible list the instance is appended to.
+/// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuDrawCommand
 {
 	public readonly uint InstanceHandle;
-	public readonly uint DrawHandle;
+	public readonly uint BatchIndex;
 	public readonly uint Flags;
+	private readonly uint _pad0;
+}
+
+/// <summary>
+/// One batch's entry in the batch table, indexed by batch index (the draw index of its draw records). Its visible
+/// instances are written from <see cref="VisibleOffset"/> into each view's slice of the visible instance list, and
+/// never more than <see cref="Capacity"/> of them. A batch with no members has a capacity of zero.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public readonly struct GpuDrawBatchData
+{
+	public GpuDrawBatchData(uint visibleOffset, uint capacity, uint laneIndex)
+	{
+		VisibleOffset = visibleOffset;
+		Capacity = capacity;
+		LaneIndex = laneIndex;
+		_pad0 = 0;
+	}
+
+	public readonly uint VisibleOffset;
+	public readonly uint Capacity;
+	public readonly uint LaneIndex;
 	private readonly uint _pad0;
 }
 
@@ -279,7 +305,7 @@ public readonly struct GpuDrawInstanceUpdateData
 		Vector4 terrainChunkOriginSize,
 		Vector4 terrainHeightmapUvScaleOffset,
 		uint type,
-		uint drawHandle,
+		uint batchIndex,
 		uint instanceHandle,
 		uint drawKind,
 		uint meshHandle,
@@ -292,7 +318,7 @@ public readonly struct GpuDrawInstanceUpdateData
 		TerrainChunkOriginSize = terrainChunkOriginSize;
 		TerrainHeightmapUvScaleOffset = terrainHeightmapUvScaleOffset;
 		Type = type;
-		DrawHandle = drawHandle;
+		BatchIndex = batchIndex;
 		InstanceHandle = instanceHandle;
 		DrawKind = drawKind;
 		MeshHandle = meshHandle;
@@ -307,7 +333,7 @@ public readonly struct GpuDrawInstanceUpdateData
 	public readonly Vector4 TerrainChunkOriginSize;
 	public readonly Vector4 TerrainHeightmapUvScaleOffset;
 	public readonly uint Type;
-	public readonly uint DrawHandle;
+	public readonly uint BatchIndex;
 	public readonly uint InstanceHandle;
 	public readonly uint DrawKind;
 	public readonly uint MeshHandle;

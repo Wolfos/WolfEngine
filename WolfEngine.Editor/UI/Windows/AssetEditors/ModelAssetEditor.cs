@@ -1,4 +1,5 @@
 using ImGuiNET;
+using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 
@@ -8,14 +9,25 @@ public sealed class ModelAssetEditor
 {
 	private readonly IEditorProjectService _projectService;
 	private readonly IAssetMetadataStore _metadataStore;
+	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
+	private readonly IIconManager _icons;
+	private readonly IAssetSelectionService _assetSelectionService;
 	private AssetSourceMetaFile? _loadedMetadata;
 	private Guid? _loadedModelAssetId;
     private string _ignoredChannelText = "";
 
-	public ModelAssetEditor(IEditorProjectService projectService, IAssetMetadataStore metadataStore)
+	public ModelAssetEditor(
+		IEditorProjectService projectService,
+		IAssetMetadataStore metadataStore,
+		IPropertyDrawerRegistry propertyDrawerRegistry,
+		IIconManager icons,
+		IAssetSelectionService assetSelectionService)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_metadataStore = metadataStore ?? throw new ArgumentNullException(nameof(metadataStore));
+		_propertyDrawerRegistry = propertyDrawerRegistry ?? throw new ArgumentNullException(nameof(propertyDrawerRegistry));
+		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
+		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -37,10 +49,16 @@ public sealed class ModelAssetEditor
 		}
 
 		var modelImportSettings = metadata.GetImportSettingsOrDefault(() => new ModelImportSettings());
-		var rigId = modelImportSettings.AnimationSkeletonId;
-        if (AnimationWindow.AssetChoice(_projectService, "Animation rig", AssetType.Skeleton, ref rigId))
+		var rig = new AssetRef<Skeleton>
+		{
+			NodeId = modelImportSettings.AnimationSkeletonId
+		};
+		var rigSelectionButton = new AssetLinkSelectionButton(
+			_icons.Get("search"),
+			assetId => _assetSelectionService.Select(assetId));
+        if (_propertyDrawerRegistry.DrawAssetRef("Animation rig", ref rig, rigSelectionButton))
         {
-            modelImportSettings.AnimationSkeletonId = rigId;
+            modelImportSettings.AnimationSkeletonId = rig.NodeId;
             metadata.SetImportSettings(modelImportSettings);
             SaveModelMetadata(asset, metadata);
         }

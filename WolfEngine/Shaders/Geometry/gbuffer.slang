@@ -6,13 +6,15 @@ import "../Common/normal_decode.slang";
 import "../Animation/skinning_common.slang";
 #endif
 
-#define WOLF_MAX_INSTANCE_COUNT 65535
-#define WOLF_MAX_MATERIAL_COUNT 65535
+#define WOLF_MAX_INSTANCE_COUNT 1048576
+#define WOLF_MAX_MATERIAL_COUNT 1048576
 
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
+// Instance ids of each batch's visible members, from the batch's draw args start onwards.
+StructuredBuffer<uint> g_VisibleInstances : register(t9);
 
 #ifdef WOLF_GBUFFER_SKINNED
 // Rebuilds skinned vertices' previous positions for motion vectors.
@@ -44,7 +46,9 @@ cbuffer CameraParams : register(b2)
     row_major float4x4 viewMatrix;
     float nearPlane;
     float farPlane;
-    float2 _cameraPadding;
+    // LOD bias for material textures; see SceneDrawData.MaterialMipBias.
+    float materialMipBias;
+    float _cameraPadding;
 };
 
 struct VSInput
@@ -105,7 +109,15 @@ VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
     GpuDrawArgs drawArgs = g_DrawArgsTable[drawIndex];
-    if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
+    // A record executed without compaction draws its batch's full capacity; instances past the visible count
+    // are discarded here.
+    uint instanceId = 0;
+    if (input.instanceId < drawArgs.instanceCount)
+    {
+        instanceId = g_VisibleInstances[drawArgs.startInstance + input.instanceId];
+    }
+
+    if (instanceId == 0 || instanceId >= WOLF_MAX_INSTANCE_COUNT)
     {
         // Emit a guaranteed clipped position for inactive commands.
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);
@@ -118,7 +130,6 @@ VSOutput vertexShader(VSInput input)
         return output;
     }
 
-    uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;
@@ -164,10 +175,12 @@ float2 ClipToPixel(float4 clipPosition, uint2 frameSize)
         (-ndc.y * 0.5f + 0.5f) * frameSize.y);
 }
 
-float ClipToDepth(float4 clipPosition)
+/// View-space depth of a clip position: clip w, for a left-handed perspective projection. The velocity
+/// target is a half float, so it stores the previous frame's view depth rather than device depth: view depth
+/// keeps its relative precision at any distance, where device depth near 1 cannot tell surfaces metres apart.
+float ClipToViewDepth(float4 clipPosition)
 {
-    float invW = abs(clipPosition.w) > 1e-5f ? rcp(clipPosition.w) : 0.0f;
-    return clipPosition.z * invW;
+    return clipPosition.w;
 }
 
 PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
@@ -180,7 +193,7 @@ PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
         output.normal = float4(0.5f, 0.5f, 1.0f, 1.0f);
         output.material = float4(0.0f, 1.0f, 1.0f, 1.0f);
         output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
-        output.velocity = float4(0.0f, 0.0f, 1.0f, 1.0f);
+        output.velocity = float4(0.0f, 0.0f, ClipToViewDepth(input.currentClip), 1.0f);
         return output;
     }
 
@@ -210,15 +223,15 @@ PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
     Texture2D<float4> emissiveTex = GetTexture(materialData.emissiveHandle);
 
     float2 materialUv = input.uv * materialData.uvOffsetScale.zw + materialData.uvOffsetScale.xy;
-    float4 albedoSample = albedoTex.Sample(sampler, materialUv);
-    float4 ormSample = ormTex.Sample(sampler, materialUv);
+    float4 albedoSample = albedoTex.SampleBias(sampler, materialUv, materialMipBias);
+    float4 ormSample = ormTex.SampleBias(sampler, materialUv, materialMipBias);
 #ifdef WOLF_ALPHA_CLIP
     if(albedoSample.a < materialData.metallicRoughness.z) discard;
 #endif
     float3 tangentNormal = ApplyNormalMapScale(
-        DecodeNormalMapSample(normalTex.Sample(sampler, materialUv)),
+        DecodeNormalMapSample(normalTex.SampleBias(sampler, materialUv, materialMipBias)),
         materialData.metallicRoughness.w);
-    float4 emissiveSample = emissiveTex.Sample(sampler, materialUv);
+    float4 emissiveSample = emissiveTex.SampleBias(sampler, materialUv, materialMipBias);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
     float3 N = normal;
     float3 T = normalize(input.tangent.xyz);
@@ -245,8 +258,8 @@ PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
     uint2 frameSize = uint2(max(frameSizeX, 1u), max(frameSizeY, 1u));
     float2 currentPixel = ClipToPixel(input.currentClip, frameSize);
     float2 previousPixel = ClipToPixel(input.previousClip, frameSize);
-    float previousDepth = ClipToDepth(input.previousClip);
-    output.velocity = float4(previousPixel - currentPixel, previousDepth, 1.0f);
+    float previousViewDepth = ClipToViewDepth(input.previousClip);
+    output.velocity = float4(previousPixel - currentPixel, previousViewDepth, 1.0f);
 
     return output;
 }

@@ -15,11 +15,25 @@ public sealed class RenderFrameResourceOwnershipTests
 		Assert.Multiple(() =>
 		{
 			Assert.That(properties, Does.Not.Contain(nameof(RenderFrameSharedResources.FinalColor)));
-			Assert.That(properties, Does.Not.Contain(nameof(RenderFrameSharedResources.SkyboxEnvironment)));
-			Assert.That(properties, Does.Not.Contain(nameof(RenderFrameSharedResources.SkyboxIrradiance)));
-			Assert.That(properties, Does.Not.Contain(nameof(RenderFrameSharedResources.SkyboxPrefilter)));
 			Assert.That(properties, Does.Not.Contain(nameof(RenderFrameSharedResources.SkyboxBrdfLut)));
 		});
+	}
+
+	[Test]
+	public void PerViewResources_OwnTheViewsSky()
+	{
+		var properties = typeof(RenderViewResources)
+			.GetProperties()
+			.Select(property => property.Name)
+			.ToHashSet(StringComparer.Ordinal);
+
+		// Each view is lit by its own sun, so a preview world must not draw the scene view's sky.
+		Assert.That(properties, Is.SupersetOf(new[]
+		{
+			nameof(RenderViewResources.SkyboxEnvironment),
+			nameof(RenderViewResources.SkyboxIrradiance),
+			nameof(RenderViewResources.SkyboxPrefilter)
+		}));
 	}
 
 	[Test]
@@ -35,10 +49,7 @@ public sealed class RenderFrameResourceOwnershipTests
 		{
 			nameof(RenderFrameSharedResources.FinalColor),
 			nameof(RenderFrameSharedResources.FramebufferSize),
-			nameof(RenderFrameSharedResources.SkyboxBrdfLut),
-			nameof(RenderFrameSharedResources.SkyboxEnvironment),
-			nameof(RenderFrameSharedResources.SkyboxIrradiance),
-			nameof(RenderFrameSharedResources.SkyboxPrefilter)
+			nameof(RenderFrameSharedResources.SkyboxBrdfLut)
 		}.Order(StringComparer.Ordinal)));
 	}
 }

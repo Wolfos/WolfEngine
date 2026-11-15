@@ -35,13 +35,28 @@ internal interface IMetalSurface
 	/// Whether a host asked for <paramref name="initialSize"/> explicitly, in which case it is also the drawable size
 	/// in pixels until the window is resized, so automation captures do not depend on the display scale.
 	/// </param>
-	IntPtr Initialize(Int2 initialSize, bool exactDrawableSize);
+	IntPtr Initialize(Int2 initialSize, bool exactDrawableSize, string title);
 
 	/// <summary>The size the layer's drawables should have, in pixels, or false while it is not known yet.</summary>
 	bool TryGetDrawableSize(out Int2 size);
 
 	/// <summary>The window's size in points, or false while it is not known yet.</summary>
 	bool TryGetWindowSize(out Int2 size);
+
+	/// <summary>Whether <see cref="ApplyWindowConfiguration"/> can change the window. A host-owned view cannot.</summary>
+	bool CanConfigureWindow { get; }
+
+	/// <summary>The mode the window is in now, which lags a fullscreen request while the platform animates it.</summary>
+	WindowMode WindowMode { get; }
+
+	/// <summary>
+	/// Changes the window's mode and size, on the thread that renders. The drawable follows on a later
+	/// <see cref="TryGetDrawableSize"/>, so a fullscreen resolution below native renders smaller and is scaled up.
+	/// </summary>
+	void ApplyWindowConfiguration(WindowConfiguration configuration);
+
+	/// <summary>The resolution in pixels of the display the window is on, or false while it is not known yet.</summary>
+	bool TryGetNativeResolution(out Int2 resolution);
 
 	/// <summary>Processes the platform events that arrived since the previous frame.</summary>
 	MetalSurfaceEvents PumpEvents();

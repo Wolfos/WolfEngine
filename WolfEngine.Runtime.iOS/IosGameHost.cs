@@ -61,6 +61,8 @@ internal sealed class IosGameHost : IDisposable
 				Catalog = catalog,
 				Gameplay = new EmptyGameplayModule(),
 				EnablePhysics = false,
+				// iOS apps are closed by the user; an app that exits on its own reads as a crash.
+				IsQuitSupported = false,
 				ConfigureServices = services => services.AddHostMetalSurface(surface)
 			});
 			var gameHost = new IosGameHost(view, surface, catalog, host);

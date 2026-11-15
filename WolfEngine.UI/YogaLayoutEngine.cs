@@ -27,13 +27,15 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		public required UiTextService Text { get; init; }
 		public int AppliedTextRevision { get; set; } = -1;
 		public bool NativeTextStale { get; set; }
+		public Texture? AppliedImage { get; set; }
 	}
 
 	private Binding? _root;
 	private float _viewportWidth = -1;
 	private float _viewportHeight = -1;
 	private bool _disposed;
-	private readonly List<Binding> _changedTextBindings = [];
+	// Text and image nodes whose measured size may have changed, so Yoga must calculate even when no style did.
+	private readonly List<Binding> _changedMeasuredBindings = [];
 	private readonly List<Binding> _patchedTextBindings = [];
 	private readonly UiTextService _text;
 	public YogaLayoutEngine(UiTextService? text = null) => _text = text ?? new UiTextService();
@@ -52,15 +54,15 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		}
 
 		var viewportChanged = _viewportWidth != width || _viewportHeight != height;
-		_changedTextBindings.Clear();
+		_changedMeasuredBindings.Clear();
 		_patchedTextBindings.Clear();
 		using (FrameProfiler.Instance.Measure("Gameplay UI.Yoga Sync Dirty Nodes"))
 		{
-			Sync(_root!, width, height, viewportChanged, _changedTextBindings, !rebuilt && !viewportChanged && !fullLayoutRequired);
+			Sync(_root!, width, height, viewportChanged, _changedMeasuredBindings, !rebuilt && !viewportChanged && !fullLayoutRequired);
 			YGNodeStyleSetWidth(_root!.Yoga, width);
 			YGNodeStyleSetHeight(_root.Yoga, height);
 		}
-		if (!rebuilt && !viewportChanged && !fullLayoutRequired && _changedTextBindings.Count == 0)
+		if (!rebuilt && !viewportChanged && !fullLayoutRequired && _changedMeasuredBindings.Count == 0)
 		{
 			PatchContainedTexts();
 			_viewportWidth = width;
@@ -92,6 +94,14 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 			YGNodeSetContext(yoga, binding);
 			YGNodeSetMeasureFunc(yoga, MeasureText);
 		}
+
+		// Yoga only measures leaves. An <img> is a void element, so in practice it never has children.
+		if (source.IsImage && source.Children.Count == 0)
+		{
+			YGNodeSetContext(yoga, binding);
+			YGNodeSetMeasureFunc(yoga, MeasureImage);
+		}
+
 		ApplyStyle(binding, viewportWidth, viewportHeight);
 		for (var i = 0; i < children.Length; i++)
 		{
@@ -106,29 +116,41 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		float viewportWidth,
 		float viewportHeight,
 		bool force,
-		List<Binding> changedTextBindings,
+		List<Binding> changedMeasuredBindings,
 		bool allowContainedPatch)
 	{
 		var styleChanged = force || !ReferenceEquals(binding.AppliedStyle, binding.Source.Style) &&
 			!Equals(binding.AppliedStyle, binding.Source.Style);
 		var textChanged = binding.Source.IsText && (binding.AppliedTextRevision != binding.Text.Revision ||
 			!string.Equals(binding.Source.Text, binding.AppliedText, StringComparison.Ordinal));
+		var imageChanged = binding.Source.IsImage &&
+			ReferenceEquals(binding.AppliedImage, binding.Source.Image) == false;
 		if (textChanged && !styleChanged && allowContainedPatch && CanPatchContainedText(binding))
 		{
 			binding.AppliedText = binding.Source.Text;
 			binding.NativeTextStale = true;
 			_patchedTextBindings.Add(binding);
 		}
-		else if (styleChanged || textChanged || binding.NativeTextStale && !allowContainedPatch)
+		else if (styleChanged || textChanged || imageChanged || binding.NativeTextStale && !allowContainedPatch)
 		{
-			if (binding.Source.IsText) changedTextBindings.Add(binding);
+			if (binding.Source.IsText) changedMeasuredBindings.Add(binding);
 			ApplyStyle(binding, viewportWidth, viewportHeight);
 			if (binding.Source.IsText) binding.Yoga.MarkDirtyAndPropagate();
 			binding.NativeTextStale = false;
+
+			if (imageChanged)
+			{
+				changedMeasuredBindings.Add(binding);
+
+				if (YGNodeHasMeasureFunc(binding.Yoga))
+				{
+					binding.Yoga.MarkDirtyAndPropagate();
+				}
+			}
 		}
 		else if (binding.NativeTextStale) _patchedTextBindings.Add(binding);
 		for (var i = 0; i < binding.Children.Length; i++)
-			Sync(binding.Children[i], viewportWidth, viewportHeight, force, changedTextBindings, allowContainedPatch);
+			Sync(binding.Children[i], viewportWidth, viewportHeight, force, changedMeasuredBindings, allowContainedPatch);
 	}
 
 	private void PatchContainedTexts()
@@ -282,6 +304,7 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		}
 		binding.AppliedStyle = style;
 		binding.AppliedText = source.Text;
+		binding.AppliedImage = source.Image;
 		binding.AppliedTextRevision = binding.Text.Revision;
 	}
 
@@ -293,6 +316,25 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		text.TextLayout = measured;
 		return new YGSize { Width = widthMode == MeasureMode.Exactly ? width : measured.Width,
 			Height = heightMode == MeasureMode.Exactly ? height : measured.Height };
+	}
+
+	/// <summary>
+	/// Sizes an <c>&lt;img&gt;</c> like a browser does: its natural size is the texture's size in CSS pixels, and
+	/// when only one side is fixed the other follows the texture's aspect ratio. Without a texture it is empty.
+	/// </summary>
+	private static YGSize MeasureImage(Node node, float width, MeasureMode widthMode, float height, MeasureMode heightMode)
+	{
+		var binding = (Binding)YGNodeGetContext(node)!;
+		var image = binding.Source.Image;
+		var naturalWidth = image is null ? 0.0f : image.Width;
+		var naturalHeight = image is null ? 0.0f : image.Height;
+		var size = UiImageLayout.Measure(naturalWidth, naturalHeight, width, widthMode, height, heightMode);
+
+		return new YGSize
+		{
+			Width = size.X,
+			Height = size.Y
+		};
 	}
 
 	private static void Read(Binding binding, float parentLeft, float parentTop, bool ancestorMoved)

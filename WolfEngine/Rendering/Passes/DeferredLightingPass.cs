@@ -66,6 +66,9 @@ public sealed class DeferredLightingPass
 		var reflections = resources.ReflectionsRadiance.IsValid
 			? context.GetTexture(resources.ReflectionsRadiance)
 			: null;
+		var ddgiFinalGather = resources.DdgiFinalGatherIrradiance.IsValid
+			? context.GetTexture(resources.DdgiFinalGatherIrradiance)
+			: null;
 		var ddgiIrradianceL0 = resources.DdgiIrradianceL0HistoryWrite.IsValid
 			? context.GetTexture(resources.DdgiIrradianceL0HistoryWrite)
 			: null;
@@ -118,14 +121,14 @@ public sealed class DeferredLightingPass
 		var shadowMapDepth2 = context.GetTexture(resources.ShadowMapDepth2);
 		var fogIntegrated = resources.FogIntegrated.IsValid ? context.GetTexture(resources.FogIntegrated) : null;
 
-		var environment = sharedResources.SkyboxEnvironment.IsValid
-			? context.GetTexture(sharedResources.SkyboxEnvironment)
+		var environment = resources.SkyboxEnvironment.IsValid
+			? context.GetTexture(resources.SkyboxEnvironment)
 			: emissive;
-		var irradiance = sharedResources.SkyboxIrradiance.IsValid
-			? context.GetTexture(sharedResources.SkyboxIrradiance)
+		var irradiance = resources.SkyboxIrradiance.IsValid
+			? context.GetTexture(resources.SkyboxIrradiance)
 			: emissive;
-		var prefilter = sharedResources.SkyboxPrefilter.IsValid
-			? context.GetTexture(sharedResources.SkyboxPrefilter)
+		var prefilter = resources.SkyboxPrefilter.IsValid
+			? context.GetTexture(resources.SkyboxPrefilter)
 			: emissive;
 		var brdfLut = sharedResources.SkyboxBrdfLut.IsValid
 			? context.GetTexture(sharedResources.SkyboxBrdfLut)
@@ -155,6 +158,7 @@ public sealed class DeferredLightingPass
 			GBufferDepth = _bindlessRegistry.GetTextureHandle(depth),
 			AmbientOcclusion = ambientOcclusionHandle,
 			Reflections = _bindlessRegistry.GetTextureHandle(reflections),
+			DdgiFinalGather = _bindlessRegistry.GetTextureHandle(ddgiFinalGather),
 			DdgiIrradianceL0 = _bindlessRegistry.GetTextureHandle(ddgiIrradianceL0),
 			DdgiIrradianceLy = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLy),
 			DdgiIrradianceLz = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLz),
@@ -213,6 +217,7 @@ public sealed class DeferredLightingPass
 			ShadowCascadeBlendDistance = shadowData.CascadeBlendDistance,
 			ShadowedDirectionalLightIndex = shadowData.ShadowedDirectionalLightIndex,
 			ShadowDepthBiases = shadowData.DepthBiases,
+			ShadowNormalOffsets = shadowData.NormalOffsets,
 			ShadowStrength = shadowData.Strength,
 			ShadowsEnabled = shadowData.Enabled,
 			ShadowMaxDistance = shadowData.MaxDistance,
@@ -220,8 +225,10 @@ public sealed class DeferredLightingPass
 			ShadowTexelSizeY = 1.0f / shadowResolution,
 			AoEnabled = resources.AmbientOcclusionFinal.IsValid,
 			ReflectionsEnabled = reflections is not null,
+			DdgiFinalGatherEnabled = ddgiEnabled && ddgiFinalGather is not null,
 			DiffuseIndirectMultiplier = Math.Max(resources.Config.Lighting.DiffuseIndirectMultiplier, 0.0f),
 			SpecularIndirectMultiplier = Math.Max(resources.Config.Lighting.SpecularIndirectMultiplier, 0.0f),
+			IndirectLightMinimum = Math.Max(resources.Config.Lighting.IndirectLightMinimum, 0.0f),
 			DdgiEnabled = ddgiEnabled,
 			DdgiOrigin = resources.DdgiRuntimeOrigin,
 			DdgiStorageOffset = resources.DdgiStorageOffset,
@@ -292,6 +299,7 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("shadowMapHandle2", config.ShadowMapDepth2.Value);
 		bindlessWriter.SetUInt("shadowSamplerHandle", config.ShadowSampler.Value);
 		bindlessWriter.SetUInt("fogIntegratedHandle", config.FogIntegrated.Value);
+		bindlessWriter.SetUInt("ddgiFinalGatherHandle", config.DdgiFinalGather.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var cameraWriter = _cameraWriter
@@ -355,6 +363,7 @@ public sealed class DeferredLightingPass
 				0.0f,
 				config.ShadowStrength));
 		lightingWriter.SetVector4("shadowDepthBiases", new Vector4(config.ShadowDepthBiases, 0.0f));
+		lightingWriter.SetVector4("shadowNormalOffsets", new Vector4(config.ShadowNormalOffsets, 0.0f));
 		lightingWriter.SetUInt(
 			"shadowLightIndex",
 			config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0u);
@@ -363,6 +372,8 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetUInt("reflectionsEnabled", config.ReflectionsEnabled ? 1u : 0u);
 		lightingWriter.SetFloat("diffuseIndirectMultiplier", config.DiffuseIndirectMultiplier);
 		lightingWriter.SetFloat("specularIndirectMultiplier", config.SpecularIndirectMultiplier);
+		lightingWriter.SetFloat("indirectLightMinimum", config.IndirectLightMinimum);
+		lightingWriter.SetUInt("ddgiFinalGatherEnabled", config.DdgiFinalGatherEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiEnabled", config.DdgiEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiFinalContributionDebugEnabled", config.DdgiFinalContributionDebugEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiProbeDebugEnabled", config.DdgiProbeDebugEnabled ? 1u : 0u);

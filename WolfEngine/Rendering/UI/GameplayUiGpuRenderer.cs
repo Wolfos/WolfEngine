@@ -122,9 +122,9 @@ public sealed class GameplayUiGpuRenderer
 		_renderer.EnsureResources(device, frame);
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture target, bool clearTarget,
+	public void Record(IGfxCommandList commandList, UiFrameData frame, IGfxTexture target, bool clearTarget,
 		ColorRGBA? clearColor = null) =>
-		_renderer.Record(context, frame, target, clearTarget, clearColor);
+		_renderer.Record(commandList, frame, target, clearTarget, clearColor);
 
 	public void InvalidateShaderPipeline() => _renderer.InvalidateShaderPipeline();
 }

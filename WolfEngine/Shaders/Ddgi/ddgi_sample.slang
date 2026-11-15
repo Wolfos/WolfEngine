@@ -276,17 +276,23 @@ DdgiShSample SampleDdgiSh(
                 float trilinearWeight = tri.x * tri.y * tri.z;
                 uint physicalProbeIndex = DdgiPhysicalProbeIndex(params, probeIndex);
                 uint2 probePixel = DdgiCoefficientPixel(params, physicalProbeIndex);
-                if (probeActivityTex.Load(int3(probePixel, 0)).x <= 0.5f)
-                {
-                    continue;
-                }
+
+                // Every fetch for this probe is issued before any of them is tested. They do not depend on
+                // each other, so they are all in flight at once, where skipping on activity, then on state,
+                // then reading the coefficients made each wait for the one before. A rejected probe is then
+                // dropped with selects rather than a branch, so whatever its slots hold never reaches the
+                // sums, NaN included.
+                float probeActivity = probeActivityTex.Load(int3(probePixel, 0)).x;
                 float4 probeState = probeStateTex.Load(int3(probePixel, 0));
-                if (uint(round(max(probeState.w, 0.0f))) != 1u)
-                {
-                    continue;
-                }
+                float3 probeL0 = irradianceL0Tex.Load(int3(probePixel, 0)).rgb;
+                float3 probeLy = irradianceLyTex.Load(int3(probePixel, 0)).rgb;
+                float3 probeLz = irradianceLzTex.Load(int3(probePixel, 0)).rgb;
+                float3 probeLx = irradianceLxTex.Load(int3(probePixel, 0)).rgb;
+                bool probeUsable =
+                    probeActivity > 0.5f &&
+                    uint(round(max(probeState.w, 0.0f))) == 1u;
                 float3 relocationOffset =
-                    params.probeRelocationEnabled != 0u
+                    probeUsable && params.probeRelocationEnabled != 0u
                     ? probeState.xyz
                     : 0.0f.xxx;
                 float3 probePosition = DdgiProbePosition(params, uint3(coord)) + relocationOffset;
@@ -299,7 +305,7 @@ DdgiShSample SampleDdgiSh(
                 // enough weight to inject sky radiance into enclosed surfaces.
                 float wrappedNormal = saturate(dot(normal, -direction) * 0.5f + 0.5f);
                 float nWeight = wrappedNormal * wrappedNormal;
-                float weight = trilinearWeight * nWeight;
+                float weight = probeUsable ? trilinearWeight * nWeight : 0.0f;
                 float2 visibilityUv = DdgiProbeAtlasUvFromLayout(
                     physicalProbeIndex,
                     direction,
@@ -312,24 +318,24 @@ DdgiShSample SampleDdgiSh(
                 float meanDistance = moments.x;
                 float meanDistanceSquared = moments.y;
                 float visibility = DdgiEvaluateVisibility(meanDistance, meanDistanceSquared, normalizedDistance);
-                float probeWeight = weight * visibility;
+                float probeWeight = probeUsable ? weight * visibility : 0.0f;
                 baseWeightSum += weight;
-                if (probeDebugEnabled != 0u && probeWeight > dominantProbeWeight)
+                if (probeDebugEnabled != 0u && probeUsable && probeWeight > dominantProbeWeight)
                 {
                     dominantProbeWeight = probeWeight;
                     dominantProbeIndex = physicalProbeIndex;
                     dominantProbeCoord = float3(coord.x, coord.y, coord.z);
                 }
-                if (probeDebugEnabled != 0u)
+                if (probeDebugEnabled != 0u && probeUsable)
                 {
                     relocationDebugSum += relocationOffset * probeWeight;
                     relocationDecisionDebugSum +=
                         relocationDecisionTex.Load(int3(probePixel, 0)).rgb * probeWeight;
                 }
-                coefficientL0 += irradianceL0Tex.Load(int3(probePixel, 0)).rgb * probeWeight;
-                coefficientLy += irradianceLyTex.Load(int3(probePixel, 0)).rgb * probeWeight;
-                coefficientLz += irradianceLzTex.Load(int3(probePixel, 0)).rgb * probeWeight;
-                coefficientLx += irradianceLxTex.Load(int3(probePixel, 0)).rgb * probeWeight;
+                coefficientL0 += probeUsable ? probeL0 * probeWeight : 0.0f.xxx;
+                coefficientLy += probeUsable ? probeLy * probeWeight : 0.0f.xxx;
+                coefficientLz += probeUsable ? probeLz * probeWeight : 0.0f.xxx;
+                coefficientLx += probeUsable ? probeLx * probeWeight : 0.0f.xxx;
                 weightSum += probeWeight;
             }
         }

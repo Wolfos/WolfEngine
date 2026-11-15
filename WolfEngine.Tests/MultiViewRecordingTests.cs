@@ -18,13 +18,21 @@ public sealed class MultiViewRecordingTests
 
 		var primaryGBuffer = graph.Passes.Single(pass => pass.Name == "GBuffer" && pass.View == RenderViewId.Primary);
 		var secondGBuffer = graph.Passes.Single(pass => pass.Name == "GBuffer [view2]" && pass.View == Second);
+		builder.BindView(RenderViewId.Primary);
+		var primaryOutput = ViewState(builder).FrameResources.EncodedSceneColor;
+		builder.BindView(Second);
+		var secondOutput = ViewState(builder).FrameResources.EncodedSceneColor;
 		Assert.Multiple(() =>
 		{
 			// Each view writes its own G-buffer: sharing one would have the second view overwrite the first
 			// before any of the first view's lighting read it.
 			Assert.That(primaryGBuffer.Writes.Intersect(secondGBuffer.Writes), Is.Empty);
-			Assert.That(graph.Passes.Count(pass => pass.Name == "ImGui"), Is.EqualTo(1));
-			Assert.That(graph.Passes.Single(pass => pass.Name == "ImGui").View, Is.EqualTo(RenderViewId.None));
+			Assert.That(graph.Passes.Count(pass => pass.Name == "UI Handoff"), Is.EqualTo(1));
+			var uiHandoff = graph.Passes.Single(pass => pass.Name == "UI Handoff");
+			Assert.That(uiHandoff.View, Is.EqualTo(RenderViewId.None));
+			// The UI samples every view's output after the graph, so the handoff leaves each one readable.
+			Assert.That(uiHandoff.Reads, Does.Contain(primaryOutput));
+			Assert.That(uiHandoff.Reads, Does.Contain(secondOutput));
 		});
 	}
 
@@ -49,13 +57,38 @@ public sealed class MultiViewRecordingTests
 	}
 
 	[Test]
+	public void EachViewDrawsItsOwnSkyBuiltFromItsOwnSun()
+	{
+		var (graph, builder) = RecordTwoViews(
+			new Int2(64, 32),
+			new Int2(24, 48),
+			secondSun: Vector3.Normalize(new Vector3(1.0f, 0.3f, 0.0f)));
+
+		builder.BindView(RenderViewId.Primary);
+		var primary = ViewState(builder);
+		builder.BindView(Second);
+		var second = ViewState(builder);
+
+		Assert.Multiple(() =>
+		{
+			// A preview world lit by its own sun must not show the scene view's sky.
+			Assert.That(primary.Sky, Is.Not.SameAs(second.Sky));
+			Assert.That(primary.FrameResources.SkyboxEnvironment, Is.Not.EqualTo(second.FrameResources.SkyboxEnvironment));
+			Assert.That(second.Sky.SunDirection, Is.Not.EqualTo(primary.Sky.SunDirection));
+			Assert.That(graph.Passes.Single(pass => pass.Name == "Skybox Environment").View, Is.EqualTo(RenderViewId.Primary));
+			Assert.That(graph.Passes.Single(pass => pass.Name == "Skybox Environment [view2]").View, Is.EqualTo(Second));
+			Assert.That(graph.Passes.Count(pass => pass.Name.StartsWith("Skybox BRDF LUT", StringComparison.Ordinal)), Is.EqualTo(1));
+		});
+	}
+
+	[Test]
 	public void ViewPassesAreRecordedBetweenSharedPreparationAndPresentation()
 	{
 		var (graph, _) = RecordTwoViews(new Int2(64, 32), new Int2(24, 48));
 		var names = graph.Passes.Select(pass => pass.Name).ToList();
 		var lastViewPass = graph.Passes.Select((pass, index) => (pass, index)).Last(entry => entry.pass.View.IsValid).index;
 
-		Assert.That(names.IndexOf("ImGui"), Is.GreaterThan(lastViewPass), "presentation composites every view");
+		Assert.That(names.IndexOf("UI Handoff"), Is.GreaterThan(lastViewPass), "the UI handoff follows every view");
 	}
 
 	[Test]
@@ -124,8 +157,12 @@ public sealed class MultiViewRecordingTests
 	}
 
 	private static (RenderGraph Graph, RenderGraphFrameBuilder Builder) RecordTwoViews(
-		Int2 primarySize, Int2 secondSize, RenderConfig? secondConfig = null)
+		Int2 primarySize,
+		Int2 secondSize,
+		RenderConfig? secondConfig = null,
+		Vector3? secondSun = null)
 	{
+		var secondSunDirection = secondSun ?? Vector3.UnitY;
 		var (graph, builder) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
 		var config = new RenderConfig
 		{
@@ -135,9 +172,9 @@ public sealed class MultiViewRecordingTests
 			Bloom = new BloomConfig { Enabled = false }
 		};
 		var framebuffer = new Int2(128, 128);
-		builder.BeginSharedFrame(framebuffer, Vector3.UnitY, 1.0f, config.SkyboxConfig);
-		builder.BeginViewFrame(RenderViewId.Primary, framebuffer, primarySize, default, true, false, config, Vector3.Zero);
-		builder.BeginViewFrame(Second, framebuffer, secondSize, default, true, false, secondConfig ?? config, Vector3.Zero);
+		builder.BeginSharedFrame(framebuffer);
+		builder.BeginViewFrame(RenderViewId.Primary, framebuffer, primarySize, default, true, false, config, Vector3.Zero, Vector3.UnitY, 1.0f);
+		builder.BeginViewFrame(Second, framebuffer, secondSize, default, true, false, secondConfig ?? config, Vector3.Zero, secondSunDirection, 1.0f);
 		builder.RecordSharedPreparation(graph);
 		builder.BindView(RenderViewId.Primary);
 		builder.RecordBoundView(graph);

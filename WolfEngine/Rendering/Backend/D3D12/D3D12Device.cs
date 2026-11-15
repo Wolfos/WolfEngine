@@ -1798,6 +1798,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Graphics.SrvT16].Anonymous.Descriptor = new RootDescriptor(16, 0);
 		rootParameters[D3D12RootBindings.Graphics.SrvT16].ShaderVisibility = ShaderVisibility.All;
 
+		rootParameters[D3D12RootBindings.Graphics.SrvT9].ParameterType = RootParameterType.TypeSrv;
+		rootParameters[D3D12RootBindings.Graphics.SrvT9].Anonymous.Descriptor = new RootDescriptor(9, 0);
+		rootParameters[D3D12RootBindings.Graphics.SrvT9].ShaderVisibility = ShaderVisibility.All;
+
 		rootParameters[D3D12RootBindings.Graphics.CbvB17].ParameterType = RootParameterType.TypeCbv;
 		rootParameters[D3D12RootBindings.Graphics.CbvB17].Anonymous.Descriptor = new RootDescriptor(17, 0);
 		rootParameters[D3D12RootBindings.Graphics.CbvB17].ShaderVisibility = ShaderVisibility.All;
@@ -2227,7 +2231,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	}
 	
 
-	private static Format ToDxgiFormat(TextureFormat format, bool isSrgb = false) => format switch
+	internal static Format ToDxgiFormat(TextureFormat format, bool isSrgb = false) => format switch
 	{
 		TextureFormat.Bgra8Unorm => isSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
 		TextureFormat.Rgba8Unorm => isSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
@@ -2236,6 +2240,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		TextureFormat.Rg16Float => Format.FormatR16G16Float,
 		TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 		TextureFormat.R32Float => Format.FormatR32Float,
+		TextureFormat.Rg32Float => Format.FormatR32G32Float,
 		TextureFormat.R32Uint => Format.FormatR32Uint,
 		TextureFormat.D32Float => Format.FormatD32Float,
 		TextureFormat.Bc1Unorm => isSrgb ? Format.FormatBC1UnormSrgb : Format.FormatBC1Unorm,
@@ -2246,6 +2251,14 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		TextureFormat.Unknown => Format.FormatUnknown,
 		_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported texture format.")
 	};
+
+	/// <summary>The format shaders read a texture through. A depth texture is read as its float channel.</summary>
+	internal static Format ToDxgiShaderResourceFormat(TextureFormat format, bool isSrgb = false) =>
+		format == TextureFormat.D32Float ? Format.FormatR32Float : ToDxgiFormat(format, isSrgb);
+
+	/// <summary>The format shaders write a texture through. Depth textures cannot be written that way.</summary>
+	internal static Format ToDxgiUnorderedAccessFormat(TextureFormat format, bool isSrgb = false) =>
+		format == TextureFormat.D32Float ? Format.FormatUnknown : ToDxgiFormat(format, isSrgb);
 
 	private static ResourceFlags DetermineResourceFlags(TextureUsage usage)
 	{

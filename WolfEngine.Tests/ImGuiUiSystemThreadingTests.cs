@@ -1,3 +1,4 @@
+using System.Numerics;
 using ImGuiNET;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.UI;
@@ -67,6 +68,31 @@ public sealed class ImGuiUiSystemThreadingTests
 		var third = ProduceFrame(ui);
 		Assert.That(third.HasFontAtlas, Is.False, "Atlas should stop being published once uploaded.");
 		Assert.That(first.FontAtlas, Is.SameAs(third.FontAtlas));
+	}
+
+	[Test]
+	public void PinchAndScrollSourcesAccumulateIndependentlyForOneFrame()
+	{
+		var ui = CreateWarmedUpSystem();
+		ui.AddMouseMagnification(0.25f);
+		ui.AddMouseMagnification(0.2f);
+		ui.AddMouseMagnification(float.NaN);
+		ui.AddMouseMagnification(-1.0f);
+		ui.AddMouseScroll(new Vector2(0.125f, -0.25f), new Vector2(3.5f, -7.0f));
+		ui.AddMouseScroll(new Vector2(0.0f, 1.0f));
+		ui.NewFrame(1.0f / 60.0f, Size, Size);
+		ui.RunGui(() =>
+		{
+			Assert.That(ui.MouseZoomFactor, Is.EqualTo(1.5f).Within(0.0001f));
+			Assert.That(ImGui.GetIO().MouseWheel, Is.EqualTo(0.75f));
+			Assert.That(ui.MousePanDelta, Is.EqualTo(new Vector2(3.5f, -7.0f)));
+			Assert.That(ui.MouseWheelZoomDelta, Is.EqualTo(Vector2.UnitY));
+		});
+
+		RunFrame(ui);
+		Assert.That(ui.MouseZoomFactor, Is.EqualTo(1.0f));
+		Assert.That(ui.MousePanDelta, Is.EqualTo(Vector2.Zero));
+		Assert.That(ui.MouseWheelZoomDelta, Is.EqualTo(Vector2.Zero));
 	}
 
 	/// <summary>

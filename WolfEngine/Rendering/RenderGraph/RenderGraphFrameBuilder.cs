@@ -4,7 +4,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Features;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Vfx;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Rendering.Shaders;
 
@@ -94,6 +96,33 @@ public readonly struct RenderViewResources
 	public RenderGraphResourceHandle DdgiProbeRelocationDecisionDebug { get; init; }
 	public bool WriteDdgiFinalContributionDebug { get; init; }
 	public bool WriteDdgiProbeDebug { get; init; }
+	/// <summary>One traced diffuse sample per trace pixel, at the final gather's own resolution.</summary>
+	public RenderGraphResourceHandle DdgiFinalGatherTrace { get; init; }
+
+	/// <summary>
+	/// The SVGF history slots, indexed by <see cref="DdgiFinalGatherHistorySlot"/>; null when the denoiser is off.
+	/// </summary>
+	public RenderGraphResourceHandle[]? DdgiFinalGatherHistoryRead { get; init; }
+	public RenderGraphResourceHandle[]? DdgiFinalGatherHistoryWrite { get; init; }
+	public bool DdgiFinalGatherHistoryValid { get; init; }
+
+	/// <summary>Temporally accumulated irradiance / PI in rgb, history length in alpha.</summary>
+	public RenderGraphResourceHandle DdgiFinalGatherIntegrated { get; init; }
+
+	/// <summary>The accumulated irradiance with its luminance variance in alpha: the a-trous filter's input.</summary>
+	public RenderGraphResourceHandle DdgiFinalGatherFilterInput { get; init; }
+
+	/// <summary>Intermediate targets the a-trous levels after the first ping-pong between.</summary>
+	public RenderGraphResourceHandle DdgiFinalGatherFilterA { get; init; }
+	public RenderGraphResourceHandle DdgiFinalGatherFilterB { get; init; }
+	public int DdgiFinalGatherFilterIterations { get; init; }
+
+	/// <summary>
+	/// The finished trace-resolution result: the last a-trous level's output, or the raw trace when the denoiser
+	/// is off. The same handle as <see cref="DdgiFinalGatherIrradiance"/> when that needs no upsampling.
+	/// </summary>
+	public RenderGraphResourceHandle DdgiFinalGatherDenoised { get; init; }
+	public RenderGraphResourceHandle DdgiFinalGatherIrradiance { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth0 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
@@ -120,6 +149,14 @@ public readonly struct RenderViewResources
 	public RenderGraphResourceHandle HistoryDepthRead { get; init; }
 	public RenderGraphResourceHandle HistoryDepthWrite { get; init; }
 	public Fsr3FrameResources Fsr3 { get; init; }
+
+	/// <summary>
+	/// The sky this view draws and is lit by: its own procedural sky, built from its own sun and sky settings, or
+	/// the external skybox every view shares when one is set.
+	/// </summary>
+	public RenderGraphResourceHandle SkyboxEnvironment { get; init; }
+	public RenderGraphResourceHandle SkyboxIrradiance { get; init; }
+	public RenderGraphResourceHandle SkyboxPrefilter { get; init; }
 	public RenderConfig Config { get; init; }
 }
 
@@ -130,9 +167,8 @@ public readonly struct RenderFrameSharedResources
 {
 	public Int2 FramebufferSize { get; init; }
 	public RenderGraphResourceHandle FinalColor { get; init; }
-	public RenderGraphResourceHandle SkyboxEnvironment { get; init; }
-	public RenderGraphResourceHandle SkyboxIrradiance { get; init; }
-	public RenderGraphResourceHandle SkyboxPrefilter { get; init; }
+
+	/// <summary>Independent of the sky, so one serves every view.</summary>
 	public RenderGraphResourceHandle SkyboxBrdfLut { get; init; }
 }
 
@@ -173,9 +209,12 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly VolumetricFogPass _volumetricFogPass;
 	private readonly ReflectionsPass _reflectionsPass;
 	private readonly ReflectionsUpsamplePass _reflectionsUpsamplePass;
+	private readonly DdgiFinalGatherPass _ddgiFinalGatherPass;
+	private readonly DdgiFinalGatherSvgfPass _ddgiFinalGatherSvgfPass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
+	private readonly VfxPass _vfxPass;
 	private readonly BloomPass _bloomPass;
 	private readonly ColorPyramidPass _colorPyramidPass;
 	private readonly TonemappingPass _tonemappingPass;
@@ -190,11 +229,17 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly SkinningPass _skinningPass;
     public int LastSkinningDispatchCount => _skinningPass.LastDispatchedInstanceCount;
 	private readonly SkyboxPass _skyboxPass;
-	private readonly IImGuiRenderer _imGuiRenderer;
 	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
 	private SkyboxResources? _externalSkybox;
 	private RenderFrameSharedResources _sharedResources;
-	private UiFrameData _uiFrame = UiFrameData.Empty;
+
+	/// <summary>
+	/// The window's image before presentation: a backbuffer view's scene, with the editor UI drawn over it. It
+	/// persists across frames because the UI is drawn into it every frame, including frames that run no graph.
+	/// It is in the render-target state whenever no graph or UI submission is using it, which is what
+	/// <see cref="IRenderer.Render"/> expects of it.
+	/// </summary>
+	internal EditorSceneRenderTargetManager WindowColorTarget { get; } = new(TextureFormat.Bgra8Unorm);
 	private GameplayUiRenderFrame _gameplayUiFrame = GameplayUiRenderFrame.Empty;
 	private readonly List<GameplayTextureTarget> _gameplayTextureTargets = [];
 
@@ -207,6 +252,8 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly nint[] _viewportTextureIds = new nint[UiTextureIds.MaxViewports];
 	// Whether each view's output is drawn ignoring its alpha, because that alpha holds data rather than coverage.
 	private readonly bool[] _viewportOpaque = new bool[UiTextureIds.MaxViewports];
+	// Whether each view's output outlives its frame, so frames that run no graph can keep showing it.
+	private readonly bool[] _viewportPersistent = new bool[UiTextureIds.MaxViewports];
 	// Views set up this frame with their scene enabled, in setup order. Their databases feed the shared draw
 	// update, which runs once before any view's passes.
 	private readonly List<RenderViewId> _frameViews = [];
@@ -239,9 +286,16 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _volumetricFogIntegrateExecute;
 	private readonly Action<RenderGraphContext> _reflectionsExecute;
 	private readonly Action<RenderGraphContext> _reflectionsUpsampleExecute;
+	private readonly Action<RenderGraphContext> _ddgiFinalGatherExecute;
+	private readonly Action<RenderGraphContext> _ddgiFinalGatherTemporalExecute;
+	private readonly Action<RenderGraphContext> _ddgiFinalGatherVarianceExecute;
+	private readonly Action<RenderGraphContext>[] _ddgiFinalGatherFilterExecutes;
+	private readonly Action<RenderGraphContext> _ddgiFinalGatherUpsampleExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
+	private readonly Action<RenderGraphContext> _vfxSimulateExecute;
+	private readonly Action<RenderGraphContext> _vfxExecute;
 	private readonly Action<RenderGraphContext> _bloomCompositeExecute;
 	private readonly Action<RenderGraphContext> _tonemappingExecute;
 	private readonly Action<RenderGraphContext> _casSharpenExecute;
@@ -249,7 +303,6 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _motionVectorDebugExecute;
 	private readonly Action<RenderGraphContext> _gameplayScreenEncodedUiExecute;
 	private readonly Action<RenderGraphContext> _gameplayScreenFinalUiExecute;
-	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawViewUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawShadowCullExecute;
@@ -259,18 +312,18 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _skyboxIrradianceExecute;
 	private readonly Action<RenderGraphContext> _skyboxPrefilterExecute;
 	private readonly Action<RenderGraphContext> _skyboxBrdfExecute;
-	private bool _useProceduralSkybox;
-	private bool _recordProceduralSkyLighting;
 	private bool _recordProceduralSkyBrdf;
-	private ResourceState _proceduralSkyboxInitialState = ResourceState.ShaderResource;
+	private RenderGraphResourceHandle _externalSkyboxEnvironment;
+	private RenderGraphResourceHandle _externalSkyboxIrradiance;
+	private RenderGraphResourceHandle _externalSkyboxPrefilter;
+	private readonly RenderFeatureHost _renderFeatureHost;
 
-	
+
 	public RenderGraphFrameBuilder(
 		RenderGraphResourceRegistry resources,
 		IRenderer renderer,
 		RenderGraphPassSet passSet,
 		GpuDrawResources gpuDrawResources,
-		IImGuiRenderer imGuiRenderer,
 		GameplayUiGpuRenderer gameplayUiRenderer,
 		IShaderProvider shaderProvider,
 		RenderViewRegistry viewRegistry)
@@ -282,6 +335,7 @@ internal sealed class RenderGraphFrameBuilder
 		_skinningPass = new SkinningPass(shaderProvider);
 		_resources = resources;
 		_renderer = renderer;
+		_renderFeatureHost = new RenderFeatureHost(resources, renderer, passSet.BindlessResourceRegistry);
 		_ambientOcclusionPass = passSet.AmbientOcclusionPass;
 		_ambientOcclusionBlurPass = passSet.AmbientOcclusionBlurPass;
 		_ambientOcclusionUpsamplePass = passSet.AmbientOcclusionUpsamplePass;
@@ -294,9 +348,12 @@ internal sealed class RenderGraphFrameBuilder
 		_volumetricFogPass = passSet.VolumetricFogPass;
 		_reflectionsPass = passSet.ReflectionsPass;
 		_reflectionsUpsamplePass = passSet.ReflectionsUpsamplePass;
+		_ddgiFinalGatherPass = passSet.DdgiFinalGatherPass;
+		_ddgiFinalGatherSvgfPass = passSet.DdgiFinalGatherSvgfPass;
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
 		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
 		_transparentForwardPass = passSet.TransparentForwardPass;
+		_vfxPass = passSet.VfxPass;
 		_bloomPass = passSet.BloomPass;
 		_colorPyramidPass = passSet.ColorPyramidPass;
 		_tonemappingPass = passSet.TonemappingPass;
@@ -307,7 +364,6 @@ internal sealed class RenderGraphFrameBuilder
 		_gpuDrawPass = passSet.GpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
 		_skyboxPass = passSet.SkyboxPass;
-		_imGuiRenderer = imGuiRenderer;
 		_gameplayUiRenderer = gameplayUiRenderer;
 		_view = GetOrCreateViewState(RenderViewId.Primary);
 
@@ -331,9 +387,24 @@ internal sealed class RenderGraphFrameBuilder
 		_volumetricFogIntegrateExecute = context => ExecuteVolumetricFog(context, VolumetricFogStage.Integrate);
 		_reflectionsExecute = ExecuteReflections;
 		_reflectionsUpsampleExecute = ExecuteReflectionsUpsample;
+		_ddgiFinalGatherExecute = ExecuteDdgiFinalGather;
+		_ddgiFinalGatherTemporalExecute = context => ExecuteDdgiFinalGatherSvgf(context, DdgiFinalGatherSvgfPass.Stage.Temporal, 0);
+		_ddgiFinalGatherVarianceExecute = context => ExecuteDdgiFinalGatherSvgf(context, DdgiFinalGatherSvgfPass.Stage.Variance, 0);
+		_ddgiFinalGatherFilterExecutes = new Action<RenderGraphContext>[DdgiUtilities.MaxFinalGatherFilterIterations];
+		for (var iteration = 0; iteration < _ddgiFinalGatherFilterExecutes.Length; iteration++)
+		{
+			var capturedIteration = iteration;
+			_ddgiFinalGatherFilterExecutes[iteration] = context => ExecuteDdgiFinalGatherSvgf(
+				context,
+				DdgiFinalGatherSvgfPass.Stage.Filter,
+				capturedIteration);
+		}
+		_ddgiFinalGatherUpsampleExecute = ExecuteDdgiFinalGatherUpsample;
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
 		_transparentForwardExecute = ExecuteTransparentForward;
+		_vfxSimulateExecute = ExecuteVfxSimulate;
+		_vfxExecute = ExecuteVfx;
 		_bloomCompositeExecute = ExecuteBloomComposite;
 		_tonemappingExecute = ExecuteTonemapping;
 		_casSharpenExecute = ExecuteCasSharpen;
@@ -341,7 +412,6 @@ internal sealed class RenderGraphFrameBuilder
 		_motionVectorDebugExecute = ExecuteMotionVectorDebug;
 		_gameplayScreenEncodedUiExecute = ExecuteGameplayScreenEncodedUi;
 		_gameplayScreenFinalUiExecute = ExecuteGameplayScreenFinalUi;
-		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
 		_gpuDrawViewUpdateExecute = ExecuteGpuDrawViewUpdate;
 		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
@@ -389,7 +459,7 @@ internal sealed class RenderGraphFrameBuilder
 		RenderConfig config,
 		Vector3 cameraPosition)
 	{
-		BeginSharedFrame(framebufferSize, sunDirection, sunIntensityScale, config.SkyboxConfig);
+		BeginSharedFrame(framebufferSize);
 		BeginViewFrame(
 			RenderViewId.Primary,
 			framebufferSize,
@@ -398,19 +468,17 @@ internal sealed class RenderGraphFrameBuilder
 			sceneEnabled,
 			hasActiveDecals,
 			config,
-			cameraPosition);
+			cameraPosition,
+			sunDirection,
+			sunIntensityScale);
 	}
 
 	/// <summary>
-	/// Sets up what every view in the frame shares: gameplay UI texture targets, the sky chain, and the final
-	/// presentation target. Once per frame, before any view.
+	/// Sets up what every view in the frame shares: gameplay UI texture targets, the external skybox or the shared
+	/// BRDF LUT, and the final presentation target. Once per frame, before any view. Each view's procedural sky is
+	/// set up by <see cref="BeginViewFrame"/>.
 	/// </summary>
-	/// <remarks>
-	/// The procedural sky is prepared from one sun. With several views it is the bound view's, so a second
-	/// world with a different sun direction currently sees the first view's sky; keying the sky by its config
-	/// is the fix when that matters.
-	/// </remarks>
-	public void BeginSharedFrame(Int2 framebufferSize, Vector3 sunDirection, float sunIntensityScale, SkyboxPass.Config skyboxConfig)
+	public void BeginSharedFrame(Int2 framebufferSize)
 	{
 		_frameViews.Clear();
 		var device = _renderer.GetGfxDevice();
@@ -423,49 +491,36 @@ internal sealed class RenderGraphFrameBuilder
 			_gameplayTextureTargets.Add(new GameplayTextureTarget(surface, handle, texture));
 		}
 		_gameplayUiRenderer.PruneTargets(device, _gameplayUiFrame);
-		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection, sunIntensityScale, skyboxConfig);
-		var activeSkybox = _externalSkybox ?? _skyboxPass.GetProceduralResources();
-		_useProceduralSkybox = ReferenceEquals(activeSkybox, _externalSkybox) == false;
-		_recordProceduralSkyLighting = _useProceduralSkybox && _skyboxPass.ShouldRecordProceduralLightingUpdate;
-		_recordProceduralSkyBrdf = _useProceduralSkybox && _skyboxPass.ShouldRecordBrdfLutUpdate;
-		_proceduralSkyboxInitialState = _skyboxPass.ProceduralResourcesInitialState;
 
-		var skyboxEnvHandle = default(RenderGraphResourceHandle);
-		var skyboxIrrHandle = default(RenderGraphResourceHandle);
-		var skyboxPrefilterHandle = default(RenderGraphResourceHandle);
+		_externalSkyboxEnvironment = default;
+		_externalSkyboxIrradiance = default;
+		_externalSkyboxPrefilter = default;
+		_recordProceduralSkyBrdf = false;
 		var skyboxBrdfHandle = default(RenderGraphResourceHandle);
-		if (activeSkybox.EnvironmentTexture is IGfxTexture envTexture)
+		if (_externalSkybox is { } external)
 		{
-			var initialState = _useProceduralSkybox
-				? _proceduralSkyboxInitialState
-				: ResourceState.ShaderResource;
-			skyboxEnvHandle = _resources.ImportTexture(envTexture, takeOwnership: false, initialState: initialState);
-			if (activeSkybox.IrradianceTexture is IGfxTexture irr)
-			{
-				skyboxIrrHandle = _resources.ImportTexture(irr, takeOwnership: false, initialState: initialState);
-			}
-			if (activeSkybox.PrefilteredEnvironment is IGfxTexture prefilter)
-			{
-				skyboxPrefilterHandle = _resources.ImportTexture(prefilter, takeOwnership: false, initialState: initialState);
-			}
-			if (activeSkybox.BrdfLut is IGfxTexture brdf)
-			{
-				skyboxBrdfHandle = _resources.ImportTexture(brdf, takeOwnership: false, initialState: initialState);
-			}
+			_externalSkyboxEnvironment = _resources.ImportTexture(external.EnvironmentTexture, takeOwnership: false, initialState: ResourceState.ShaderResource);
+			_externalSkyboxIrradiance = _resources.ImportTexture(external.IrradianceTexture, takeOwnership: false, initialState: ResourceState.ShaderResource);
+			_externalSkyboxPrefilter = _resources.ImportTexture(external.PrefilteredEnvironment, takeOwnership: false, initialState: ResourceState.ShaderResource);
+			skyboxBrdfHandle = _resources.ImportTexture(external.BrdfLut, takeOwnership: false, initialState: ResourceState.ShaderResource);
+		}
+		else
+		{
+			_skyboxPass.PrepareBrdfLut(device);
+			_recordProceduralSkyBrdf = _skyboxPass.ShouldRecordBrdfLutUpdate;
+			skyboxBrdfHandle = _resources.ImportTexture(
+				_skyboxPass.ProceduralBrdfLut,
+				takeOwnership: false,
+				initialState: _skyboxPass.BrdfLutInitialState);
 		}
 
 		_sharedResources = new()
 		{
 			FramebufferSize = framebufferSize,
-			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
-				framebufferSize.X,
-				framebufferSize.Y,
-				TextureFormat.Bgra8Unorm,
-				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f))),
-			SkyboxEnvironment = skyboxEnvHandle,
-			SkyboxIrradiance = skyboxIrrHandle,
-			SkyboxPrefilter = skyboxPrefilterHandle,
+			FinalColor = _resources.ImportTexture(
+				WindowColorTarget.EnsureTarget(device, framebufferSize),
+				takeOwnership: false,
+				initialState: WindowColorTarget.CurrentState),
 			SkyboxBrdfLut = skyboxBrdfHandle
 		};
 	}
@@ -483,7 +538,9 @@ internal sealed class RenderGraphFrameBuilder
 		bool sceneEnabled,
 		bool hasActiveDecals,
 		RenderConfig config,
-		Vector3 cameraPosition)
+		Vector3 cameraPosition,
+		Vector3 sunDirection,
+		float sunIntensityScale)
 	{
 		_view = GetOrCreateViewState(view);
 		if (sceneEnabled && _frameViews.Contains(view) == false)
@@ -515,6 +572,11 @@ internal sealed class RenderGraphFrameBuilder
 		_view.ResetTaaHistoryThisFrame = frameShapeChanged || (taaEnabled &&
 			(!_view.PreviousTaaEnabled || _view.PreviousAntiAliasingMode != config.AntiAliasing.Mode));
 		_view.PreviousAntiAliasingMode = config.AntiAliasing.Mode;
+		if (frameShapeChanged)
+		{
+			_view.InvalidateScreenSpaceHistories();
+		}
+
 		if (!taaEnabled || !sceneEnabled)
 		{
 			_view.ReleaseTemporalHistoryResources();
@@ -522,6 +584,10 @@ internal sealed class RenderGraphFrameBuilder
 		if (!config.VolumetricFog.Enabled || !sceneEnabled)
 		{
 			_view.ReleaseFogHistoryResources();
+		}
+		if (DdgiUtilities.IsFinalGatherDenoiseEnabled(config) == false || sceneEnabled == false)
+		{
+			_view.ReleaseFinalGatherHistoryResources();
 		}
 		_view.PreviousTaaEnabled = taaEnabled;
 		var lightingHandle = default(RenderGraphResourceHandle);
@@ -577,6 +643,17 @@ internal sealed class RenderGraphFrameBuilder
 		var ddgiProbeRelocationDebugHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeRelocationDecisionHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeRelocationDecisionDebugHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherTraceHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherHistoryReadHandles = default(RenderGraphResourceHandle[]);
+		var ddgiFinalGatherHistoryWriteHandles = default(RenderGraphResourceHandle[]);
+		var ddgiFinalGatherHistoryValid = false;
+		var ddgiFinalGatherIntegratedHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherFilterInputHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherFilterAHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherFilterBHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherFilterIterations = 0;
+		var ddgiFinalGatherDenoisedHandle = default(RenderGraphResourceHandle);
+		var ddgiFinalGatherIrradianceHandle = default(RenderGraphResourceHandle);
 		var resolvedSceneColorHandle = default(RenderGraphResourceHandle);
 		var historyColorReadHandle = default(RenderGraphResourceHandle);
 		var historyColorWriteHandle = default(RenderGraphResourceHandle);
@@ -591,6 +668,7 @@ internal sealed class RenderGraphFrameBuilder
 		var fogIntegratedHandle = default(RenderGraphResourceHandle);
 		var fogHistoryValid = false;
 		var fsr3Resources = default(Fsr3FrameResources);
+		var resolvedSceneColorSize = GetResolvedSceneColorSize(config.AntiAliasing, framebufferSize, sceneFramebufferSize);
 		if (sceneEnabled)
 		{
 			gbufferAlbedoHandle = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -703,8 +781,8 @@ internal sealed class RenderGraphFrameBuilder
 			resolvedSceneColorHandle = sceneColorHandle.IsValid
 				? sceneColorHandle
 				: _resources.CreateTransientTexture(new TextureDescriptor(
-					sceneFramebufferSize.X,
-					sceneFramebufferSize.Y,
+					resolvedSceneColorSize.X,
+					resolvedSceneColorSize.Y,
 					TextureFormat.Rgba16Float,
 					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
 			var transparencyMaskHandle = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -761,17 +839,13 @@ internal sealed class RenderGraphFrameBuilder
 			{
 				var fogGrid = VolumetricFogPass.ComputeGrid(sceneFramebufferSize, config.VolumetricFog);
 				var maxDistance = Math.Max(config.VolumetricFog.MaxDistance, 0.001f);
-				EnsureFogHistoryResources(device, fogGrid, maxDistance);
-				var fogWriteIndex = 1 - _view.FogHistoryReadIndex;
+				_view.FogHistory.Ensure(device, new FogHistoryShape(fogGrid, maxDistance));
+				_view.FogHistory.Import(_resources);
 				fogCurrentHandle = _resources.CreateTransientTexture(CreateFogTextureDescriptor(fogGrid));
 				fogIntegratedHandle = _resources.CreateTransientTexture(CreateFogTextureDescriptor(fogGrid));
-				if (_view.FogHistoryTextures[_view.FogHistoryReadIndex] is IGfxTexture fogHistoryRead &&
-				    _view.FogHistoryTextures[fogWriteIndex] is IGfxTexture fogHistoryWrite)
-				{
-					fogHistoryReadHandle = _resources.ImportTexture(fogHistoryRead, false, _view.FogHistoryStates[_view.FogHistoryReadIndex]);
-					fogHistoryWriteHandle = _resources.ImportTexture(fogHistoryWrite, false, _view.FogHistoryStates[fogWriteIndex]);
-					fogHistoryValid = _view.FogHistoryValid && !frameShapeChanged;
-				}
+				fogHistoryReadHandle = _view.FogHistory.Previous();
+				fogHistoryWriteHandle = _view.FogHistory.Current();
+				fogHistoryValid = _view.FogHistory.IsValid;
 			}
 			else
 			{
@@ -781,54 +855,19 @@ internal sealed class RenderGraphFrameBuilder
 			fsr3Resources = new Fsr3FrameResources { TransparencyMask = transparencyMaskHandle };
 			if (taaEnabled)
 			{
-				EnsureTemporalHistoryResources(_renderer.GetGfxDevice(), sceneFramebufferSize, config.AntiAliasing.Mode);
-				var historyWriteIndex = 1 - _view.HistoryReadIndex;
-				if (_view.HistoryColorTextures[_view.HistoryReadIndex] is IGfxTexture historyColorRead &&
-				    _view.HistoryColorTextures[historyWriteIndex] is IGfxTexture historyColorWrite &&
-				    _view.HistoryDepthTextures[_view.HistoryReadIndex] is IGfxTexture historyDepthRead &&
-				    _view.HistoryDepthTextures[historyWriteIndex] is IGfxTexture historyDepthWrite)
+				if (config.AntiAliasing.UsesFsr3)
 				{
-					historyColorReadHandle = _resources.ImportTexture(
-						historyColorRead,
-						takeOwnership: false,
-						initialState: _view.HistoryColorStates[_view.HistoryReadIndex]);
-					historyColorWriteHandle = _resources.ImportTexture(
-						historyColorWrite,
-						takeOwnership: false,
-						initialState: _view.HistoryColorStates[historyWriteIndex]);
-					historyDepthReadHandle = _resources.ImportTexture(
-						historyDepthRead,
-						takeOwnership: false,
-						initialState: _view.HistoryDepthStates[_view.HistoryReadIndex]);
-					historyDepthWriteHandle = _resources.ImportTexture(
-						historyDepthWrite,
-						takeOwnership: false,
-						initialState: _view.HistoryDepthStates[historyWriteIndex]);
-				}
-				else
-				{
-					_view.ResetTaaHistoryThisFrame = true;
-					_view.HistoryValid = false;
-				}
+					_view.TemporalHistory.Release();
+					if (EnsureFsr3HistoryResources(device, sceneFramebufferSize, framebufferSize))
+					{
+						_view.ResetTaaHistoryThisFrame = true;
+					}
 
-				var writeIndex = 1 - _view.HistoryReadIndex;
-				if (config.AntiAliasing.UsesFsr3 &&
-				    _view.Fsr3CurrentLumaTextures[_view.HistoryReadIndex] is IGfxTexture currentLumaRead &&
-				    _view.Fsr3CurrentLumaTextures[writeIndex] is IGfxTexture currentLumaWrite &&
-				    _view.Fsr3AccumulationTextures[_view.HistoryReadIndex] is IGfxTexture accumulationRead &&
-				    _view.Fsr3AccumulationTextures[writeIndex] is IGfxTexture accumulationWrite)
-				{
-					var currentLumaReadHandle = _resources.ImportTexture(currentLumaRead, false,
-						_view.Fsr3CurrentLumaStates[_view.HistoryReadIndex]);
-					var currentLumaWriteHandle = _resources.ImportTexture(currentLumaWrite, false,
-						_view.Fsr3CurrentLumaStates[writeIndex]);
-					var accumulationReadHandle = _resources.ImportTexture(accumulationRead, false,
-						_view.Fsr3AccumulationStates[_view.HistoryReadIndex]);
-					var accumulationWriteHandle = _resources.ImportTexture(accumulationWrite, false,
-						_view.Fsr3AccumulationStates[writeIndex]);
+					_view.Fsr3History.Import(_resources);
 					var frameInfoHandle = _resources.ImportTexture(
 						_view.Fsr3FrameInfoTexture ?? throw new InvalidOperationException("FSR3 frame info was not allocated."),
-						false, _view.Fsr3FrameInfoState);
+						takeOwnership: false,
+						initialState: _view.Fsr3FrameInfoState);
 					var lumaSpdMips = CreateFsr3SpdMips(sceneFramebufferSize);
 					var shadingSpdMips = CreateFsr3SpdMips(new Int2(
 						Math.Max(sceneFramebufferSize.X / 2, 1), Math.Max(sceneFramebufferSize.Y / 2, 1)));
@@ -839,8 +878,8 @@ internal sealed class RenderGraphFrameBuilder
 						DilatedDepth = CreateFsr3Texture(sceneFramebufferSize),
 						FarthestDepth = CreateFsr3Texture(sceneFramebufferSize),
 						ReconstructedPrevNearestDepth = CreateFsr3UintTexture(sceneFramebufferSize),
-						CurrentLumaRead = currentLumaReadHandle,
-						CurrentLumaWrite = currentLumaWriteHandle,
+						CurrentLumaRead = _view.Fsr3History.Previous(Fsr3HistorySlot.CurrentLuma),
+						CurrentLumaWrite = _view.Fsr3History.Current(Fsr3HistorySlot.CurrentLuma),
 						FarthestDepthMip1 = CreateFsr3Texture(new Int2(
 							Math.Max(sceneFramebufferSize.X / 2, 1), Math.Max(sceneFramebufferSize.Y / 2, 1))),
 						FrameInfo = frameInfoHandle,
@@ -851,17 +890,34 @@ internal sealed class RenderGraphFrameBuilder
 						// This target is physically half-resolution. Allocating it at full resolution makes
 						// FSR3's half-resolution UV clamp sample the unwritten portion of the resource.
 						ShadingChange = CreateFsr3Texture(GetFsr3ShadingChangeSize(sceneFramebufferSize)),
-						AccumulationRead = accumulationReadHandle,
-						AccumulationWrite = accumulationWriteHandle,
+						AccumulationRead = _view.Fsr3History.Previous(Fsr3HistorySlot.Accumulation),
+						AccumulationWrite = _view.Fsr3History.Current(Fsr3HistorySlot.Accumulation),
 						DilatedReactiveMasks = CreateFsr3Texture(sceneFramebufferSize),
-						NewLocks = CreateFsr3Texture(sceneFramebufferSize),
-						LumaHistoryRead = historyDepthReadHandle,
-						LumaHistoryWrite = historyDepthWriteHandle,
+						// Prepare Reactivity writes new locks at the display pixel each jittered sample lands on.
+						NewLocks = CreateFsr3Texture(framebufferSize),
+						LumaHistoryRead = _view.Fsr3History.Previous(Fsr3HistorySlot.LumaHistory),
+						LumaHistoryWrite = _view.Fsr3History.Current(Fsr3HistorySlot.LumaHistory),
 						LumaInstability = CreateFsr3Texture(sceneFramebufferSize),
-						InternalHistoryRead = historyColorReadHandle,
-						InternalHistoryWrite = historyColorWriteHandle,
-						HistoryValid = _view.HistoryValid
+						InternalHistoryRead = _view.Fsr3History.Previous(Fsr3HistorySlot.InternalUpscaled),
+						InternalHistoryWrite = _view.Fsr3History.Current(Fsr3HistorySlot.InternalUpscaled),
+						HistoryValid = _view.Fsr3History.IsValid
 					};
+				}
+				else
+				{
+					_view.ReleaseFsr3HistoryResources();
+
+					var temporalHistoryShape = new TemporalHistoryShape(sceneFramebufferSize, config.AntiAliasing.Mode);
+					if (_view.TemporalHistory.Ensure(device, temporalHistoryShape))
+					{
+						_view.ResetTaaHistoryThisFrame = true;
+					}
+
+					_view.TemporalHistory.Import(_resources);
+					historyColorReadHandle = _view.TemporalHistory.Previous(TemporalHistorySlot.Color);
+					historyColorWriteHandle = _view.TemporalHistory.Current(TemporalHistorySlot.Color);
+					historyDepthReadHandle = _view.TemporalHistory.Previous(TemporalHistorySlot.Depth);
+					historyDepthWriteHandle = _view.TemporalHistory.Current(TemporalHistorySlot.Depth);
 				}
 			}
 
@@ -918,17 +974,18 @@ internal sealed class RenderGraphFrameBuilder
 				var visibilityTileInteriorSize = DdgiUtilities.GetVisibilityTileInteriorSize(ddgiConfig);
 				var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(ddgiGridShape, visibilityTileInteriorSize);
 				EnsureDdgiHistoryResources(
-					_renderer.GetGfxDevice(),
-					ddgiGridShape,
-					ddgiConfig.Origin,
-					ddgiProbeSpacing,
-					visibilityTileInteriorSize);
+					device,
+					new DdgiHistoryShape(
+						ddgiGridShape,
+						ddgiConfig.Origin,
+						ddgiProbeSpacing,
+						visibilityTileInteriorSize));
 				ddgiRuntimeOrigin = DdgiUtilities.GetRuntimeOrigin(
 					ddgiConfig.Origin,
 					ddgiGridShape,
 					ddgiProbeSpacing,
 					cameraPosition);
-				if (_view.DdgiHistoryValid && _view.DdgiCommittedPlacementValid)
+				if (_view.DdgiHistory.IsValid && _view.DdgiCommittedPlacementValid)
 				{
 					ddgiScrollDelta = DdgiUtilities.GetScrollDelta(
 						_view.DdgiCommittedRuntimeOrigin,
@@ -939,128 +996,119 @@ internal sealed class RenderGraphFrameBuilder
 						ddgiScrollDelta,
 						ddgiGridShape);
 				}
-				var ddgiWriteIndex = 1 - _view.DdgiHistoryReadIndex;
-				if (_view.DdgiIrradianceTextures[0, _view.DdgiHistoryReadIndex] is IGfxTexture ddgiIrradianceL0Read &&
-				    _view.DdgiIrradianceTextures[0, ddgiWriteIndex] is IGfxTexture ddgiIrradianceL0Write &&
-				    _view.DdgiIrradianceTextures[1, _view.DdgiHistoryReadIndex] is IGfxTexture ddgiIrradianceLyRead &&
-				    _view.DdgiIrradianceTextures[1, ddgiWriteIndex] is IGfxTexture ddgiIrradianceLyWrite &&
-				    _view.DdgiIrradianceTextures[2, _view.DdgiHistoryReadIndex] is IGfxTexture ddgiIrradianceLzRead &&
-				    _view.DdgiIrradianceTextures[2, ddgiWriteIndex] is IGfxTexture ddgiIrradianceLzWrite &&
-				    _view.DdgiIrradianceTextures[3, _view.DdgiHistoryReadIndex] is IGfxTexture ddgiIrradianceLxRead &&
-				    _view.DdgiIrradianceTextures[3, ddgiWriteIndex] is IGfxTexture ddgiIrradianceLxWrite &&
-				    _view.DdgiVisibilityTextures[_view.DdgiHistoryReadIndex] is IGfxTexture ddgiVisibilityRead &&
-				    _view.DdgiVisibilityTextures[ddgiWriteIndex] is IGfxTexture ddgiVisibilityWrite &&
-				    _view.DdgiProbeStateTextures[_view.DdgiHistoryReadIndex] is IGfxTexture ddgiProbeStateRead &&
-				    _view.DdgiProbeStateTextures[ddgiWriteIndex] is IGfxTexture ddgiProbeStateWrite &&
-				    _view.DdgiProbeActivityTexture is IGfxTexture ddgiProbeActivity &&
-				    _view.DdgiIrradianceEstimatorBuffer is IGfxBuffer ddgiIrradianceEstimator)
+				_view.DdgiHistory.Import(_resources);
+				ddgiTraceIrradianceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					irradianceAtlasSize.X,
+					irradianceAtlasSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+				ddgiTraceVisibilityHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					visibilityAtlasSize.X,
+					visibilityAtlasSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f)));
+				ddgiIrradianceEstimatorHandle = _resources.ImportBuffer(
+					_view.DdgiIrradianceEstimatorBuffer!,
+					takeOwnership: false,
+					initialState: _view.DdgiIrradianceEstimatorState);
+				ddgiIrradianceL0ReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Irradiance);
+				ddgiIrradianceL0WriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Irradiance);
+				ddgiIrradianceLyReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Irradiance + 1);
+				ddgiIrradianceLyWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Irradiance + 1);
+				ddgiIrradianceLzReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Irradiance + 2);
+				ddgiIrradianceLzWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Irradiance + 2);
+				ddgiIrradianceLxReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Irradiance + 3);
+				ddgiIrradianceLxWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Irradiance + 3);
+				ddgiVisibilityReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.Visibility);
+				ddgiVisibilityWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.Visibility);
+				ddgiProbeStateReadHandle = _view.DdgiHistory.Previous(DdgiHistorySlot.ProbeState);
+				ddgiProbeStateWriteHandle = _view.DdgiHistory.Current(DdgiHistorySlot.ProbeState);
+				ddgiProbeActivityHandle = _resources.ImportTexture(
+					_view.DdgiProbeActivityTexture!,
+					takeOwnership: false,
+					initialState: _view.DdgiProbeActivityState);
+				ddgiProbeActivityMarksHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					ddgiGridShape.AtlasColumns,
+					ddgiGridShape.AtlasRows,
+					TextureFormat.R32Uint,
+					TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+				ddgiFinalContributionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+				ddgiProbeBaseWeightDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiWeightedVisibilityDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiDominantProbeDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiDominantProbeCoordDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiProbeRelocationDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				ddgiProbeRelocationDecisionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					ddgiGridShape.AtlasColumns,
+					ddgiGridShape.AtlasRows,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+				ddgiProbeRelocationDecisionDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
+				if (DdgiUtilities.IsFinalGatherEnabled(config))
 				{
-					ddgiTraceIrradianceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						irradianceAtlasSize.X,
-						irradianceAtlasSize.Y,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
-					ddgiTraceVisibilityHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						visibilityAtlasSize.X,
-						visibilityAtlasSize.Y,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f)));
-					ddgiIrradianceEstimatorHandle = _resources.ImportBuffer(
-						ddgiIrradianceEstimator,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceEstimatorState);
-					ddgiIrradianceL0ReadHandle = _resources.ImportTexture(
-						ddgiIrradianceL0Read,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[0, _view.DdgiHistoryReadIndex]);
-					ddgiIrradianceL0WriteHandle = _resources.ImportTexture(
-						ddgiIrradianceL0Write,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[0, ddgiWriteIndex]);
-					ddgiIrradianceLyReadHandle = _resources.ImportTexture(
-						ddgiIrradianceLyRead,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[1, _view.DdgiHistoryReadIndex]);
-					ddgiIrradianceLyWriteHandle = _resources.ImportTexture(
-						ddgiIrradianceLyWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[1, ddgiWriteIndex]);
-					ddgiIrradianceLzReadHandle = _resources.ImportTexture(
-						ddgiIrradianceLzRead,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[2, _view.DdgiHistoryReadIndex]);
-					ddgiIrradianceLzWriteHandle = _resources.ImportTexture(
-						ddgiIrradianceLzWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[2, ddgiWriteIndex]);
-					ddgiIrradianceLxReadHandle = _resources.ImportTexture(
-						ddgiIrradianceLxRead,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[3, _view.DdgiHistoryReadIndex]);
-					ddgiIrradianceLxWriteHandle = _resources.ImportTexture(
-						ddgiIrradianceLxWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiIrradianceStates[3, ddgiWriteIndex]);
-					ddgiVisibilityReadHandle = _resources.ImportTexture(
-						ddgiVisibilityRead,
-						takeOwnership: false,
-						initialState: _view.DdgiVisibilityStates[_view.DdgiHistoryReadIndex]);
-					ddgiVisibilityWriteHandle = _resources.ImportTexture(
-						ddgiVisibilityWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiVisibilityStates[ddgiWriteIndex]);
-					ddgiProbeStateReadHandle = _resources.ImportTexture(
-						ddgiProbeStateRead,
-						takeOwnership: false,
-						initialState: _view.DdgiProbeStateStates[_view.DdgiHistoryReadIndex]);
-					ddgiProbeStateWriteHandle = _resources.ImportTexture(
-						ddgiProbeStateWrite,
-						takeOwnership: false,
-						initialState: _view.DdgiProbeStateStates[ddgiWriteIndex]);
-					ddgiProbeActivityHandle = _resources.ImportTexture(
-						ddgiProbeActivity,
-						takeOwnership: false,
-						initialState: _view.DdgiProbeActivityState);
-					ddgiProbeActivityMarksHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						ddgiGridShape.AtlasColumns,
-						ddgiGridShape.AtlasRows,
-						TextureFormat.R32Uint,
-						TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-					ddgiFinalContributionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						sceneFramebufferSize.X,
-						sceneFramebufferSize.Y,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
-					ddgiProbeBaseWeightDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiWeightedVisibilityDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiDominantProbeDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiDominantProbeCoordDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiProbeRelocationDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-					ddgiProbeRelocationDecisionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						ddgiGridShape.AtlasColumns,
-						ddgiGridShape.AtlasRows,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
-					ddgiProbeRelocationDecisionDebugHandle = CreateDdgiDebugTexture(sceneFramebufferSize);
-				}
-				else
-				{
-					_view.DdgiHistoryValid = false;
+					var finalGatherTraceSize = DdgiUtilities.GetFinalGatherTraceSize(
+						sceneFramebufferSize,
+						ddgiConfig.FinalGather);
+					var tracesAtFullResolution =
+						finalGatherTraceSize.X == sceneFramebufferSize.X &&
+						finalGatherTraceSize.Y == sceneFramebufferSize.Y;
+					ddgiFinalGatherTraceHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+					ddgiFinalGatherDenoisedHandle = ddgiFinalGatherTraceHandle;
+
+					if (DdgiUtilities.IsFinalGatherDenoiseEnabled(config))
+					{
+						_view.FinalGatherHistory.Ensure(device, finalGatherTraceSize);
+						_view.FinalGatherHistory.Import(_resources);
+						ddgiFinalGatherHistoryReadHandles = new RenderGraphResourceHandle[DdgiFinalGatherHistorySlot.Count];
+						ddgiFinalGatherHistoryWriteHandles = new RenderGraphResourceHandle[DdgiFinalGatherHistorySlot.Count];
+						for (var slot = 0; slot < DdgiFinalGatherHistorySlot.Count; slot++)
+						{
+							ddgiFinalGatherHistoryReadHandles[slot] = _view.FinalGatherHistory.Previous(slot);
+							ddgiFinalGatherHistoryWriteHandles[slot] = _view.FinalGatherHistory.Current(slot);
+						}
+						ddgiFinalGatherHistoryValid = _view.FinalGatherHistory.IsValid;
+						ddgiFinalGatherIntegratedHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+						ddgiFinalGatherFilterInputHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+
+						// The first a-trous level writes the color history; later levels ping-pong between two
+						// intermediates and the last writes the finished target.
+						ddgiFinalGatherFilterIterations = DdgiUtilities.GetFinalGatherFilterIterations(ddgiConfig.FinalGather);
+						if (ddgiFinalGatherFilterIterations >= 3)
+						{
+							ddgiFinalGatherFilterAHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+						}
+						if (ddgiFinalGatherFilterIterations >= 4)
+						{
+							ddgiFinalGatherFilterBHandle = CreateFinalGatherTexture(finalGatherTraceSize);
+						}
+						ddgiFinalGatherDenoisedHandle = ddgiFinalGatherFilterIterations > 1
+							? CreateFinalGatherTexture(finalGatherTraceSize)
+							: ddgiFinalGatherHistoryWriteHandles[DdgiFinalGatherHistorySlot.Color];
+					}
+
+					ddgiFinalGatherIrradianceHandle = tracesAtFullResolution
+						? ddgiFinalGatherDenoisedHandle
+						: CreateFinalGatherTexture(sceneFramebufferSize);
 				}
 			}
 		}
 
 		if (sceneEnabled && config.Bloom.Enabled)
 		{
-			var levelCount = GetBloomLevelCount(sceneFramebufferSize, config.Bloom.Quality);
+			// Bloom runs on the resolved image, which an upscaler has already brought to display size.
+			var levelCount = GetBloomLevelCount(resolvedSceneColorSize, config.Bloom.Quality);
 			bloomDownsampleLevels = new RenderGraphResourceHandle[levelCount];
 			bloomUpsampleLevels = new RenderGraphResourceHandle[Math.Max(levelCount - 1, 0)];
-			var levelSize = new Int2(Math.Max(1, (sceneFramebufferSize.X + 1) / 2), Math.Max(1, (sceneFramebufferSize.Y + 1) / 2));
+			var levelSize = new Int2(Math.Max(1, (resolvedSceneColorSize.X + 1) / 2), Math.Max(1, (resolvedSceneColorSize.Y + 1) / 2));
 			for (var level = 0; level < levelCount; level++)
 			{
 				bloomDownsampleLevels[level] = CreateBloomTexture(levelSize);
@@ -1070,7 +1118,7 @@ internal sealed class RenderGraphFrameBuilder
 				}
 				levelSize = new Int2(Math.Max(1, (levelSize.X + 1) / 2), Math.Max(1, (levelSize.Y + 1) / 2));
 			}
-			bloomCompositeSceneColorHandle = CreateBloomTexture(sceneFramebufferSize);
+			bloomCompositeSceneColorHandle = CreateBloomTexture(resolvedSceneColorSize);
 		}
 
 		var tonemappedLinearSceneColorHandle = sceneEnabled
@@ -1092,16 +1140,18 @@ internal sealed class RenderGraphFrameBuilder
 			: tonemappedLinearSceneColorHandle;
 
 		var encodedSceneColorHandle = sceneEnabled
-			? _resources.CreateTransientTexture(new TextureDescriptor(
-				framebufferSize.X,
-				framebufferSize.Y,
-				TextureFormat.Bgra8Unorm,
-				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
+			? CreateEncodedSceneColor(framebufferSize)
+			: default;
+
+		var (skyboxEnvironmentHandle, skyboxIrradianceHandle, skyboxPrefilterHandle) = sceneEnabled
+			? ImportViewSky(sunDirection, sunIntensityScale, config.SkyboxConfig)
 			: default;
 
 		_view.FrameResources = new()
 		{
+			SkyboxEnvironment = skyboxEnvironmentHandle,
+			SkyboxIrradiance = skyboxIrradianceHandle,
+			SkyboxPrefilter = skyboxPrefilterHandle,
 			FramebufferSize = framebufferSize,
 			SceneFramebufferSize = sceneFramebufferSize,
 			SceneEnabled = sceneEnabled,
@@ -1164,6 +1214,17 @@ internal sealed class RenderGraphFrameBuilder
 				ddgiProbeRelocationDebugHandle.IsValid &&
 				ddgiProbeRelocationDecisionDebugHandle.IsValid &&
 				IsDdgiProbeDebugView(_view.RequestedSceneDebugViewId),
+			DdgiFinalGatherTrace = ddgiFinalGatherTraceHandle,
+			DdgiFinalGatherHistoryRead = ddgiFinalGatherHistoryReadHandles,
+			DdgiFinalGatherHistoryWrite = ddgiFinalGatherHistoryWriteHandles,
+			DdgiFinalGatherHistoryValid = ddgiFinalGatherHistoryValid,
+			DdgiFinalGatherIntegrated = ddgiFinalGatherIntegratedHandle,
+			DdgiFinalGatherFilterInput = ddgiFinalGatherFilterInputHandle,
+			DdgiFinalGatherFilterA = ddgiFinalGatherFilterAHandle,
+			DdgiFinalGatherFilterB = ddgiFinalGatherFilterBHandle,
+			DdgiFinalGatherFilterIterations = ddgiFinalGatherFilterIterations,
+			DdgiFinalGatherDenoised = ddgiFinalGatherDenoisedHandle,
+			DdgiFinalGatherIrradiance = ddgiFinalGatherIrradianceHandle,
 			ShadowMapDepth0 = shadowMapHandle0,
 			ShadowMapDepth1 = shadowMapHandle1,
 			ShadowMapDepth2 = shadowMapHandle2,
@@ -1237,6 +1298,24 @@ internal sealed class RenderGraphFrameBuilder
 			{
 				RegisterSceneDebugView(SceneDebugViewIds.DdgiFinalContribution, "DDGI Final Contribution", ddgiFinalContributionHandle, SceneDebugViewKind.Color);
 			}
+			if (ddgiFinalGatherTraceHandle.IsValid)
+			{
+				// Alpha holds hit distance, history length or variance, not coverage.
+				RegisterSceneDebugView(SceneDebugViewIds.DdgiFinalGatherRaw, "DDGI Final Gather (Raw Trace)", ddgiFinalGatherTraceHandle, SceneDebugViewKind.ColorIgnoreAlpha);
+				if (ddgiFinalGatherIntegratedHandle.IsValid)
+				{
+					RegisterSceneDebugView(
+						SceneDebugViewIds.DdgiFinalGatherAccumulated,
+						"DDGI Final Gather (Accumulated)",
+						ddgiFinalGatherIntegratedHandle,
+						SceneDebugViewKind.ColorIgnoreAlpha);
+					RegisterSceneDebugView(
+						SceneDebugViewIds.DdgiFinalGatherDenoised,
+						"DDGI Final Gather (Denoised)",
+						ddgiFinalGatherDenoisedHandle,
+						SceneDebugViewKind.ColorIgnoreAlpha);
+				}
+			}
 			if (ddgiProbeBaseWeightDebugHandle.IsValid)
 			{
 				RegisterSceneDebugView(SceneDebugViewIds.DdgiProbeBaseWeight, "DDGI Probe Base Weight", ddgiProbeBaseWeightDebugHandle, SceneDebugViewKind.Color);
@@ -1260,10 +1339,16 @@ internal sealed class RenderGraphFrameBuilder
 		}
 	}
 
-	public void SetUiFrame(UiFrameData uiFrame)
-	{
-		_uiFrame = uiFrame;
-	}
+	/// <summary>Once per frame, before views are set up: releases what unregistered render features owned.</summary>
+	internal void BeginRenderFeatures(RenderFeatureRegistry registry) => _renderFeatureHost.BeginFrame(registry);
+
+	/// <summary>Hands the bound view its snapshot's render features; call after <see cref="BeginViewFrame"/>.</summary>
+	internal void SetViewRenderFeatures(IReadOnlyList<RenderFeatureFrame> frames) => _view.RenderFeatureFrames = frames;
+
+	internal void SetViewVfx(VfxWorldFrame? frame) => _view.VfxFrame = frame;
+
+	/// <summary>Once per frame, after execution and before the resource registry ends the frame.</summary>
+	internal void CompleteRenderFeatures() => _renderFeatureHost.CompleteFrame();
 
 	public void SetGameplayUiFrame(GameplayUiRenderFrame frame)
 	{
@@ -1324,24 +1409,7 @@ internal sealed class RenderGraphFrameBuilder
 				.SetExecute(context => ExecuteGameplayTextureUi(context, target));
 		}
 
-		if (_useProceduralSkybox && _recordProceduralSkyLighting)
-		{
-			graph.AddPass("Skybox Environment", PassKind.Compute)
-				.WriteTexture(_sharedResources.SkyboxEnvironment, ResourceState.UnorderedAccess)
-				.SetExecute(_skyboxEnvironmentExecute);
-
-			graph.AddPass("Skybox Irradiance", PassKind.Compute)
-				.ReadTexture(_sharedResources.SkyboxEnvironment, ResourceState.ShaderResource)
-				.WriteTexture(_sharedResources.SkyboxIrradiance, ResourceState.UnorderedAccess)
-				.SetExecute(_skyboxIrradianceExecute);
-
-			graph.AddPass("Skybox Prefilter", PassKind.Compute)
-				.ReadTexture(_sharedResources.SkyboxEnvironment, ResourceState.ShaderResource)
-				.WriteTexture(_sharedResources.SkyboxPrefilter, ResourceState.UnorderedAccess)
-				.SetExecute(_skyboxPrefilterExecute);
-		}
-
-		if (_useProceduralSkybox && _recordProceduralSkyBrdf)
+		if (_recordProceduralSkyBrdf)
 		{
 			graph.AddPass("Skybox BRDF LUT", PassKind.Compute)
 				.WriteTexture(_sharedResources.SkyboxBrdfLut, ResourceState.UnorderedAccess)
@@ -1358,10 +1426,35 @@ internal sealed class RenderGraphFrameBuilder
 	}
 
 	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
+	/// <summary>Regenerates the bound view's procedural sky when its sun or settings changed since it was built.</summary>
+	private void RecordViewSkyUpdate(RenderGraph graph)
+	{
+		if (_externalSkybox is not null || _view.Sky.ShouldRecordLightingUpdate == false)
+		{
+			return;
+		}
+
+		graph.AddPass("Skybox Environment", PassKind.Compute)
+			.WriteTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.UnorderedAccess)
+			.SetExecute(_skyboxEnvironmentExecute);
+
+		graph.AddPass("Skybox Irradiance", PassKind.Compute)
+			.ReadTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.ShaderResource)
+			.WriteTexture(_view.FrameResources.SkyboxIrradiance, ResourceState.UnorderedAccess)
+			.SetExecute(_skyboxIrradianceExecute);
+
+		graph.AddPass("Skybox Prefilter", PassKind.Compute)
+			.ReadTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.ShaderResource)
+			.WriteTexture(_view.FrameResources.SkyboxPrefilter, ResourceState.UnorderedAccess)
+			.SetExecute(_skyboxPrefilterExecute);
+	}
+
 	private void RecordViewPasses(RenderGraph graph)
 	{
 		if (_view.FrameResources.SceneEnabled)
 		{
+			RecordViewSkyUpdate(graph);
+
 			graph.AddPass("GpuDraw View Update", PassKind.Compute)
 				.SetExecute(_gpuDrawViewUpdateExecute);
 
@@ -1474,7 +1567,7 @@ internal sealed class RenderGraphFrameBuilder
 			if (_view.FrameResources.FogIntegrated.IsValid)
 			{
 				graph.AddPass("Volumetric Fog Inject", PassKind.Compute)
-					.ReadTexture(_sharedResources.SkyboxIrradiance, ResourceState.ShaderResource)
+					.ReadTexture(_view.FrameResources.SkyboxIrradiance, ResourceState.ShaderResource)
 					.ReadTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.ShaderResource)
 					.ReadTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.ShaderResource)
 					.ReadTexture(_view.FrameResources.ShadowMapDepth2, ResourceState.ShaderResource)
@@ -1547,9 +1640,9 @@ internal sealed class RenderGraphFrameBuilder
 					.ReadTexture(_view.FrameResources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
 					.WriteTexture(_view.FrameResources.DdgiTraceIrradiance, ResourceState.UnorderedAccess)
 					.WriteTexture(_view.FrameResources.DdgiTraceVisibility, ResourceState.UnorderedAccess);
-				if (_sharedResources.SkyboxEnvironment.IsValid)
+				if (_view.FrameResources.SkyboxEnvironment.IsValid)
 				{
-					ddgiTraceBuilder.ReadTexture(_sharedResources.SkyboxEnvironment, ResourceState.ShaderResource);
+					ddgiTraceBuilder.ReadTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.ShaderResource);
 				}
 				ddgiTraceBuilder.SetExecute(_ddgiTraceExecute);
 
@@ -1577,6 +1670,42 @@ internal sealed class RenderGraphFrameBuilder
 					.ReadTexture(_view.FrameResources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
 					.WriteTexture(_view.FrameResources.DdgiVisibilityHistoryWrite, ResourceState.UnorderedAccess)
 					.SetExecute(_ddgiVisibilityIntegrateExecute);
+
+				if (_view.FrameResources.DdgiFinalGatherTrace.IsValid)
+				{
+					var finalGatherBuilder = graph.AddPass("DDGI Final Gather", PassKind.Compute)
+						.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.GBufferNormal, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiIrradianceL0HistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiIrradianceLyHistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiIrradianceLzHistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiIrradianceLxHistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiVisibilityHistoryWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiProbeStateWrite, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiProbeActivity, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.DdgiProbeRelocationDecision, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.ShaderResource)
+						.ReadTexture(_view.FrameResources.ShadowMapDepth2, ResourceState.ShaderResource)
+						.WriteTexture(_view.FrameResources.DdgiFinalGatherTrace, ResourceState.UnorderedAccess);
+					ReadSkyboxTextures(finalGatherBuilder);
+					finalGatherBuilder.SetExecute(_ddgiFinalGatherExecute);
+
+					if (_view.FrameResources.DdgiFinalGatherHistoryWrite is not null)
+					{
+						AddFinalGatherSvgfPasses(graph);
+					}
+
+					if (_view.FrameResources.DdgiFinalGatherDenoised.Id != _view.FrameResources.DdgiFinalGatherIrradiance.Id)
+					{
+						graph.AddPass("DDGI Final Gather Upsample", PassKind.Compute)
+							.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
+							.ReadTexture(_view.FrameResources.GBufferNormal, ResourceState.ShaderResource)
+							.ReadTexture(_view.FrameResources.DdgiFinalGatherDenoised, ResourceState.ShaderResource)
+							.WriteTexture(_view.FrameResources.DdgiFinalGatherIrradiance, ResourceState.UnorderedAccess)
+							.SetExecute(_ddgiFinalGatherUpsampleExecute);
+					}
+				}
 			}
 
 			graph.AddPass("Clustered Lighting Build", PassKind.Compute)
@@ -1633,6 +1762,10 @@ internal sealed class RenderGraphFrameBuilder
 			if (_view.FrameResources.ReflectionsRadiance.IsValid)
 			{
 				deferredLightingBuilder.ReadTexture(_view.FrameResources.ReflectionsRadiance, ResourceState.ShaderResource);
+			}
+			if (_view.FrameResources.DdgiFinalGatherIrradiance.IsValid)
+			{
+				deferredLightingBuilder.ReadTexture(_view.FrameResources.DdgiFinalGatherIrradiance, ResourceState.ShaderResource);
 			}
 			if (_view.FrameResources.FogIntegrated.IsValid)
 			{
@@ -1701,6 +1834,26 @@ internal sealed class RenderGraphFrameBuilder
 			
 			ReadSkyboxTextures(transparentForwardBuilder);
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
+
+			if (VfxPass.HasWork(_view.VfxFrame))
+			{
+				// Buffers are outside the graph's tracking; the pass orders its own particle writes and reads.
+				graph.AddPass("VFX Simulate", PassKind.Compute)
+					.SetExecute(_vfxSimulateExecute);
+
+				graph.AddPass("VFX", PassKind.Graphics)
+					.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
+					.WriteTexture(_view.FrameResources.LightingBuffer, ResourceState.RenderTarget)
+					.SetExecute(_vfxExecute);
+			}
+
+			_renderFeatureHost.Record(
+				graph,
+				RenderInjectionPoint.BeforeTemporalResolve,
+				_view.RenderFeatureFrames,
+				_view.View,
+				_view.FrameResources.LightingBuffer,
+				_view.FrameResources.GBufferDepth);
 
 			if (_view.FrameResources.Config.AntiAliasing.UsesFsr3 && _view.FrameResources.Fsr3.InternalHistoryWrite.IsValid)
 			{
@@ -1851,35 +2004,45 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void RecordSharedPresentationPasses(RenderGraph graph)
 	{
-		var imguiBuilder = graph.AddPass("ImGui", PassKind.Graphics)
+		// The editor UI is drawn after the graph, in a submission of its own (see UiCompositor), so it cannot
+		// declare what it samples. This pass declares it instead: it leaves the window target ready to be drawn
+		// into, and every view's output readable by the UI. It records no work; its barriers are the point.
+		var handoffBuilder = graph.AddPass("UI Handoff", PassKind.Graphics)
 			.WriteTexture(_sharedResources.FinalColor, ResourceState.RenderTarget);
-		var selectedSceneDebugViewHandle = GetSelectedSceneDebugViewHandle();
-		if (selectedSceneDebugViewHandle.IsValid)
+		var boundView = _view;
+		for (var i = 0; i < _frameViews.Count; i++)
 		{
-			imguiBuilder.ReadTexture(selectedSceneDebugViewHandle, ResourceState.ShaderResource);
-		}
-		var sceneColorDebugViewHandle = GetSceneColorDebugViewHandle();
-		if (sceneColorDebugViewHandle.IsValid && sceneColorDebugViewHandle.Id != selectedSceneDebugViewHandle.Id)
-		{
-			imguiBuilder.ReadTexture(sceneColorDebugViewHandle, ResourceState.ShaderResource);
+			_view = GetOrCreateViewState(_frameViews[i]);
+			var selectedSceneDebugViewHandle = GetSelectedSceneDebugViewHandle();
+			if (selectedSceneDebugViewHandle.IsValid)
+			{
+				handoffBuilder.ReadTexture(selectedSceneDebugViewHandle, ResourceState.ShaderResource);
+			}
+
+			var sceneColorDebugViewHandle = GetSceneColorDebugViewHandle();
+			if (sceneColorDebugViewHandle.IsValid && sceneColorDebugViewHandle.Id != selectedSceneDebugViewHandle.Id)
+			{
+				handoffBuilder.ReadTexture(sceneColorDebugViewHandle, ResourceState.ShaderResource);
+			}
 		}
 
-		imguiBuilder.SetExecute(_imguiExecute);
+		_view = boundView;
+		handoffBuilder.SetExecute(static _ => { });
 	}
 
 	private void ReadSkyboxTextures(RenderGraphBuilder builder)
 	{
-		if (_sharedResources.SkyboxEnvironment.IsValid)
+		if (_view.FrameResources.SkyboxEnvironment.IsValid)
 		{
-			builder.ReadTexture(_sharedResources.SkyboxEnvironment, ResourceState.ShaderResource);
+			builder.ReadTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.ShaderResource);
 		}
-		if (_sharedResources.SkyboxIrradiance.IsValid)
+		if (_view.FrameResources.SkyboxIrradiance.IsValid)
 		{
-			builder.ReadTexture(_sharedResources.SkyboxIrradiance, ResourceState.ShaderResource);
+			builder.ReadTexture(_view.FrameResources.SkyboxIrradiance, ResourceState.ShaderResource);
 		}
-		if (_sharedResources.SkyboxPrefilter.IsValid)
+		if (_view.FrameResources.SkyboxPrefilter.IsValid)
 		{
-			builder.ReadTexture(_sharedResources.SkyboxPrefilter, ResourceState.ShaderResource);
+			builder.ReadTexture(_view.FrameResources.SkyboxPrefilter, ResourceState.ShaderResource);
 		}
 		if (_sharedResources.SkyboxBrdfLut.IsValid)
 		{
@@ -1892,6 +2055,24 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		Array.Clear(_viewportTextureIds);
 		Array.Clear(_viewportOpaque);
+		Array.Clear(_viewportPersistent);
+	}
+
+	/// <summary>
+	/// Starts a frame that runs no graph. Each view keeps the output it resolved on the last frame that did, but
+	/// only where that output outlives its frame: a debug view samples a transient texture that has since been
+	/// returned to the pool, so such a view shows nothing until the next frame draws it again.
+	/// </summary>
+	public void KeepPersistentViewportOutputs()
+	{
+		for (var i = 0; i < _viewportTextureIds.Length; i++)
+		{
+			if (_viewportPersistent[i] == false)
+			{
+				_viewportTextureIds[i] = 0;
+				_viewportOpaque[i] = false;
+			}
+		}
 	}
 
 	/// <summary>
@@ -1912,6 +2093,10 @@ internal sealed class RenderGraphFrameBuilder
 		var textureId = ResolveSceneViewportTextureId(out var activeDebugViewId, out var activeDebugViewKind);
 		_viewportTextureIds[_view.View.Index] = textureId;
 		_viewportOpaque[_view.View.Index] = activeDebugViewKind == SceneDebugViewKind.ColorIgnoreAlpha;
+		// Final Color of a texture-output view is its persistent presented target; every other output is transient.
+		_viewportPersistent[_view.View.Index] = textureId != 0 &&
+		                                        _view.Output == RenderViewOutput.Texture &&
+		                                        string.Equals(activeDebugViewId, SceneDebugViewIds.FinalColor, StringComparison.Ordinal);
 		_view.ResolvedSceneViewportState = new SceneViewportRenderState(
 			textureId,
 			_view.FrameResources.SceneFramebufferSize,
@@ -1954,15 +2139,9 @@ internal sealed class RenderGraphFrameBuilder
 		}
 
 		var device = _renderer.GetGfxDevice();
-		var commandSets = new List<SharedDrawIndirectCommandSet>();
-		commandSets.AddRange(_gpuDrawPass.TakeViewCommandSets(view.Index));
-		commandSets.AddRange(_transparentForwardPass.TakeViewCommandSets(view.Index));
-		commandSets.AddRange(_shadowMapPass.TakeViewCommandSets(view.Index));
-		_gpuDrawPass.ForgetIndirectCommandSets(commandSets);
-		foreach (var commandSet in commandSets)
-		{
-			device.Retire(commandSet, $"Indirect command set for {view}");
-		}
+		_gpuDrawPass.ReleaseViewCommandSets(view.Index, device);
+		_transparentForwardPass.ReleaseViewCommandSets(view.Index, device);
+		_shadowMapPass.ReleaseViewCommandSets(view.Index, device);
 	}
 
 	/// <summary>Exposes a view's state so tests can assert that views do not share history.</summary>
@@ -1984,6 +2163,30 @@ internal sealed class RenderGraphFrameBuilder
 		{
 			_view = GetOrCreateViewState(RenderViewId.Primary);
 		}
+	}
+
+	/// <summary>
+	/// The bound view's sky handles: the shared external skybox when one is set, otherwise the view's own
+	/// procedural sky, prepared from its sun and settings so it regenerates only when those change.
+	/// </summary>
+	private (RenderGraphResourceHandle Environment, RenderGraphResourceHandle Irradiance, RenderGraphResourceHandle Prefilter) ImportViewSky(
+		Vector3 sunDirection,
+		float sunIntensityScale,
+		SkyboxPass.Config skyboxConfig)
+	{
+		if (_externalSkybox is not null)
+		{
+			return (_externalSkyboxEnvironment, _externalSkyboxIrradiance, _externalSkyboxPrefilter);
+		}
+
+		var sky = _view.Sky;
+		_skyboxPass.PrepareSky(_renderer.GetGfxDevice(), sky, sunDirection, sunIntensityScale, skyboxConfig);
+		var initialState = sky.InitialState;
+
+		return (
+			_resources.ImportTexture(sky.Environment!, takeOwnership: false, initialState: initialState),
+			_resources.ImportTexture(sky.Irradiance!, takeOwnership: false, initialState: initialState),
+			_resources.ImportTexture(sky.Prefilter!, takeOwnership: false, initialState: initialState));
 	}
 
 	public RenderGraphResourceHandle GetFinalColorHandle() => _sharedResources.FinalColor;
@@ -2172,10 +2375,12 @@ internal sealed class RenderGraphFrameBuilder
 	}
 
 	/// <summary>
-	/// Rewrites the UI frame's viewport sentinels to the outputs resolved this frame. Once per frame, after every
-	/// view has been prepared, because the UI frame holds the sentinels of all views together.
+	/// Rewrites the UI frame's viewport sentinels to the outputs the views resolved to. Once per presented frame,
+	/// after every view has been prepared on a frame that runs the graph, or after
+	/// <see cref="KeepPersistentViewportOutputs"/> on one that does not.
 	/// </summary>
-	public void ResolveUiViewportTextures() => ResolveViewportTextureIds(_uiFrame, _viewportTextureIds, _viewportOpaque);
+	public void ResolveUiViewportTextures(UiFrameData uiFrame) =>
+		ResolveViewportTextureIds(uiFrame, _viewportTextureIds, _viewportOpaque);
 
 	/// <summary>
 	/// Rewrites every viewport sentinel in the UI frame to the output its view resolved to this frame. The UI
@@ -2337,33 +2542,29 @@ internal sealed class RenderGraphFrameBuilder
 		var device = _renderer.GetGfxDevice();
 		for (var cascadeIndex = 0; cascadeIndex < shadowData.CascadeCount; cascadeIndex++)
 		{
-			EnsureShadowIndirectCommands(context, device, cascadeIndex);
+			EnsureShadowIndirectCommands(device, cascadeIndex);
 			var compacted = _gpuDrawPass.RecordIndirectCompaction(
 				context,
 				_shadowMapPass.GetIndirectCommandSet(cascadeIndex, _gpuDrawResources.ActiveViewIndex),
 				DrawPassParticipation.ShadowCaster,
 				_gpuDrawResources.ShadowDrawArgsBuffer,
-				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
+				_gpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
 				lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane));
 			_shadowMapPass.SetCompactedExecution(cascadeIndex, compacted);
 		}
 	}
 
-	private void EnsureShadowIndirectCommands(RenderGraphContext context, IGfxDevice device, int cascadeIndex)
+	private void EnsureShadowIndirectCommands(IGfxDevice device, int cascadeIndex)
 	{
 		_shadowMapPass.EnsureIndirectResources(device, cascadeIndex, _gpuDrawResources.ActiveViewIndex);
-		_gpuDrawPass.EnsureIndirectCommandsForPass(
-			context.GpuDrawDatabase,
+		_gpuDrawPass.EnsureIndirectCommands(
 			_shadowMapPass.GetIndirectCommandSet(cascadeIndex, _gpuDrawResources.ActiveViewIndex),
-			DrawPassParticipation.ShadowCaster,
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(
 				_gpuDrawResources,
 				_gpuDrawResources.ShadowDrawArgsBuffer,
-				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
-				_view.FrameResources.Config.ShadowMaps.WeldShadowVertices ? MeshIndexStream.ShadowOpaque : MeshIndexStream.Main),
-			lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane),
-			lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane),
-			lane => _shadowMapPass.GetPassBindingSet(cascadeIndex, lane, _gpuDrawResources));
+				_gpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
+				_view.FrameResources.Config.ShadowMaps.WeldShadowVertices ? MeshIndexStream.ShadowOpaque : MeshIndexStream.Main,
+				_gpuDrawResources.ShadowVisibleInstanceBuffer));
 	}
 
 	private void ExecuteShadowMap(RenderGraphContext context)
@@ -2393,17 +2594,17 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteSkyboxEnvironment(RenderGraphContext context)
 	{
-		_skyboxPass.RecordEnvironment(context, _view.FrameResources.Config.SkyboxConfig);
+		_skyboxPass.RecordEnvironment(context, _view.Sky);
 	}
 
 	private void ExecuteSkyboxIrradiance(RenderGraphContext context)
 	{
-		_skyboxPass.RecordIrradiance(context);
+		_skyboxPass.RecordIrradiance(context, _view.Sky);
 	}
 
 	private void ExecuteSkyboxPrefilter(RenderGraphContext context)
 	{
-		_skyboxPass.RecordPrefilter(context);
+		_skyboxPass.RecordPrefilter(context, _view.Sky);
 	}
 
 	private void ExecuteSkyboxBrdf(RenderGraphContext context)
@@ -2430,7 +2631,7 @@ internal sealed class RenderGraphFrameBuilder
 		var materialTexture = context.GetTexture(materialHandle);
 		var emissiveTexture = context.GetTexture(emissiveHandle);
 		var depthTexture = context.GetTexture(_view.FrameResources.GBufferDepth);
-		_gpuDrawPass.EnsureGBufferIndirectCommands(context);
+		_gpuDrawPass.EnsureGBufferIndirectCommands();
 		var bucketList = _gpuDrawPass.BuildGBufferBuckets();
 
 		var gbufferConfig = new GBufferPassConfig
@@ -2454,6 +2655,7 @@ internal sealed class RenderGraphFrameBuilder
 			TerrainMaterialBuffer = _gpuDrawResources.TerrainMaterialBuffer,
 			TerrainLayerBuffer = _gpuDrawResources.TerrainLayerBuffer,
 			DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
+			VisibleInstanceBuffer = _gpuDrawResources.VisibleInstanceBuffer,
 			DrawCountPerBucketBuffer = _gpuDrawResources.DrawCountPerBucketBuffer,
 			DrawExecutionRangePerBucketBuffer = _gpuDrawResources.DrawExecutionRangePerBucketBuffer,
 			MaterialGenerationBuffer = _gpuDrawResources.MaterialGenerationBuffer,
@@ -2536,7 +2738,6 @@ internal sealed class RenderGraphFrameBuilder
 		var config = _volumetricFogPass.BuildConfig(
 			context,
 			_view.FrameResources,
-			_sharedResources,
 			device,
 			_gpuDrawResources,
 			stage);
@@ -2566,6 +2767,132 @@ internal sealed class RenderGraphFrameBuilder
 		_reflectionsUpsamplePass.Record(context, in config, context.SceneData);
 	}
 
+	private void ExecuteDdgiFinalGather(RenderGraphContext context)
+	{
+		var config = _ddgiFinalGatherPass.BuildConfig(
+			context,
+			_view.FrameResources,
+			_renderer.GetGfxDevice(),
+			_renderer,
+			_gpuDrawResources,
+			_rayTracingSceneResources,
+			context.SceneData,
+			GetShadowFrameData());
+		_ddgiFinalGatherPass.Record(context, in config, context.SceneData);
+	}
+
+	private void AddFinalGatherSvgfPasses(RenderGraph graph)
+	{
+		var resources = _view.FrameResources;
+		var historyRead = resources.DdgiFinalGatherHistoryRead
+			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
+		var historyWrite = resources.DdgiFinalGatherHistoryWrite
+			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
+		var guide = historyWrite[DdgiFinalGatherHistorySlot.Guide];
+		var moments = historyWrite[DdgiFinalGatherHistorySlot.Moments];
+
+		graph.AddPass("DDGI Final Gather SVGF Temporal", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferVelocity, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiFinalGatherTrace, ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Color], ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Moments], ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Guide], ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiFinalGatherIntegrated, ResourceState.UnorderedAccess)
+			.WriteTexture(moments, ResourceState.UnorderedAccess)
+			.WriteTexture(guide, ResourceState.UnorderedAccess)
+			.SetExecute(_ddgiFinalGatherTemporalExecute);
+
+		graph.AddPass("DDGI Final Gather SVGF Variance", PassKind.Compute)
+			.ReadTexture(resources.DdgiFinalGatherIntegrated, ResourceState.ShaderResource)
+			.ReadTexture(moments, ResourceState.ShaderResource)
+			.ReadTexture(guide, ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiFinalGatherFilterInput, ResourceState.UnorderedAccess)
+			.SetExecute(_ddgiFinalGatherVarianceExecute);
+
+		for (var iteration = 0; iteration < resources.DdgiFinalGatherFilterIterations; iteration++)
+		{
+			var (source, output) = GetFinalGatherFilterTargets(iteration);
+			graph.AddPass($"DDGI Final Gather SVGF Filter {iteration}", PassKind.Compute)
+				.ReadTexture(guide, ResourceState.ShaderResource)
+				.ReadTexture(source, ResourceState.ShaderResource)
+				.WriteTexture(output, ResourceState.UnorderedAccess)
+				.SetExecute(_ddgiFinalGatherFilterExecutes[iteration]);
+		}
+	}
+
+	private void ExecuteDdgiFinalGatherSvgf(RenderGraphContext context, DdgiFinalGatherSvgfPass.Stage stage, int iteration)
+	{
+		var source = default(RenderGraphResourceHandle);
+		var output = default(RenderGraphResourceHandle);
+		if (stage == DdgiFinalGatherSvgfPass.Stage.Variance)
+		{
+			output = _view.FrameResources.DdgiFinalGatherFilterInput;
+		}
+		else if (stage == DdgiFinalGatherSvgfPass.Stage.Filter)
+		{
+			(source, output) = GetFinalGatherFilterTargets(iteration);
+		}
+
+		var config = _ddgiFinalGatherSvgfPass.BuildConfig(
+			context,
+			_view.FrameResources,
+			_renderer.GetGfxDevice(),
+			stage,
+			source,
+			output,
+			iteration);
+		_ddgiFinalGatherSvgfPass.Record(context, in config, context.SceneData);
+	}
+
+	/// <summary>
+	/// The first a-trous level reads the variance pass's output and writes the color history the next frame
+	/// accumulates into; the last writes the finished target; the ones between alternate over two intermediates.
+	/// </summary>
+	private (RenderGraphResourceHandle Source, RenderGraphResourceHandle Output) GetFinalGatherFilterTargets(int iteration)
+	{
+		var resources = _view.FrameResources;
+		var historyWrite = resources.DdgiFinalGatherHistoryWrite
+			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
+		var colorHistory = historyWrite[DdgiFinalGatherHistorySlot.Color];
+		var lastIteration = resources.DdgiFinalGatherFilterIterations - 1;
+
+		var source = iteration == 0
+			? resources.DdgiFinalGatherFilterInput
+			: iteration == 1
+				? colorHistory
+				: GetFinalGatherFilterIntermediate(iteration - 1);
+		var output = iteration == 0
+			? colorHistory
+			: iteration == lastIteration
+				? resources.DdgiFinalGatherDenoised
+				: GetFinalGatherFilterIntermediate(iteration);
+		return (source, output);
+	}
+
+	/// <summary>Level 1 writes A, level 2 writes B, level 3 writes A again, and so on.</summary>
+	private RenderGraphResourceHandle GetFinalGatherFilterIntermediate(int iteration)
+	{
+		return iteration % 2 == 1
+			? _view.FrameResources.DdgiFinalGatherFilterA
+			: _view.FrameResources.DdgiFinalGatherFilterB;
+	}
+
+	private void ExecuteDdgiFinalGatherUpsample(RenderGraphContext context)
+	{
+		// The reflection upsample's depth- and normal-aware reconstruction suits any one-sample-per-trace-pixel
+		// signal. Its pipeline is shared; only the handles differ.
+		var config = _reflectionsUpsamplePass.BuildConfig(
+			context,
+			_view.FrameResources,
+			_renderer.GetGfxDevice(),
+			_view.FrameResources.DdgiFinalGatherDenoised,
+			_view.FrameResources.DdgiFinalGatherIrradiance,
+			_view.FrameResources.Config.DiffuseGlobalIllumination.FinalGather.UpsampleSharpness);
+		_reflectionsUpsamplePass.Record(context, in config, context.SceneData);
+	}
+
 	private void ExecuteColorPyramid(
 		RenderGraphContext context,
 		ColorPyramidPass.Stage stage,
@@ -2585,6 +2912,7 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		var fsr = _view.FrameResources.Fsr3;
 		var size = _view.FrameResources.SceneFramebufferSize;
+		var upscaleSize = _view.FrameResources.FramebufferSize;
 		AddFsr3Clear(graph, "FSR3 Clear Reconstructed Depth", fsr.ReconstructedPrevNearestDepth,
 			size, BitConverter.SingleToUInt32Bits(1.0f), true);
 		AddFsr3Clear(graph, "FSR3 Clear Luma SPD Counter", fsr.LumaSpdAtomic, new Int2(1, 1), 0u, true);
@@ -2603,7 +2931,7 @@ internal sealed class RenderGraphFrameBuilder
 		if (!fsr.HistoryValid || _view.ResetTaaHistoryThisFrame)
 		{
 			AddFsr3Clear(graph, "FSR3 Clear Frame Info", fsr.FrameInfo, new Int2(1, 1), 0u, false);
-			AddFsr3Clear(graph, "FSR3 Clear Internal History", fsr.InternalHistoryRead, size, 0u, false);
+			AddFsr3Clear(graph, "FSR3 Clear Internal History", fsr.InternalHistoryRead, upscaleSize, 0u, false);
 			AddFsr3Clear(graph, "FSR3 Clear Luma History", fsr.LumaHistoryRead, size, 0u, false);
 			AddFsr3Clear(graph, "FSR3 Clear Previous Luma", fsr.CurrentLumaRead, size, 0u, false);
 			AddFsr3Clear(graph, "FSR3 Clear Accumulation", fsr.AccumulationRead, size, 0u, false);
@@ -2649,13 +2977,14 @@ internal sealed class RenderGraphFrameBuilder
 		// at the lifetime boundary, after those earlier intermediates have finished using the alias.
 		// Otherwise their depth/luma payload is read as a positive lock and stale colour history is
 		// protected from rectification, producing bright trails behind moving opaque geometry.
-		AddFsr3Clear(graph, "FSR3 Clear New Locks", fsr.NewLocks, size, 0u, false);
+		AddFsr3Clear(graph, "FSR3 Clear New Locks", fsr.NewLocks, upscaleSize, 0u, false);
 
 		graph.AddPass("FSR3 Prepare Reactivity", PassKind.Compute)
 			.ReadTexture(fsr.ReconstructedPrevNearestDepth, ResourceState.UnorderedAccess)
 			.ReadTexture(fsr.DilatedMotionVectors, ResourceState.ShaderResource)
 			.ReadTexture(fsr.DilatedDepth, ResourceState.ShaderResource)
 			.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(_view.FrameResources.GBufferVelocity, ResourceState.ShaderResource)
 			.ReadTexture(_view.FrameResources.GBufferMaterial, ResourceState.ShaderResource)
 			.ReadTexture(fsr.TransparencyMask, ResourceState.ShaderResource)
 			.ReadTexture(fsr.AccumulationRead, ResourceState.ShaderResource)
@@ -2726,21 +3055,36 @@ internal sealed class RenderGraphFrameBuilder
 		return new Int2(Math.Max(sourceSize.X / divisor, 1), Math.Max(sourceSize.Y / divisor, 1));
 	}
 
+	/// <summary>
+	/// The size of the temporally resolved scene colour. FSR3 reconstructs at display size; TAA resolves at render
+	/// size and leaves tonemapping to filter the image up to the display.
+	/// </summary>
+	internal static Int2 GetResolvedSceneColorSize(AntiAliasingConfig antiAliasing, Int2 displaySize, Int2 renderSize)
+	{
+		return antiAliasing.UsesFsr3
+			? displaySize
+			: renderSize;
+	}
+
 	internal static Int2 GetFsr3ShadingChangeSize(Int2 renderSize) => new(
 		Math.Max(renderSize.X / 2, 1),
 		Math.Max(renderSize.Y / 2, 1));
 
 	private Fsr3ConstantValues BuildFsr3Constants(RenderGraphContext context)
 	{
-		var size = _view.FrameResources.SceneFramebufferSize;
+		var renderSize = _view.FrameResources.SceneFramebufferSize;
+		var upscaleSize = _view.FrameResources.FramebufferSize;
 		var camera = context.ViewSnapshot.Camera;
 		var verticalFov = float.DegreesToRadians(camera.Fov > 0.0f ? camera.Fov : 70.0f);
 		var depth = Fsr3Constants.BuildDeviceToViewDepth(context.SceneData.NearPlane,
-			context.SceneData.FarPlane, verticalFov, (float)Math.Max(size.X, 1) / Math.Max(size.Y, 1));
+			context.SceneData.FarPlane, verticalFov, (float)Math.Max(renderSize.X, 1) / Math.Max(renderSize.Y, 1));
 		var reset = _view.ResetTaaHistoryThisFrame || context.SceneData.ResetHistory || !_view.FrameResources.Fsr3.HistoryValid;
-		return Fsr3Constants.Build(size, size, size, size, depth,
+
+		// Any change to either size reallocates the history and resets accumulation, so whenever last frame's
+		// history is read it was produced at this frame's sizes.
+		return Fsr3Constants.Build(renderSize, upscaleSize, renderSize, upscaleSize, depth,
 			context.SceneData.JitterPixels, context.SceneData.PreviousJitterPixels, verticalFov,
-			Math.Max(_uiFrame.DeltaTime, 1.0f / 1000.0f), reset ? 0.0f : _view.Fsr3FrameIndex);
+			Math.Max(_view.SceneFrameDeltaSeconds, 1.0f / 1000.0f), reset ? 0.0f : _view.Fsr3FrameIndex);
 	}
 
 	private void ExecuteFsr3PrepareInputs(RenderGraphContext context)
@@ -2791,6 +3135,7 @@ internal sealed class RenderGraphFrameBuilder
 		var config = _passSet.Fsr3PrepareReactivityPass.BuildConfig(context, _renderer.GetGfxDevice(),
 			fsr.ReconstructedPrevNearestDepth, fsr.DilatedMotionVectors, fsr.DilatedDepth,
 			_view.FrameResources.GBufferDepth,
+			_view.FrameResources.GBufferVelocity,
 			_view.FrameResources.GBufferMaterial, fsr.TransparencyMask, fsr.AccumulationRead, fsr.AccumulationWrite,
 			fsr.ShadingChange, fsr.CurrentLumaWrite, fsr.FrameInfo, fsr.DilatedReactiveMasks,
 			fsr.NewLocks, in constants,
@@ -2867,7 +3212,7 @@ internal sealed class RenderGraphFrameBuilder
 			context,
 			_view.FrameResources,
 			_renderer.GetGfxDevice(),
-			_view.HistoryValid,
+			_view.TemporalHistory.IsValid,
 			_view.ResetTaaHistoryThisFrame || context.SceneData.ResetHistory);
 		_temporalAntiAliasingPass.Record(context, in config);
 	}
@@ -2929,13 +3274,12 @@ internal sealed class RenderGraphFrameBuilder
 		_view.CurrentDdgiConfig = _ddgiPass.BuildConfig(
 			context,
 			_view.FrameResources,
-			_sharedResources,
 			_renderer.GetGfxDevice(),
 			_renderer,
 			_gpuDrawResources,
 			_rayTracingSceneResources,
 			context.SceneData,
-			_view.DdgiHistoryValid);
+			_view.DdgiHistory.IsValid);
 		_view.CurrentDdgiConfigValid = true;
 		_ddgiPass.RecordClassify(context, in _view.CurrentDdgiConfig);
 	}
@@ -2994,14 +3338,9 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		var device = _renderer.GetGfxDevice();
 		_transparentForwardPass.EnsureIndirectResources(device, _gpuDrawResources.ActiveViewIndex);
-		_gpuDrawPass.EnsureIndirectCommandsForPass(
-			context.GpuDrawDatabase,
+		_gpuDrawPass.EnsureIndirectCommands(
 			_transparentForwardPass.GetIndirectCommandSet(_gpuDrawResources.ActiveViewIndex),
-			DrawPassParticipation.ForwardTransparent,
-			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources),
-			lane => _transparentForwardPass.HasIndirectLane(lane),
-			lane => _transparentForwardPass.GetBufferBindings(lane),
-			lane => _transparentForwardPass.GetPassBindingSet(lane, _gpuDrawResources));
+			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources));
 		var config = _transparentForwardPass.BuildConfig(
 			context,
 			_view.FrameResources,
@@ -3013,7 +3352,33 @@ internal sealed class RenderGraphFrameBuilder
 		_transparentForwardPass.Record(context, in config, context.SceneData);
 	}
 
-	private void ExecuteTonemapping(RenderGraphContext context)
+	private void ExecuteVfxSimulate(RenderGraphContext context)
+	{
+		if (context.ViewSnapshot.VfxFrame is not { } frame)
+		{
+			return;
+		}
+
+		_vfxPass.Simulate(context, _renderer.GetGfxDevice(), frame);
+	}
+
+	private void ExecuteVfx(RenderGraphContext context)
+	{
+		if (context.ViewSnapshot.VfxFrame is not { } frame)
+		{
+			return;
+		}
+
+		_vfxPass.Draw(
+			context,
+			_renderer.GetGfxDevice(),
+			frame,
+			context.GetTexture(_view.FrameResources.LightingBuffer),
+			context.GetTexture(_view.FrameResources.GBufferDepth),
+			_view.FrameResources.SceneFramebufferSize);
+	}
+
+		private void ExecuteTonemapping(RenderGraphContext context)
 	{
 		var config = _tonemappingPass.BuildConfig(
 			context,
@@ -3070,15 +3435,6 @@ internal sealed class RenderGraphFrameBuilder
 		_motionVectorDebugPass.Record(context, in config);
 	}
 
-	private void ExecuteImGui(RenderGraphContext context)
-	{
-		var finalColor = context.GetTexture(_sharedResources.FinalColor);
-		var presentationView = _viewRegistry.GetOrCreate(RenderViewId.Primary);
-		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
-		_imGuiRenderer.Record(context, _uiFrame, finalColor,
-			clearTarget: presentationView.Output != RenderViewOutput.Backbuffer || presentationView.FrameResources.SceneEnabled == false);
-	}
-
 	private void ExecuteGameplayScreenEncodedUi(RenderGraphContext context) =>
 		ExecuteGameplayScreenUi(context, _view.FrameResources.EncodedSceneColor);
 
@@ -3089,18 +3445,25 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		var target = context.GetTexture(targetHandle);
 		_gameplayUiRenderer.EnsureResources(_renderer.GetGfxDevice(), _gameplayUiFrame.Screen);
-		_gameplayUiRenderer.Record(context, _gameplayUiFrame.Screen, target, clearTarget: false);
+		_gameplayUiRenderer.Record(context.CommandList, _gameplayUiFrame.Screen, target, clearTarget: false);
 	}
 
 	private void ExecuteGameplayTextureUi(RenderGraphContext context, GameplayTextureTarget target)
 	{
 		_gameplayUiRenderer.EnsureResources(_renderer.GetGfxDevice(), target.Surface.Frame);
 		_gameplayUiRenderer.Record(
-			context,
+			context.CommandList,
 			target.Surface.Frame,
 			target.Texture,
 			clearTarget: true,
 			target.Surface.ClearColor);
+
+		// A surface recorded before its images were uploaded is redrawn once they are.
+		if (target.Surface.Frame.HasPendingImages())
+		{
+			return;
+		}
+
 		_gameplayUiRenderer.MarkRendered(target.Surface);
 	}
 
@@ -3141,8 +3504,36 @@ internal sealed class RenderGraphFrameBuilder
 		_view.HasPreviousFrameShape = true;
 	}
 
+	/// <summary>
+	/// The bound view's display-encoded image. A texture-output view encodes into its persistent presented target,
+	/// which the UI keeps sampling on frames that draw no scene; a backbuffer view's image lives only this frame.
+	/// </summary>
+	private RenderGraphResourceHandle CreateEncodedSceneColor(Int2 framebufferSize)
+	{
+		if (_view.Output == RenderViewOutput.Texture)
+		{
+			var presentedTarget = _view.PresentedSceneTarget.EnsureTarget(_renderer.GetGfxDevice(), framebufferSize);
+			return _resources.ImportTexture(
+				presentedTarget,
+				takeOwnership: false,
+				initialState: _view.PresentedSceneTarget.CurrentState);
+		}
+
+		return _resources.CreateTransientTexture(new TextureDescriptor(
+			framebufferSize.X,
+			framebufferSize.Y,
+			TextureFormat.Bgra8Unorm,
+			TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)));
+	}
+
 	public void CompleteFrame()
 	{
+		if (_view.Output == RenderViewOutput.Texture && _view.FrameResources.EncodedSceneColor.IsValid)
+		{
+			_view.PresentedSceneTarget.SetCurrentState(_resources.GetResourceState(_view.FrameResources.EncodedSceneColor));
+		}
+
 		if (_view.FrameResources.ColorPyramidLevels is not { Length: > 0 } || _view.FrameResources.SceneEnabled == false)
 		{
 			_view.ColorPyramidValid = false;
@@ -3157,122 +3548,26 @@ internal sealed class RenderGraphFrameBuilder
 			_view.ColorPyramidValid = true;
 		}
 
-		if (_view.FrameResources.Config.AntiAliasing.Enabled == false || _view.FrameResources.SceneEnabled == false)
+		// Companion state is committed first, while IsImported still says whether this frame ran the effect.
+		if (_view.Fsr3History.IsImported)
 		{
-			_view.HistoryValid = false;
-		}
-		else if (_view.FrameResources.HistoryColorWrite.IsValid == false ||
-		         _view.FrameResources.HistoryDepthWrite.IsValid == false)
-		{
-			_view.HistoryValid = false;
-		}
-		else
-		{
-			if (_view.FrameResources.HistoryColorRead.IsValid)
-			{
-				_view.HistoryColorStates[_view.HistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.HistoryColorRead);
-			}
-
-			if (_view.FrameResources.HistoryDepthRead.IsValid)
-			{
-				_view.HistoryDepthStates[_view.HistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.HistoryDepthRead);
-			}
-
-			var writeIndex = 1 - _view.HistoryReadIndex;
-			_view.HistoryColorStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.HistoryColorWrite);
-			_view.HistoryDepthStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.HistoryDepthWrite);
-			if (_view.FrameResources.Config.AntiAliasing.UsesFsr3)
-			{
-				_view.Fsr3CurrentLumaStates[_view.HistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.Fsr3.CurrentLumaRead);
-				_view.Fsr3CurrentLumaStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.Fsr3.CurrentLumaWrite);
-				_view.Fsr3AccumulationStates[_view.HistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.Fsr3.AccumulationRead);
-				_view.Fsr3AccumulationStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.Fsr3.AccumulationWrite);
-				_view.Fsr3FrameInfoState = _resources.GetResourceState(_view.FrameResources.Fsr3.FrameInfo);
-				_view.Fsr3FrameIndex++;
-			}
-			_view.HistoryReadIndex = writeIndex;
-			_view.HistoryValid = true;
+			_view.Fsr3FrameInfoState = _resources.GetResourceState(_view.FrameResources.Fsr3.FrameInfo);
+			_view.Fsr3FrameIndex++;
 		}
 
-		if (_view.FrameResources.Config.VolumetricFog.Enabled &&
-		    _view.FrameResources.SceneEnabled &&
-		    _view.FrameResources.FogHistoryWrite.IsValid)
-		{
-			if (_view.FrameResources.FogHistoryRead.IsValid)
-			{
-				_view.FogHistoryStates[_view.FogHistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.FogHistoryRead);
-			}
-			var writeIndex = 1 - _view.FogHistoryReadIndex;
-			_view.FogHistoryStates[writeIndex] = _resources.GetResourceState(_view.FrameResources.FogHistoryWrite);
-			_view.FogHistoryReadIndex = writeIndex;
-			_view.FogHistoryValid = true;
-		}
-		else
-		{
-			_view.FogHistoryValid = false;
-		}
-
-		if (HasRayTracedDdgi(_view.FrameResources.Config) == false || _view.FrameResources.SceneEnabled == false)
-		{
-			_view.DdgiHistoryValid = false;
-			return;
-		}
-
-		if (_view.FrameResources.DdgiIrradianceL0HistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiIrradianceLyHistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiIrradianceLzHistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiIrradianceLxHistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiVisibilityHistoryWrite.IsValid == false ||
-		    _view.FrameResources.DdgiProbeStateWrite.IsValid == false ||
-		    _view.FrameResources.DdgiIrradianceEstimator.IsValid == false)
-		{
-			_view.DdgiHistoryValid = false;
-			return;
-		}
-
-		UpdateDdgiIrradianceState(0, _view.FrameResources.DdgiIrradianceL0HistoryRead, _view.DdgiHistoryReadIndex);
-		UpdateDdgiIrradianceState(1, _view.FrameResources.DdgiIrradianceLyHistoryRead, _view.DdgiHistoryReadIndex);
-		UpdateDdgiIrradianceState(2, _view.FrameResources.DdgiIrradianceLzHistoryRead, _view.DdgiHistoryReadIndex);
-		UpdateDdgiIrradianceState(3, _view.FrameResources.DdgiIrradianceLxHistoryRead, _view.DdgiHistoryReadIndex);
-
-		if (_view.FrameResources.DdgiVisibilityHistoryRead.IsValid)
-		{
-			_view.DdgiVisibilityStates[_view.DdgiHistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.DdgiVisibilityHistoryRead);
-		}
-
-		if (_view.FrameResources.DdgiProbeStateRead.IsValid)
-		{
-			_view.DdgiProbeStateStates[_view.DdgiHistoryReadIndex] = _resources.GetResourceState(_view.FrameResources.DdgiProbeStateRead);
-		}
-		if (_view.FrameResources.DdgiProbeActivity.IsValid)
+		if (_view.DdgiHistory.IsImported)
 		{
 			_view.DdgiProbeActivityState = _resources.GetResourceState(_view.FrameResources.DdgiProbeActivity);
+			_view.DdgiIrradianceEstimatorState = _resources.GetResourceState(_view.FrameResources.DdgiIrradianceEstimator);
+			_view.DdgiCommittedRuntimeOrigin = _view.FrameResources.DdgiRuntimeOrigin;
+			_view.DdgiCommittedStorageOffset = _view.FrameResources.DdgiStorageOffset;
+			_view.DdgiCommittedPlacementValid = true;
 		}
 
-		var ddgiWriteIndex = 1 - _view.DdgiHistoryReadIndex;
-		UpdateDdgiIrradianceState(0, _view.FrameResources.DdgiIrradianceL0HistoryWrite, ddgiWriteIndex);
-		UpdateDdgiIrradianceState(1, _view.FrameResources.DdgiIrradianceLyHistoryWrite, ddgiWriteIndex);
-		UpdateDdgiIrradianceState(2, _view.FrameResources.DdgiIrradianceLzHistoryWrite, ddgiWriteIndex);
-		UpdateDdgiIrradianceState(3, _view.FrameResources.DdgiIrradianceLxHistoryWrite, ddgiWriteIndex);
-		_view.DdgiVisibilityStates[ddgiWriteIndex] = _resources.GetResourceState(_view.FrameResources.DdgiVisibilityHistoryWrite);
-		_view.DdgiProbeStateStates[ddgiWriteIndex] = _resources.GetResourceState(_view.FrameResources.DdgiProbeStateWrite);
-		_view.DdgiIrradianceEstimatorState = _resources.GetResourceState(_view.FrameResources.DdgiIrradianceEstimator);
-		_view.DdgiHistoryReadIndex = ddgiWriteIndex;
-		_view.DdgiHistoryValid = true;
-		_view.DdgiCommittedRuntimeOrigin = _view.FrameResources.DdgiRuntimeOrigin;
-		_view.DdgiCommittedStorageOffset = _view.FrameResources.DdgiStorageOffset;
-		_view.DdgiCommittedPlacementValid = true;
+		_view.CompleteHistories(_resources);
 	}
 
-	private void UpdateDdgiIrradianceState(int coefficientIndex, RenderGraphResourceHandle handle, int historyIndex)
-	{
-		if (handle.IsValid)
-		{
-			_view.DdgiIrradianceStates[coefficientIndex, historyIndex] = _resources.GetResourceState(handle);
-		}
-	}
-
-	private static TextureDescriptor CreateFogTextureDescriptor(Int3 grid) => new(
+	internal static TextureDescriptor CreateFogTextureDescriptor(Int3 grid) => new(
 		grid.X,
 		grid.Y,
 		TextureFormat.Rgba16Float,
@@ -3281,93 +3576,14 @@ internal sealed class RenderGraphFrameBuilder
 		dimension: TextureDimension.Texture3D,
 		depth: grid.Z);
 
-	private void EnsureFogHistoryResources(IGfxDevice device, Int3 grid, float maxDistance)
+	private RenderGraphResourceHandle CreateFinalGatherTexture(Int2 size)
 	{
-		var changed = _view.FogHistoryDevice is not null &&
-		              (!ReferenceEquals(_view.FogHistoryDevice, device) ||
-		               _view.FogHistoryBackendKind != device.BackendKind ||
-		               !_view.FogHistoryGrid.Equals(grid) ||
-		               MathF.Abs(_view.FogHistoryMaxDistance - maxDistance) > 1e-5f);
-		if (changed) _view.ReleaseFogHistoryResources();
-		if (_view.FogHistoryTextures[0] is not null && _view.FogHistoryTextures[1] is not null) return;
-		for (var i = 0; i < 2; i++)
-		{
-			_view.FogHistoryTextures[i] = device.CreateTexture(CreateFogTextureDescriptor(grid));
-			_view.FogHistoryStates[i] = ResourceState.UnorderedAccess;
-		}
-		_view.FogHistoryDevice = device;
-		_view.FogHistoryBackendKind = device.BackendKind;
-		_view.FogHistoryGrid = grid;
-		_view.FogHistoryMaxDistance = maxDistance;
-		_view.FogHistoryReadIndex = 0;
-		_view.FogHistoryValid = false;
-	}
-
-	private void EnsureTemporalHistoryResources(IGfxDevice device, Int2 sceneFramebufferSize, AntiAliasingMode mode)
-	{
-		var deviceChanged = _view.HistoryDevice is not null && ReferenceEquals(_view.HistoryDevice, device) == false;
-		var backendChanged = _view.HistoryBackendKind.HasValue && _view.HistoryBackendKind.Value != device.BackendKind;
-		var sizeChanged = _view.HistorySize.X != sceneFramebufferSize.X || _view.HistorySize.Y != sceneFramebufferSize.Y;
-		if (deviceChanged || backendChanged || sizeChanged || _view.HistoryMode != mode)
-		{
-			_view.ReleaseTemporalHistoryResources();
-		}
-
-		if (_view.HistoryColorTextures[0] is not null &&
-		    _view.HistoryColorTextures[1] is not null &&
-		    _view.HistoryDepthTextures[0] is not null &&
-		    _view.HistoryDepthTextures[1] is not null)
-		{
-			return;
-		}
-
-		for (var i = 0; i < 2; i++)
-		{
-			_view.HistoryColorTextures[i] = device.CreateTexture(new TextureDescriptor(
-				sceneFramebufferSize.X,
-				sceneFramebufferSize.Y,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
-			_view.HistoryDepthTextures[i] = device.CreateTexture(new TextureDescriptor(
-				sceneFramebufferSize.X,
-				sceneFramebufferSize.Y,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
-			if (mode == AntiAliasingMode.Fsr3)
-			{
-				_view.Fsr3CurrentLumaTextures[i] = device.CreateTexture(new TextureDescriptor(
-					sceneFramebufferSize.X, sceneFramebufferSize.Y, TextureFormat.Rgba16Float,
-					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-				_view.Fsr3AccumulationTextures[i] = device.CreateTexture(new TextureDescriptor(
-					sceneFramebufferSize.X, sceneFramebufferSize.Y, TextureFormat.Rgba16Float,
-					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-			}
-			_view.HistoryColorStates[i] = ResourceState.UnorderedAccess;
-			_view.HistoryDepthStates[i] = ResourceState.UnorderedAccess;
-			_view.Fsr3CurrentLumaStates[i] = ResourceState.UnorderedAccess;
-			_view.Fsr3AccumulationStates[i] = ResourceState.UnorderedAccess;
-		}
-
-		if (mode == AntiAliasingMode.Fsr3)
-		{
-			_view.Fsr3FrameInfoTexture = device.CreateTexture(new TextureDescriptor(
-				1, 1, TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-			_view.Fsr3FrameInfoState = ResourceState.UnorderedAccess;
-		}
-		_view.HistoryMode = mode;
-
-		_view.HistoryDevice = device;
-		_view.HistoryBackendKind = device.BackendKind;
-		_view.HistorySize = sceneFramebufferSize;
-		_view.HistoryReadIndex = 0;
-		_view.HistoryValid = false;
-		_view.ResetTaaHistoryThisFrame = true;
+		return _resources.CreateTransientTexture(new TextureDescriptor(
+			size.X,
+			size.Y,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 	}
 
 	private RenderGraphResourceHandle CreateFsr3Texture(Int2 size) =>
@@ -3447,78 +3663,50 @@ internal sealed class RenderGraphFrameBuilder
 		_view.ColorPyramidValid = false;
 	}
 
-	private void EnsureDdgiHistoryResources(
-		IGfxDevice device,
-		DdgiGridShape gridShape,
-		Vector3 latticeAnchor,
-		float probeSpacing,
-		int visibilityTileInteriorSize)
+	/// <summary>Allocates FSR3's history for the given sizes. Returns true when it was (re)allocated.</summary>
+	private bool EnsureFsr3HistoryResources(IGfxDevice device, Int2 renderSize, Int2 upscaleSize)
 	{
-		var deviceChanged = _view.DdgiHistoryDevice is not null && ReferenceEquals(_view.DdgiHistoryDevice, device) == false;
-		var backendChanged = _view.DdgiHistoryBackendKind.HasValue && _view.DdgiHistoryBackendKind.Value != device.BackendKind;
-		var shapeChanged = _view.DdgiHistoryGridShape.Equals(gridShape) == false;
-		var latticeAnchorChanged = _view.DdgiHistoryDevice is not null && _view.DdgiHistoryLatticeAnchor != latticeAnchor;
-		var probeSpacingChanged = _view.DdgiHistoryDevice is not null &&
-		                          MathF.Abs(_view.DdgiHistoryProbeSpacing - probeSpacing) > 1e-6f;
-		var visibilityResolutionChanged = _view.DdgiHistoryDevice is not null &&
-		                                  _view.DdgiHistoryVisibilityTileInteriorSize != visibilityTileInteriorSize;
-		if (deviceChanged ||
-		    backendChanged ||
-		    shapeChanged ||
-		    latticeAnchorChanged ||
-		    probeSpacingChanged ||
-		    visibilityResolutionChanged)
+		var previousDevice = _view.Fsr3History.Device;
+		var shape = new Fsr3HistoryShape(renderSize, upscaleSize);
+		if (_view.Fsr3History.Ensure(device, shape) == false &&
+		    _view.Fsr3FrameInfoTexture is not null)
 		{
-			_view.ReleaseDdgiHistoryResources();
+			return false;
 		}
 
-		var irradianceTexturesReady = true;
-		for (var coefficientIndex = 0; coefficientIndex < DdgiShCoefficientCount; coefficientIndex++)
+		// The frame info and frame index describe the accumulation in the history, so they restart with it.
+		if (_view.Fsr3FrameInfoTexture is not null)
 		{
-			irradianceTexturesReady &= _view.DdgiIrradianceTextures[coefficientIndex, 0] is not null &&
-			                           _view.DdgiIrradianceTextures[coefficientIndex, 1] is not null;
+			TemporalResourceRetirement.RetireTexture(previousDevice, _view.Fsr3FrameInfoTexture, _view.Fsr3FrameInfoState);
 		}
 
-		if (irradianceTexturesReady &&
-		    _view.DdgiVisibilityTextures[0] is not null &&
-		    _view.DdgiVisibilityTextures[1] is not null &&
-		    _view.DdgiProbeStateTextures[0] is not null &&
-		    _view.DdgiProbeStateTextures[1] is not null &&
+		_view.Fsr3FrameInfoTexture = device.CreateTexture(new TextureDescriptor(
+			1,
+			1,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+		_view.Fsr3FrameInfoState = ResourceState.UnorderedAccess;
+		_view.Fsr3FrameIndex = 0;
+
+		return true;
+	}
+
+	private void EnsureDdgiHistoryResources(IGfxDevice device, DdgiHistoryShape shape)
+	{
+		var previousDevice = _view.DdgiHistory.Device;
+		if (_view.DdgiHistory.Ensure(device, shape) == false &&
 		    _view.DdgiProbeActivityTexture is not null &&
 		    _view.DdgiIrradianceEstimatorBuffer is not null)
 		{
 			return;
 		}
 
-		var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, visibilityTileInteriorSize);
-		var shCoefficientTextureSize = DdgiUtilities.GetShCoefficientTextureSize(gridShape);
-		for (var i = 0; i < 2; i++)
-		{
-			for (var coefficientIndex = 0; coefficientIndex < DdgiShCoefficientCount; coefficientIndex++)
-			{
-				_view.DdgiIrradianceTextures[coefficientIndex, i] = device.CreateTexture(new TextureDescriptor(
-					shCoefficientTextureSize.X,
-					shCoefficientTextureSize.Y,
-					TextureFormat.Rgba16Float,
-					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-				_view.DdgiIrradianceStates[coefficientIndex, i] = ResourceState.UnorderedAccess;
-			}
-			_view.DdgiVisibilityTextures[i] = device.CreateTexture(new TextureDescriptor(
-				visibilityAtlasSize.X,
-				visibilityAtlasSize.Y,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f)));
-			_view.DdgiProbeStateTextures[i] = device.CreateTexture(new TextureDescriptor(
-				gridShape.AtlasColumns,
-				gridShape.AtlasRows,
-				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-			_view.DdgiVisibilityStates[i] = ResourceState.UnorderedAccess;
-			_view.DdgiProbeStateStates[i] = ResourceState.UnorderedAccess;
-		}
+		// The activity texture, estimator and committed placement describe the probes the history held, so they
+		// restart with it.
+		_view.ReleaseDdgiCompanionResources(previousDevice);
+
+		var shCoefficientTextureSize = DdgiUtilities.GetShCoefficientTextureSize(shape.GridShape);
 		_view.DdgiProbeActivityTexture = device.CreateTexture(new TextureDescriptor(
 			shCoefficientTextureSize.X,
 			shCoefficientTextureSize.Y,
@@ -3527,19 +3715,10 @@ internal sealed class RenderGraphFrameBuilder
 			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 		_view.DdgiProbeActivityState = ResourceState.UnorderedAccess;
 		_view.DdgiIrradianceEstimatorBuffer = device.CreateBuffer(new BufferDescriptor(
-			DdgiUtilities.GetIrradianceEstimatorBufferSize(gridShape),
+			DdgiUtilities.GetIrradianceEstimatorBufferSize(shape.GridShape),
 			BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 		_view.DdgiIrradianceEstimatorState = ResourceState.UnorderedAccess;
-
-		_view.DdgiHistoryDevice = device;
-		_view.DdgiHistoryBackendKind = device.BackendKind;
-		_view.DdgiHistoryGridShape = gridShape;
-		_view.DdgiHistoryLatticeAnchor = latticeAnchor;
-		_view.DdgiHistoryProbeSpacing = probeSpacing;
-		_view.DdgiHistoryVisibilityTileInteriorSize = visibilityTileInteriorSize;
-		_view.DdgiHistoryReadIndex = 0;
-		_view.DdgiHistoryValid = false;
 	}
 
 	private static bool HasAmbientOcclusion(RenderConfig config)

@@ -73,6 +73,7 @@ internal static class WindowsHelpers
 	private static readonly Guid ShellItemGuid = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
 	private static readonly ConcurrentDictionary<nint, WindowChromeState> WindowChromeStates = new();
 	private static readonly WindowProc CustomWindowProc = WindowProcImpl;
+	private static readonly ConcurrentDictionary<nint, BorderlessFullscreenState> FullscreenStates = new();
 
 	public static void EnableCustomWindowChrome(nint windowHandle, WindowChromeController controller)
 	{
@@ -121,6 +122,7 @@ internal static class WindowsHelpers
 			return;
 		}
 
+		FullscreenStates.TryRemove(windowHandle, out _);
 		if (WindowChromeStates.TryRemove(windowHandle, out var state))
 		{
 			SetWindowLongPtr(windowHandle, GWLP_WNDPROC, state.PreviousWindowProc);
@@ -133,6 +135,119 @@ internal static class WindowsHelpers
 				0,
 				SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 		}
+	}
+
+	/// <summary>
+	/// Covers the window's monitor with the window, without a frame. Flip-model swapchains get independent flip in a
+	/// borderless window that covers the monitor, so this presents like exclusive fullscreen without changing the
+	/// display mode. The window's style and placement are kept for <see cref="ExitBorderlessFullscreen"/>.
+	/// </summary>
+	public static void EnterBorderlessFullscreen(nint windowHandle)
+	{
+		if (windowHandle == nint.Zero)
+		{
+			return;
+		}
+
+		if (FullscreenStates.ContainsKey(windowHandle) == false)
+		{
+			var wasMaximized = IsZoomed(windowHandle);
+			if (wasMaximized)
+			{
+				ShowWindow(windowHandle, SW_RESTORE);
+			}
+
+			GetWindowRect(windowHandle, out var windowRect);
+			var style = GetWindowLongPtr(windowHandle, GWL_STYLE);
+			FullscreenStates[windowHandle] = new BorderlessFullscreenState(style, windowRect, wasMaximized);
+
+			// The shell only treats a window as fullscreen, and hides the taskbar over it, when it has no frame.
+			SetWindowLongPtr(windowHandle, GWL_STYLE, style & ~(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX));
+		}
+
+		if (TryGetMonitorRect(windowHandle, out var monitorRect) == false)
+		{
+			return;
+		}
+
+		SetWindowPos(
+			windowHandle,
+			nint.Zero,
+			monitorRect.Left,
+			monitorRect.Top,
+			monitorRect.Right - monitorRect.Left,
+			monitorRect.Bottom - monitorRect.Top,
+			SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+	}
+
+	/// <summary>Restores the style and placement the window had before <see cref="EnterBorderlessFullscreen"/>.</summary>
+	public static void ExitBorderlessFullscreen(nint windowHandle)
+	{
+		if (FullscreenStates.TryRemove(windowHandle, out var state) == false)
+		{
+			return;
+		}
+
+		SetWindowLongPtr(windowHandle, GWL_STYLE, state.Style);
+		var rect = state.WindowRect;
+		SetWindowPos(
+			windowHandle,
+			nint.Zero,
+			rect.Left,
+			rect.Top,
+			rect.Right - rect.Left,
+			rect.Bottom - rect.Top,
+			SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+
+		if (state.WasMaximized)
+		{
+			ShowWindow(windowHandle, SW_SHOWMAXIMIZED);
+		}
+	}
+
+	/// <summary>The size in pixels of the monitor the window is mostly on.</summary>
+	public static bool TryGetMonitorSize(nint windowHandle, out int width, out int height)
+	{
+		width = 0;
+		height = 0;
+		if (TryGetMonitorRect(windowHandle, out var rect) == false)
+		{
+			return false;
+		}
+
+		width = rect.Right - rect.Left;
+		height = rect.Bottom - rect.Top;
+
+		return width > 0 && height > 0;
+	}
+
+	private static bool TryGetMonitorRect(nint windowHandle, out RECT rect)
+	{
+		rect = default;
+		if (windowHandle == nint.Zero)
+		{
+			return false;
+		}
+
+		var monitor = MonitorFromWindow(windowHandle, MONITOR_DEFAULTTONEAREST);
+		if (monitor == nint.Zero)
+		{
+			return false;
+		}
+
+		var monitorInfo = new MONITORINFO
+		{
+			cbSize = Marshal.SizeOf<MONITORINFO>()
+		};
+
+		if (GetMonitorInfo(monitor, ref monitorInfo) == false)
+		{
+			return false;
+		}
+
+		rect = monitorInfo.rcMonitor;
+
+		return true;
 	}
 
 	public static bool GetIsMaximized(nint windowHandle)
@@ -463,7 +578,12 @@ internal static class WindowsHelpers
 				return 1;
 
 			case WM_GETMINMAXINFO:
-				AdjustMaximizedWindowBounds(hwnd, lParam);
+				// The maximized bounds stop at the taskbar, which a fullscreen window must cover.
+				if (FullscreenStates.ContainsKey(hwnd) == false)
+				{
+					AdjustMaximizedWindowBounds(hwnd, lParam);
+				}
+
 				break;
 
 			case WM_NCHITTEST:
@@ -760,6 +880,8 @@ internal static class WindowsHelpers
 		public int Right;
 		public int Bottom;
 	}
+
+	private readonly record struct BorderlessFullscreenState(nint Style, RECT WindowRect, bool WasMaximized);
 
 	[StructLayout(LayoutKind.Sequential)]
 	private struct MONITORINFO

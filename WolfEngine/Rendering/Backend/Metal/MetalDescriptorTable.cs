@@ -38,6 +38,9 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private MTLArgumentEncoder _textureEncoder;
 	private MTLArgumentEncoder _rwTextureEncoder;
 	private MTLArgumentEncoder _samplerEncoder;
+	private nint _requestedTextureEncoder;
+	private nint _requestedRwTextureEncoder;
+	private nint _requestedSamplerEncoder;
 	private MTLBuffer _textureArgumentBuffer;
 	private MTLBuffer _rwTextureArgumentBuffer;
 	private MTLBuffer _samplerArgumentBuffer;
@@ -47,6 +50,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private int _cbvCount;
 	private int _samplerCount;
 	private uint _bindlessVersion;
+	private ulong _generation;
 	private uint _encodedSrvVersion;
 	private uint _encodedUavVersion;
 	private uint _encodedSamplerVersion;
@@ -309,6 +313,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		if (_countBuffer.NativePtr == IntPtr.Zero)
 		{
 			_countBuffer = _device.NewBuffer(32, MTLResourceOptions.ResourceStorageModeShared);
+			_generation++;
 		}
 
 		var counts = new uint[5];
@@ -353,6 +358,8 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	public MTLBuffer SamplerArgumentBuffer => _samplerArgumentBuffer;
 
 	public MTLBuffer CountBuffer => _countBuffer;
+
+	public ulong Generation => _generation;
 
 	public void Free(DescriptorHandle handle)
 	{
@@ -406,8 +413,29 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		}
 	}
 
+	/// <summary>
+	/// Sizes and encodes the argument buffers for the pipeline that will execute an encoded draw record, so the
+	/// buffers the record captures are already current. Skipped when that pipeline's encoders are the ones last
+	/// applied, because re-applying them also spends the remaining forced-encode frames.
+	/// </summary>
+	internal void PrepareArgumentBuffersFor(MetalPipeline pipeline)
+	{
+		ArgumentNullException.ThrowIfNull(pipeline);
+		if (_requestedTextureEncoder == pipeline.TextureEncoder.NativePtr &&
+		    _requestedRwTextureEncoder == pipeline.RWTextureEncoder.NativePtr &&
+		    _requestedSamplerEncoder == pipeline.SamplerEncoder.NativePtr)
+		{
+			return;
+		}
+
+		SetArgumentEncoders(pipeline.TextureEncoder, pipeline.RWTextureEncoder, pipeline.SamplerEncoder);
+	}
+
 	public void SetArgumentEncoders(MTLArgumentEncoder textureEncoder, MTLArgumentEncoder rwTextureEncoder, MTLArgumentEncoder samplerEncoder)
 	{
+		_requestedTextureEncoder = textureEncoder.NativePtr;
+		_requestedRwTextureEncoder = rwTextureEncoder.NativePtr;
+		_requestedSamplerEncoder = samplerEncoder.NativePtr;
 		_textureEncoder = textureEncoder;
 		_rwTextureEncoder = rwTextureEncoder;
 		_samplerEncoder = samplerEncoder;
@@ -654,6 +682,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		}
 
 		buffer = replacement;
+		_generation++;
 		encoder.SetArgumentBuffer(buffer, 0);
 		if (previousBuffer.NativePtr != IntPtr.Zero)
 		{

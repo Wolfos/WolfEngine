@@ -43,7 +43,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private ulong _packedVertexBufferUsedBytes;
     private ulong _packedIndexBufferUsedBytes;
     private readonly SkinnedInstanceVertexAllocator _skinnedInstanceVertexAllocator = new();
-    private bool _needsPackedGeometryReencode;
+    private ulong _packedGeometryGeneration;
     private MTLTexture _depthTexture;
     private MTLDepthStencilState _depthState;
 
@@ -54,6 +54,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private CAMetalLayer _metalLayer;
     private bool _surfaceInitialized;
     private bool _hasRequestedWindowSize;
+    private string _windowTitle = "WolfEngine";
     private bool _isRunning;
     private volatile bool _shutdownRequested;
     private bool _hasDrawableSize;
@@ -68,7 +69,13 @@ internal unsafe class WolfRendererMetal : IRenderer
     private string _lastGpuCapturePath = string.Empty;
     private int _presentFrameIndex;
     private int _lastDrawableAcquireFailureLogFrame = int.MinValue;
-    private bool _vsyncEnabled = Screen.VSyncEnabled;
+    private bool _vsyncEnabled = true;
+    private volatile bool _vsyncRequested = true;
+    private readonly object _windowConfigurationSync = new();
+    private bool _windowOpened;
+    private WindowConfiguration? _initialWindowConfiguration;
+    private WindowConfiguration? _pendingWindowConfiguration;
+    private volatile DisplayInfo _displayInfo = DisplayInfo.Unknown;
     private readonly object _queuedDrawableLock = new();
     private ThreadingThread? _drawableAcquireThread;
     private volatile bool _drawableAcquireRunning;
@@ -195,6 +202,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         try
         {
             PumpSurfaceEvents();
+            ApplyPendingWindowConfiguration();
 
             // TODO: Delta time
             _updateCallback(0);
@@ -232,8 +240,19 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private void InitializeSurface()
     {
-        var layerPtr = _surface.Initialize(new Int2(_width, _height), _hasRequestedWindowSize);
+        WindowConfiguration? initialConfiguration;
+        lock (_windowConfigurationSync)
+        {
+            initialConfiguration = _initialWindowConfiguration;
+            _windowOpened = true;
+        }
+
+        var layerPtr = _surface.Initialize(new Int2(_width, _height), _hasRequestedWindowSize, _windowTitle);
         _surfaceInitialized = true;
+        if (initialConfiguration is { Mode: WindowMode.Fullscreen } fullscreen)
+        {
+            _surface.ApplyWindowConfiguration(fullscreen);
+        }
 
         _metalLayer = new CAMetalLayer(layerPtr);
         _metalLayer.Device = _device;
@@ -244,7 +263,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         ObjCNative.ObjcMsgSendSetBool(_metalLayer.NativePtr, SetAllowsNextDrawableTimeoutSelector.SelPtr, false);
         if (_surface.CanDisableVSync)
         {
-            ApplyDisplaySync(Screen.VSyncEnabled);
+            ApplyDisplaySync(_vsyncRequested);
         }
 
         _hasDrawableSize = false;
@@ -337,16 +356,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         return true;
     }
 
-    internal bool ConsumePackedGeometryRefresh()
-    {
-        if (_needsPackedGeometryReencode == false)
-        {
-            return false;
-        }
-
-        _needsPackedGeometryReencode = false;
-        return true;
-    }
+    public ulong PackedGeometryGeneration => _packedGeometryGeneration;
 
     private void CreateDepthTexture(int width, int height)
     {
@@ -552,6 +562,89 @@ internal unsafe class WolfRendererMetal : IRenderer
         _hasRequestedWindowSize = true;
     }
 
+    public void SetWindowTitle(string title)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        if (_surfaceInitialized)
+        {
+            throw new InvalidOperationException("Window title must be configured before the renderer starts.");
+        }
+
+        _windowTitle = title;
+    }
+
+    public bool VSyncEnabled
+    {
+        get => _vsyncRequested;
+        set => _vsyncRequested = value;
+    }
+
+    public bool CanConfigureWindow => _surface.CanConfigureWindow;
+
+    public void RequestWindowConfiguration(WindowConfiguration configuration)
+    {
+        lock (_windowConfigurationSync)
+        {
+            if (_windowOpened)
+            {
+                _pendingWindowConfiguration = configuration;
+                return;
+            }
+
+            _initialWindowConfiguration = configuration;
+            var size = configuration.Resolution;
+            if (configuration.Mode == WindowMode.Windowed && size.X > 0 && size.Y > 0)
+            {
+                _width = size.X;
+                _height = size.Y;
+                _hasRequestedWindowSize = true;
+            }
+        }
+    }
+
+    public DisplayInfo GetDisplayInfo()
+    {
+        return _displayInfo;
+    }
+
+    private void ApplyPendingWindowConfiguration()
+    {
+        WindowConfiguration? pending;
+        lock (_windowConfigurationSync)
+        {
+            pending = _pendingWindowConfiguration;
+            _pendingWindowConfiguration = null;
+        }
+
+        if (pending is { } configuration && _surface.CanConfigureWindow)
+        {
+            _surface.ApplyWindowConfiguration(configuration);
+        }
+    }
+
+    /// <summary>Republishes what the window shows only when it changed, so a steady frame allocates nothing.</summary>
+    private void PublishDisplayInfo()
+    {
+        if (_surface.TryGetNativeResolution(out var nativeResolution) == false)
+        {
+            return;
+        }
+
+        var windowSize = GetWindowSize();
+        var outputResolution = GetFrameBufferSize();
+        var windowMode = _surface.WindowMode;
+        var current = _displayInfo;
+        if (current.WindowMode == windowMode &&
+            current.WindowSize == windowSize &&
+            current.OutputResolution == outputResolution &&
+            current.NativeResolution == nativeResolution)
+        {
+            return;
+        }
+
+        _displayInfo = DisplayInfo.Create(windowMode, windowSize, outputResolution, nativeResolution);
+    }
+
     public Task<FrameCapture> CaptureNextFrameAsync(FrameCaptureTarget target, CancellationToken cancellationToken = default)
     {
         var completion = new TaskCompletionSource<FrameCapture>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -586,7 +679,7 @@ internal unsafe class WolfRendererMetal : IRenderer
 
         if (_surface.CanDisableVSync)
         {
-            var desiredVSync = Screen.VSyncEnabled;
+            var desiredVSync = _vsyncRequested;
             _vsyncEnabled = ObjCNative.ObjcMsgSendBool(_metalLayer.NativePtr, DisplaySyncEnabledSelector.SelPtr) != 0;
             if (_vsyncEnabled != desiredVSync)
             {
@@ -595,6 +688,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         UpdateDrawableSize();
+        PublishDisplayInfo();
     }
 
     internal bool ConsumeResizeSkip()
@@ -620,7 +714,7 @@ internal unsafe class WolfRendererMetal : IRenderer
 
         nint drawablePtr;
         // Without vsync control the layer always presents in step with the display, and no thread acquires ahead.
-        var vsync = Screen.VSyncEnabled || _surface.CanDisableVSync == false;
+        var vsync = _vsyncRequested || _surface.CanDisableVSync == false;
         var releaseDrawableAfterSubmit = vsync == false;
         if (vsync)
         {
@@ -1005,7 +1099,7 @@ internal unsafe class WolfRendererMetal : IRenderer
                 indexPublished = true;
             }
 
-            _needsPackedGeometryReencode = true;
+            _packedGeometryGeneration++;
             return true;
         }
         catch
@@ -1259,7 +1353,6 @@ internal unsafe class WolfRendererMetal : IRenderer
         mesh.PackedShadowOpaqueIndexOffsetBytes = 0;
         mesh.PackedShadowAlphaTestIndexOffsetBytes = 0;
         mesh.PackedBaseVertex = 0;
-        _needsPackedGeometryReencode = true;
     }
 
     public IGfxBuffer GetPackedMeshVertexBuffer() => _packedVertexBuffer!;
@@ -1432,7 +1525,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         while (_drawableAcquireRunning)
         {
             // TODO: Verify correct display timing here, the millisecond timeout is sus
-            if (Screen.VSyncEnabled)
+            if (_vsyncRequested)
             {
                 ThreadingThread.Sleep(1);
                 continue;

@@ -76,8 +76,6 @@ public sealed class TemporalAntiAliasingPass
 			PreviousViewProjection = context.SceneData.PreviousViewProjection,
 			CurrentProjectionZBias = context.SceneData.UnjitteredProjection.M33,
 			CurrentProjectionZScale = context.SceneData.UnjitteredProjection.M43,
-			PreviousProjectionZBias = context.SceneData.PreviousProjection.M33,
-			PreviousProjectionZScale = context.SceneData.PreviousProjection.M43,
 			Settings = resources.Config.AntiAliasing.Taa,
 			HistoryValid = historyValid,
 			ResetHistory = resetHistory || inverseUnjitteredViewProjectionValid == false
@@ -128,8 +126,6 @@ public sealed class TemporalAntiAliasingPass
 		settingsWriter.SetFloat("alphaTestHistoryScale", Math.Clamp(settings.AlphaTestHistoryScale, 0.0f, 1.0f));
 		settingsWriter.SetFloat("currentProjectionZBias", config.CurrentProjectionZBias);
 		settingsWriter.SetFloat("currentProjectionZScale", config.CurrentProjectionZScale);
-		settingsWriter.SetFloat("previousProjectionZBias", config.PreviousProjectionZBias);
-		settingsWriter.SetFloat("previousProjectionZScale", config.PreviousProjectionZScale);
 		settingsWriter.SetMatrix4x4(
 			"inverseUnjitteredViewProjection",
 			config.InverseUnjitteredViewProjection);

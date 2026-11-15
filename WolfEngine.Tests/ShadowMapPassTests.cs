@@ -23,7 +23,7 @@ public sealed class ShadowMapPassTests
 	[Test]
 	public void PrepareFrame_ExplicitlyDisabledIgnoresDirectionalLight()
 	{
-		var pass = new ShadowMapPass(new ShaderCompiler());
+		var pass = DrawRecordFakes.CreateShadowMapPass();
 		pass.PrepareFrame(CreateSceneData(hasDirectionalLight: true), new ShadowMapConfig { Enabled = false });
 		Assert.That(pass.GetCurrentFrameData().Enabled, Is.False);
 	}
@@ -33,7 +33,7 @@ public sealed class ShadowMapPassTests
 	[TestCase(3)]
 	public void PrepareFrame_UsesConfiguredCascadeCount(int cascadeCount)
 	{
-		var pass = new ShadowMapPass(new ShaderCompiler());
+		var pass = DrawRecordFakes.CreateShadowMapPass();
 		var sceneData = CreateSceneData(hasDirectionalLight: true);
 		var config = new ShadowMapConfig { CascadeCount = cascadeCount };
 
@@ -53,7 +53,7 @@ public sealed class ShadowMapPassTests
 	[Test]
 	public void PrepareFrame_WithoutDirectionalLight_DisablesShadowRendering()
 	{
-		var pass = new ShadowMapPass(new ShaderCompiler());
+		var pass = DrawRecordFakes.CreateShadowMapPass();
 
 		pass.PrepareFrame(CreateSceneData(hasDirectionalLight: false), new ShadowMapConfig());
 

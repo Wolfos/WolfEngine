@@ -122,7 +122,6 @@ public sealed class VolumetricFogPass
 	public VolumetricFogPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
-		RenderFrameSharedResources sharedResources,
 		IGfxDevice device,
 		GpuDrawResources gpuDrawResources,
 		VolumetricFogStage stage)
@@ -145,7 +144,7 @@ public sealed class VolumetricFogPass
 			VolumetricFogStage.Temporal => resources.FogHistoryWrite,
 			_ => resources.FogIntegrated
 		});
-		var irradiance = context.GetTexture(sharedResources.SkyboxIrradiance);
+		var irradiance = context.GetTexture(resources.SkyboxIrradiance);
 		var frame = _frame;
 		return new VolumetricFogPassConfig
 		{

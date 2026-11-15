@@ -45,4 +45,6 @@ As part of this vision, WolfEngine is distributed as source code only. An engine
 - [Screen points and world rays](Manual/ScreenToRay.md)
 - [Animation graphs](Manual/Animation.md)
 - [Audio](Manual/Audio.md)
+- [Graphics settings: fullscreen, resolution and vsync](Manual/GraphicsSettings.md)
 - [Spawning prefabs at runtime](Manual/Prefabs.md)
+- [Visual effects](Manual/Vfx.md)

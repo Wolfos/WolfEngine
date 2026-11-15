@@ -6,7 +6,13 @@ public enum EditorFocusedWindow
 {
 	None,
 	Entities,
-	Assets
+	Assets,
+
+	/// <summary>
+	/// An editor with its own document, such as the clip editor, has keyboard focus. Never stored as
+	/// the sticky focused window; shortcut resolution passes it for the frames that editor is focused.
+	/// </summary>
+	Document
 }
 
 public interface IEditorInteractionState

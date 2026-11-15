@@ -5,7 +5,7 @@ namespace WolfEngine.AssetPipeline;
 public static class AnimationClipSerializer
 {
 	private static ReadOnlySpan<byte> Magic => "WEAN"u8;
-	public const int CurrentVersion = 1;
+	public const int CurrentVersion = 2;
 
 	public static void Write(string path, ImportedAnimationClipAssetFile clip)
 	{
@@ -37,6 +37,20 @@ public static class AnimationClipSerializer
 				WriteBinding(writer, propertyTracks[i].Binding);
 				WriteFloatCurve(writer, propertyTracks[i].Curve);
 			}
+
+			writer.Write(clip.Curves.Length);
+			foreach (var curve in clip.Curves)
+			{
+				writer.Write(curve.Name);
+				WriteFloatCurve(writer, curve.Compile());
+			}
+
+			writer.Write(clip.Markers.Length);
+			foreach (var marker in clip.Markers)
+			{
+				writer.Write(marker.Name);
+				writer.Write(marker.Time);
+			}
 		});
 	}
 
@@ -63,7 +77,7 @@ public static class AnimationClipSerializer
 		}
 
 		var version = reader.ReadInt32();
-		if (version != CurrentVersion)
+		if (version < 1 || version > CurrentVersion)
 		{
 			throw new InvalidOperationException(
 				$"Unsupported imported animation artifact version {version}. Expected {CurrentVersion}.");
@@ -98,6 +112,31 @@ public static class AnimationClipSerializer
 		}
 
 		clip.PropertyTracks = propertyTracks;
+		if (version >= 2)
+		{
+			clip.Curves = new AnimationCurve[reader.ReadInt32()];
+			for (var i = 0; i < clip.Curves.Length; i++)
+			{
+				var name = reader.ReadString();
+				var curve = ReadFloatCurve(reader);
+				clip.Curves[i] = new AnimationCurve
+				{
+					Name = name,
+					Interpolation = curve.Interpolation,
+					Times = curve.Times,
+					Values = curve.Values,
+					InTangents = curve.InTangents,
+					OutTangents = curve.OutTangents
+				};
+			}
+
+			clip.Markers = new AnimationMarker[reader.ReadInt32()];
+			for (var i = 0; i < clip.Markers.Length; i++)
+			{
+				clip.Markers[i] = new AnimationMarker { Name = reader.ReadString(), Time = reader.ReadSingle() };
+			}
+		}
+
 		return clip;
 	}
 

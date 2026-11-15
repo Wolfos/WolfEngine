@@ -20,6 +20,12 @@ public interface IEditorAssetHandler
 	string GetSubtitle(AssetDatabaseEntry asset);
 	IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems();
 	void DrawEditor(AssetDatabaseEntry asset);
+
+	/// <summary>Opens the asset in its dedicated editor, as a double-click in Assets does. Returns false when the type has none.</summary>
+	bool TryOpen(AssetDatabaseEntry asset)
+	{
+		return false;
+	}
 }
 
 public interface IEditorAssetHandlerRegistry
@@ -109,6 +115,36 @@ public sealed class ColorLookupTableEditorAssetHandler : IEditorAssetHandler
 		}
 
 		ImGui.TextDisabled("Assign it in a Render Config under Color Grading > Lookup Table.");
+	}
+}
+
+public sealed class ComputeShaderEditorAssetHandler : IEditorAssetHandler
+{
+	public AssetType AssetType => AssetType.ComputeShader;
+	public string DisplayName => "Compute Shader";
+	public string ThumbnailLabel => "CS";
+
+	public string GetSubtitle(AssetDatabaseEntry asset)
+	{
+		return asset.TryGetSummary<ComputeShaderAssetSummary>(out var summary) == false
+			? "Compute Shader"
+			: $"Compute Shader | {summary.EntryPoints.Length} kernel{(summary.EntryPoints.Length == 1 ? "" : "s")}";
+	}
+
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
+
+	public void DrawEditor(AssetDatabaseEntry asset)
+	{
+		ImGui.TextUnformatted(GetSubtitle(asset));
+		if (asset.TryGetSummary<ComputeShaderAssetSummary>(out var summary))
+		{
+			foreach (var entryPoint in summary.EntryPoints)
+			{
+				ImGui.BulletText(entryPoint);
+			}
+		}
+
+		ImGui.TextDisabled("Run it from a render feature's compute pass.");
 	}
 }
 

@@ -65,7 +65,7 @@ public readonly struct DdgiPassConfig
 	public required int ProbeUpdateFrames { get; init; }
 	public required int ProbeUpdateFrameIndex { get; init; }
 	public required int ActiveProbeCount { get; init; }
-	public required uint ActiveDrawCommandUpperBound { get; init; }
+	public required uint ActiveInstanceUpperBound { get; init; }
 	public required float MaxRayDistance { get; init; }
 	public required float NormalBias { get; init; }
 	public required float ViewBias { get; init; }

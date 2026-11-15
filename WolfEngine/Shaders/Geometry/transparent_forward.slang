@@ -5,13 +5,15 @@ import "../Common/common_lighting.slang";
 import "../Common/normal_decode.slang";
 import "../Common/volumetric_fog.slang";
 
-#define WOLF_MAX_INSTANCE_COUNT 65535
-#define WOLF_MAX_MATERIAL_COUNT 65535
+#define WOLF_MAX_INSTANCE_COUNT 1048576
+#define WOLF_MAX_MATERIAL_COUNT 1048576
 
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
+// Instance ids of each batch's visible members, from the batch's draw args start onwards.
+StructuredBuffer<uint> g_VisibleInstances : register(t9);
 StructuredBuffer<PointLightData> g_PointLights : register(t14);
 StructuredBuffer<ClusterHeader> g_ClusterHeaders : register(t15);
 StructuredBuffer<uint> g_ClusterLightIndices : register(t16);
@@ -55,7 +57,9 @@ cbuffer CameraParams : register(b2)
     row_major float4x4 viewMatrix;
     float nearPlane;
     float farPlane;
-    float2 _cameraPadding;
+    // LOD bias for material textures; see SceneDrawData.MaterialMipBias.
+    float materialMipBias;
+    float _cameraPadding;
 };
 
 cbuffer LightingParams : register(b3)
@@ -71,6 +75,7 @@ cbuffer LightingParams : register(b3)
     float4 shadowSplitsBlend;
     float4 shadowTexelSizeBiasStrength;
     float4 shadowDepthBiases;
+    float4 shadowNormalOffsets;
     float shadowMaxDistance;
     float _lightingPadding1;
     float _lightingPadding2;
@@ -101,7 +106,15 @@ VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
     GpuDrawArgs drawArgs = g_DrawArgsTable[drawIndex];
-    if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
+    // A record executed without compaction draws its batch's full capacity; instances past the visible count
+    // are discarded here.
+    uint instanceId = 0;
+    if (input.instanceId < drawArgs.instanceCount)
+    {
+        instanceId = g_VisibleInstances[drawArgs.startInstance + input.instanceId];
+    }
+
+    if (instanceId == 0 || instanceId >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);
         output.worldPos = 0.0f.xxx;
@@ -113,7 +126,6 @@ VSOutput vertexShader(VSInput input)
         return output;
     }
 
-    uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
 
     float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
@@ -176,12 +188,12 @@ TransparentOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFa
     Texture2D<float4> emissiveTex = GetTexture(materialData.emissiveHandle);
 
     float2 materialUv = input.uv * materialData.uvOffsetScale.zw + materialData.uvOffsetScale.xy;
-    float4 albedoSample = albedoTex.Sample(sampler, materialUv);
-    float4 ormSample = ormTex.Sample(sampler, materialUv);
+    float4 albedoSample = albedoTex.SampleBias(sampler, materialUv, materialMipBias);
+    float4 ormSample = ormTex.SampleBias(sampler, materialUv, materialMipBias);
     float3 tangentNormal = ApplyNormalMapScale(
-        DecodeNormalMapSample(normalTex.Sample(sampler, materialUv)),
+        DecodeNormalMapSample(normalTex.SampleBias(sampler, materialUv, materialMipBias)),
         materialData.metallicRoughness.w);
-    float4 emissiveSample = emissiveTex.Sample(sampler, materialUv);
+    float4 emissiveSample = emissiveTex.SampleBias(sampler, materialUv, materialMipBias);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
 
     float3 N = normal;
@@ -217,6 +229,7 @@ TransparentOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFa
         shadowLightIndex,
         shadowTexelSizeBiasStrength.xy,
         shadowDepthBiases.xyz,
+        shadowNormalOffsets.xyz,
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
         shadowMaxDistance);

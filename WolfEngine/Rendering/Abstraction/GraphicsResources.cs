@@ -101,6 +101,12 @@ public interface IGfxIndirectCommandBuffer : IGfxResource
 
 	/// <summary>Byte offset of the draw index count within a record, used to skip records that draw nothing.</summary>
 	uint RecordIndexCountOffsetInBytes => 0;
+
+	/// <summary>
+	/// Byte offset of the instance count within a record, which compaction overwrites with the number of
+	/// instances culling left visible.
+	/// </summary>
+	uint RecordInstanceCountOffsetInBytes => 0;
 }
 
 /// <summary>
@@ -119,6 +125,12 @@ public interface IGfxDescriptorTable
 	DescriptorHandle AllocateSampler(in SamplerDescriptor sampler);
 	BindlessFallbackHandles GetOrCreateFallbackHandles();
 	void Free(DescriptorHandle handle);
+
+	/// <summary>
+	/// Increases each time the table replaces a GPU buffer that draw records may have captured, such as a
+	/// grown argument buffer. Freeing or allocating descriptors does not change it.
+	/// </summary>
+	ulong Generation { get; }
 }
 
 /// <summary>

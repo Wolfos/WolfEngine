@@ -52,7 +52,7 @@ public sealed class HostMetalSurface : IMetalSurface
 		}
 	}
 
-	IntPtr IMetalSurface.Initialize(Int2 initialSize, bool exactDrawableSize)
+	IntPtr IMetalSurface.Initialize(Int2 initialSize, bool exactDrawableSize, string title)
 	{
 		return _layerHandle;
 	}
@@ -71,6 +71,25 @@ public sealed class HostMetalSurface : IMetalSurface
 		lock (_sync)
 		{
 			size = _windowSize;
+			return _hasSize;
+		}
+	}
+
+	/// <summary>The host owns the view, and the view fills the screen.</summary>
+	bool IMetalSurface.CanConfigureWindow => false;
+
+	WindowMode IMetalSurface.WindowMode => WindowMode.Fullscreen;
+
+	void IMetalSurface.ApplyWindowConfiguration(WindowConfiguration configuration)
+	{
+	}
+
+	/// <summary>The view covers the screen, so its drawable is the native resolution.</summary>
+	bool IMetalSurface.TryGetNativeResolution(out Int2 resolution)
+	{
+		lock (_sync)
+		{
+			resolution = _drawableSize;
 			return _hasSize;
 		}
 	}

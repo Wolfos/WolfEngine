@@ -1,4 +1,6 @@
 using NSubstitute;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
@@ -10,8 +12,282 @@ using WolfEngine.Utility;
 namespace WolfEngine.Editor.Tests;
 
 [TestFixture]
+[NonParallelizable]
 public sealed class EditorCommandServiceTests
 {
+	private string? _previousPreferencesPath;
+	private string _preferencesDirectory = null!;
+	private string _preferencesPath = null!;
+
+	[SetUp]
+	public void SetUpPreferences()
+	{
+		_previousPreferencesPath = Environment.GetEnvironmentVariable("WOLF_EDITOR_PREFERENCES_PATH");
+		_preferencesDirectory = Path.Combine(Path.GetTempPath(), "WolfEngine.SceneHistory.Tests", Guid.NewGuid().ToString("N"));
+		_preferencesPath = Path.Combine(_preferencesDirectory, "EditorPreferences.json");
+		Environment.SetEnvironmentVariable("WOLF_EDITOR_PREFERENCES_PATH", _preferencesPath);
+		_ = new EditorPreferences();
+	}
+
+	[TearDown]
+	public void TearDownPreferences()
+	{
+		Environment.SetEnvironmentVariable("WOLF_EDITOR_PREFERENCES_PATH", _previousPreferencesPath);
+		if (Directory.Exists(_preferencesDirectory))
+		{
+			Directory.Delete(_preferencesDirectory, true);
+		}
+	}
+
+	[Test]
+	public void LoadScene_PersistsIdentityAndRestoresThroughSceneReplacement()
+	{
+		var fixture = CreateCommandFixture();
+		var sceneId = Guid.NewGuid();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		fixture.ProjectService.TryGetAsset(sceneId, out Arg.Any<AssetDatabaseEntry>()).Returns(call =>
+		{
+			call[1] = new AssetDatabaseEntry { Id = sceneId, Type = AssetType.Scene, Name = "Renamed Scene" };
+
+			return true;
+		});
+		fixture.Service.RequestLoadScene(sceneId);
+
+		// Rehydrate the saved preferences to simulate a fresh editor session.
+		_ = JsonSerializer.Deserialize<EditorPreferences>(File.ReadAllText(_preferencesPath));
+		fixture.SceneWorkspace.ClearReceivedCalls();
+
+		Assert.That(fixture.Service.RestoreLastScene(), Is.True);
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+		fixture.SceneWorkspace.Received(1).ReplaceCurrentScene(Arg.Any<EditorScene>());
+	}
+
+	[Test]
+	public void RestoreLastScene_DoesNotUseAnotherProjectsScene()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		fixture.Service.RequestLoadScene(Guid.NewGuid());
+		fixture.ProjectService.ProjectRootPath.Returns("/other-project");
+		fixture.SceneWorkspace.ClearReceivedCalls();
+
+		Assert.That(fixture.Service.RestoreLastScene(), Is.False);
+		fixture.SceneWorkspace.DidNotReceive().LoadSceneAsset(Arg.Any<Guid>());
+	}
+
+	[TestCase(false, AssetType.Scene)]
+	[TestCase(true, AssetType.Material)]
+	public void RestoreLastScene_SkipsMissingOrNonSceneAssets(bool found, AssetType type)
+	{
+		var fixture = CreateCommandFixture();
+		var sceneId = Guid.NewGuid();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		EditorPreferences.SetLastDocumentAssetId("/project", EditorDocumentKind.Scene, sceneId);
+		fixture.ProjectService.TryGetAsset(sceneId, out Arg.Any<AssetDatabaseEntry>()).Returns(call =>
+		{
+			call[1] = new AssetDatabaseEntry { Id = sceneId, Type = type };
+
+			return found;
+		});
+
+		Assert.That(fixture.Service.RestoreLastScene(), Is.False);
+		fixture.SceneWorkspace.DidNotReceive().LoadSceneAsset(Arg.Any<Guid>());
+	}
+
+	[Test]
+	public void NewScene_ClearsOnlyTheCurrentProjectsRememberedScene()
+	{
+		var fixture = CreateCommandFixture();
+		var otherSceneId = Guid.NewGuid();
+		EditorPreferences.SetLastDocumentAssetId("/other-project", EditorDocumentKind.Scene, otherSceneId);
+		fixture.Service.RequestLoadScene(Guid.NewGuid());
+
+		fixture.Service.RequestNewScene();
+
+		_ = JsonSerializer.Deserialize<EditorPreferences>(File.ReadAllText(_preferencesPath));
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/project", EditorDocumentKind.Scene), Is.Null);
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/other-project", EditorDocumentKind.Scene), Is.EqualTo(otherSceneId));
+	}
+
+	[Test]
+	public void FailedSceneLoad_KeepsPreviousRememberedScene()
+	{
+		var fixture = CreateCommandFixture();
+		var previousSceneId = Guid.NewGuid();
+		EditorPreferences.SetLastDocumentAssetId("/project", EditorDocumentKind.Scene, previousSceneId);
+		fixture.SceneWorkspace.When(workspace => workspace.LoadSceneAsset(Arg.Any<Guid>()))
+			.Do(_ => throw new InvalidOperationException("Invalid scene"));
+
+		fixture.Service.RequestLoadScene(Guid.NewGuid());
+
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/project", EditorDocumentKind.Scene), Is.EqualTo(previousSceneId));
+		fixture.SceneWorkspace.DidNotReceive().ReplaceCurrentScene(Arg.Any<EditorScene>());
+	}
+
+	[Test]
+	public void SaveNewScene_RemembersItsAssignedAssetId()
+	{
+		var fixture = CreateCommandFixture();
+		var sceneId = Guid.NewGuid();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		fixture.SceneWorkspace.When(workspace => workspace.SaveCurrentScene()).Do(_ =>
+		{
+			fixture.SceneWorkspace.CurrentScene.AssetId = sceneId;
+		});
+
+		Assert.That(fixture.Service.SaveScene(), Is.True);
+
+		_ = JsonSerializer.Deserialize<EditorPreferences>(File.ReadAllText(_preferencesPath));
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/project", EditorDocumentKind.Scene), Is.EqualTo(sceneId));
+	}
+
+	[Test]
+	public void ReopenableDocument_PersistsItsOpenAssetPerKind()
+	{
+		var fixture = CreateCommandFixture();
+		var graphId = Guid.NewGuid();
+		var clipId = Guid.NewGuid();
+		var graph = CreateReopenableDocument(EditorDocumentKind.AnimationGraph);
+		var clip = CreateReopenableDocument(EditorDocumentKind.AnimationClip);
+		_ = CreateServiceWithDocuments(fixture, new EditorWorkspaceService((EditorWorkspacePreferences?)null), graph, clip);
+
+		graph.OpenAssetChanged += Raise.Event<Action<Guid>>(graphId);
+		clip.OpenAssetChanged += Raise.Event<Action<Guid>>(clipId);
+		clip.OpenAssetChanged += Raise.Event<Action<Guid>>(Guid.Empty);
+
+		var options = new JsonSerializerOptions
+		{
+			Converters = { new JsonStringEnumConverter() }
+		};
+		_ = JsonSerializer.Deserialize<EditorPreferences>(File.ReadAllText(_preferencesPath), options);
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/project", EditorDocumentKind.AnimationGraph), Is.EqualTo(graphId));
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/project", EditorDocumentKind.AnimationClip), Is.Null);
+	}
+
+	[Test]
+	public void RestoreLastDocuments_ReopensEachDocumentByAssetId()
+	{
+		var fixture = CreateCommandFixture();
+		var graphId = Guid.NewGuid();
+		var clipId = Guid.NewGuid();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		EditorPreferences.SetLastDocumentAssetId("/project", EditorDocumentKind.AnimationGraph, graphId);
+		EditorPreferences.SetLastDocumentAssetId("/project", EditorDocumentKind.AnimationClip, clipId);
+		var movedGraph = new AssetDatabaseEntry
+		{
+			Id = graphId,
+			Name = "Renamed",
+			RelativeSourcePath = "Moved/Renamed.animgraph.json"
+		};
+		fixture.ProjectService.TryGetAsset(graphId, out Arg.Any<AssetDatabaseEntry>()).Returns(call =>
+		{
+			call[1] = movedGraph;
+
+			return true;
+		});
+		var graph = CreateReopenableDocument(EditorDocumentKind.AnimationGraph);
+		var clip = CreateReopenableDocument(EditorDocumentKind.AnimationClip);
+		var service = CreateServiceWithDocuments(fixture, new EditorWorkspaceService((EditorWorkspacePreferences?)null), graph, clip);
+
+		service.RestoreLastDocuments();
+
+		graph.Received(1).Reopen(movedGraph);
+		clip.DidNotReceive().Reopen(Arg.Any<AssetDatabaseEntry>());
+	}
+
+	[Test]
+	public void MigrateLastSceneAssetIds_MovesScenesIntoDocumentIds()
+	{
+		var sceneId = Guid.NewGuid();
+		var projectKey = Path.TrimEndingDirectorySeparator(Path.GetFullPath("/project"));
+		var preferences = new EditorPreferences
+		{
+			LastSceneAssetIds = new Dictionary<string, Guid> { [projectKey] = sceneId }
+		};
+
+		EditorPreferences.MigrateLastSceneAssetIds(preferences);
+
+		Assert.That(preferences.LastSceneAssetIds, Is.Null);
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/project", EditorDocumentKind.Scene), Is.EqualTo(sceneId));
+	}
+
+	private static IEditorReopenableDocument CreateReopenableDocument(EditorDocumentKind kind)
+	{
+		var document = Substitute.For<IEditorReopenableDocument>();
+		document.Kind.Returns(kind);
+		document.Reopen(Arg.Any<AssetDatabaseEntry>()).Returns(true);
+
+		return document;
+	}
+
+	[Test]
+	public void ActiveDocument_FollowsTheActiveWorkspacesOwnedDocument()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		var graph = Substitute.For<IEditorDocument>();
+		graph.Kind.Returns(EditorDocumentKind.AnimationGraph);
+		graph.CanSave.Returns(true);
+		graph.CanUndo.Returns(true);
+		graph.Save().Returns(true);
+		graph.Undo().Returns(true);
+		var workspaces = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
+		var service = CreateServiceWithDocuments(fixture, workspaces, graph);
+
+		Assert.That(service.ActiveDocument, Is.SameAs(service.SceneDocument));
+
+		workspaces.Activate(EditorWorkspaceService.AnimationWorkspaceId);
+
+		Assert.That(service.ActiveDocument, Is.SameAs(graph));
+		Assert.That(service.SaveActiveDocument(), Is.True);
+		Assert.That(service.UndoActiveDocument(), Is.True);
+		graph.Received(1).Save();
+		graph.Received(1).Undo();
+		fixture.SceneWorkspace.DidNotReceive().SaveCurrentScene();
+		fixture.UndoRedoService.DidNotReceive().Undo();
+	}
+
+	[Test]
+	public void ActiveDocument_IsNullWhenTheWorkspaceOwnsNoDocumentOrItsKindIsMissing()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		var workspaces = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
+		var service = CreateServiceWithDocuments(fixture, workspaces);
+
+		workspaces.TryConfigure(EditorWorkspaceService.SceneWorkspaceId, "Scene", EditorDocumentKind.None, out _);
+
+		Assert.That(service.ActiveDocument, Is.Null);
+		Assert.That(service.SaveActiveDocument(), Is.False);
+
+		workspaces.Activate(EditorWorkspaceService.AnimateWorkspaceId);
+
+		Assert.That(service.ActiveDocument, Is.Null);
+		fixture.SceneWorkspace.DidNotReceive().SaveCurrentScene();
+	}
+
+	private static EditorCommandService CreateServiceWithDocuments(
+		CommandFixture fixture,
+		IEditorWorkspaceService workspaces,
+		params IEditorDocument[] documents)
+	{
+		return new EditorCommandService(
+			fixture.SceneWorkspace,
+			fixture.ProjectService,
+			fixture.AssetRefreshService,
+			fixture.PlaySession,
+			fixture.InteractionState,
+			fixture.NotificationService,
+			fixture.UndoRedoService,
+			Substitute.For<IShaderProvider>(),
+			Substitute.For<IRenderer>(),
+			fixture.OperationService,
+			fixture.FileDialogService,
+			new InputSystem(),
+			documents: documents,
+			workspaces: workspaces);
+	}
+
 	[Test]
 	public void EntitySelection_PreservesInsertionOrderAndAddsVisibleRange()
 	{
@@ -51,6 +327,25 @@ public sealed class EditorCommandServiceTests
 	}
 
 	[Test]
+	public void RestoredEntitySelection_DoesNotAskForTheComponentsWindow()
+	{
+		var runtimeScene = new EditorScene();
+		var kept = runtimeScene.World.CreateEntity("Kept");
+		var other = runtimeScene.World.CreateEntity("Other");
+		var keptId = Guid.NewGuid();
+		runtimeScene.EntityIds[kept] = keptId;
+		runtimeScene.EntityIds[other] = Guid.NewGuid();
+
+		// Entering Play restores the authoring selection onto the runtime copy; with a focus request
+		// pending, the editor would open Components in whichever workspace is active.
+		EditorGui.RestoreEntitySelection(runtimeScene, [keptId]);
+
+		Assert.That(EditorGui.SelectedEntities, Is.EqualTo(new[] { kept }));
+		Assert.That(EditorGui.ConsumeComponentsWindowFocusRequest(), Is.False);
+		EditorGui.ClearEntitySelection();
+	}
+
+	[Test]
 	public void EntitySelection_AggregatesComponentTypesAcrossSelectedEntitiesInSelectionOrder()
 	{
 		var world = new World(WorldTag.Authoring);
@@ -73,6 +368,21 @@ public sealed class EditorCommandServiceTests
 	}
 
 	[Test]
+	public void ShortcutResolver_MapsPlainTabToPreviousWorkspace()
+	{
+		var tab = new EditorShortcutSnapshot(false, false, false, false, false, false, false, false, false, false, false, false, TabPressed: true);
+		var ctrlTab = tab with { PrimaryModifierDown = true };
+		var shiftTab = tab with { ShiftDown = true };
+		var typingTab = tab with { IsTextInputActive = true };
+
+		Assert.That(EditorShortcutCommandResolver.Resolve(tab, EditorFocusedWindow.None), Is.EqualTo(EditorShortcutCommand.SwitchToPreviousWorkspace));
+		Assert.That(EditorShortcutCommandResolver.Resolve(tab, EditorFocusedWindow.Document), Is.EqualTo(EditorShortcutCommand.SwitchToPreviousWorkspace));
+		Assert.That(EditorShortcutCommandResolver.Resolve(ctrlTab, EditorFocusedWindow.None), Is.EqualTo(EditorShortcutCommand.None));
+		Assert.That(EditorShortcutCommandResolver.Resolve(shiftTab, EditorFocusedWindow.None), Is.EqualTo(EditorShortcutCommand.None));
+		Assert.That(EditorShortcutCommandResolver.Resolve(typingTab, EditorFocusedWindow.None), Is.EqualTo(EditorShortcutCommand.None));
+	}
+
+	[Test]
 	public void ShortcutResolver_MapsSceneCommandsAndFocusedDelete()
 	{
 		Assert.That(
@@ -85,7 +395,7 @@ public sealed class EditorCommandServiceTests
 			EditorShortcutCommandResolver.Resolve(
 				new EditorShortcutSnapshot(true, false, false, false, false, true, false, false, false, false, false, false),
 				EditorFocusedWindow.None),
-			Is.EqualTo(EditorShortcutCommand.SaveScene));
+			Is.EqualTo(EditorShortcutCommand.Save));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
@@ -165,6 +475,40 @@ public sealed class EditorCommandServiceTests
 	}
 
 	[Test]
+	public void RequestOpenProject_WithDirtyScene_QueuesConfirmationBeforeOpeningProject()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.InteractionState.MarkSceneDirty();
+
+		var completedImmediately = fixture.Service.RequestOpenProject("/other");
+
+		Assert.That(completedImmediately, Is.False);
+		Assert.That(fixture.Service.PendingSceneReplacementType, Is.EqualTo(PendingSceneReplacementKind.OpenProject));
+		fixture.ProjectService.DidNotReceive().OpenProject(Arg.Any<string>(), out Arg.Any<string>());
+		fixture.SceneWorkspace.DidNotReceive().ResetToNewScene();
+	}
+
+	[Test]
+	public void RequestOpenProject_ClosesSceneBeforeOpeningProject()
+	{
+		var fixture = CreateCommandFixture();
+		var oldSceneId = Guid.NewGuid();
+		EditorPreferences.SetLastDocumentAssetId("/project", EditorDocumentKind.Scene, oldSceneId);
+		fixture.ProjectService.OpenProject("/other", out Arg.Any<string>()).Returns(true);
+
+		var completedImmediately = fixture.Service.RequestOpenProject("/other");
+
+		Assert.That(completedImmediately, Is.True);
+		Received.InOrder(() =>
+		{
+			fixture.SceneWorkspace.ResetToNewScene();
+			fixture.ProjectService.OpenProject("/other", out Arg.Any<string>());
+		});
+		Assert.That(fixture.InteractionState.IsSceneDirty, Is.False);
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/project", EditorDocumentKind.Scene), Is.EqualTo(oldSceneId));
+	}
+
+	[Test]
 	public void ResolvePendingSceneReplacement_SaveThenNewScene_SavesAndClearsDirtyState()
 	{
 		var fixture = CreateCommandFixture();
@@ -202,6 +546,8 @@ public sealed class EditorCommandServiceTests
 	public void ResolvePendingSceneReplacement_Cancel_KeepsCurrentScene()
 	{
 		var fixture = CreateCommandFixture();
+		var sceneId = Guid.NewGuid();
+		EditorPreferences.SetLastDocumentAssetId("/project", EditorDocumentKind.Scene, sceneId);
 		fixture.InteractionState.MarkSceneDirty();
 		fixture.Service.RequestNewScene();
 
@@ -212,6 +558,7 @@ public sealed class EditorCommandServiceTests
 		fixture.SceneWorkspace.DidNotReceive().ResetToNewScene();
 		Assert.That(fixture.Service.HasPendingSceneReplacement, Is.False);
 		Assert.That(fixture.InteractionState.IsSceneDirty, Is.True);
+		Assert.That(EditorPreferences.GetLastDocumentAssetId("/project", EditorDocumentKind.Scene), Is.EqualTo(sceneId));
 	}
 
 	[Test]
@@ -531,7 +878,82 @@ public sealed class EditorCommandServiceTests
 		Assert.That(window.PendingRenameRelativePathForTesting, Is.EqualTo("Assets/Data"));
 	}
 
-	private static CommandFixture CreateCommandFixture()
+	[Test]
+	public void RequestLoadScene_WithStaleGameplay_BuildsAndAppliesItBeforeReadingTheScene()
+	{
+		var gameplayAssemblyHost = Substitute.For<IGameplayAssemblyHost>();
+		gameplayAssemblyHost.CheckSourceStale().Returns(true);
+		gameplayAssemblyHost.BuildAndQueueReload().Returns(true);
+		gameplayAssemblyHost.HasPendingBuildResult.Returns(true);
+		var fixture = CreateCommandFixture(gameplayAssemblyHost);
+		var sceneId = Guid.NewGuid();
+
+		fixture.Service.RequestLoadScene(sceneId);
+		fixture.Service.ProcessDeferredSceneLoad();
+
+		gameplayAssemblyHost.Received(1).BuildAndQueueReload();
+		fixture.SceneWorkspace.DidNotReceive().LoadSceneAsset(Arg.Any<Guid>());
+		Assert.That(fixture.Service.LoadingSceneAssetId, Is.EqualTo(sceneId));
+
+		// The editor applied the rebuilt assembly.
+		gameplayAssemblyHost.HasPendingBuildResult.Returns(false);
+		fixture.Service.ProcessDeferredSceneLoad();
+
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+		fixture.SceneWorkspace.Received(1).ReplaceCurrentScene(Arg.Any<EditorScene>());
+		Assert.That(fixture.Service.LoadingSceneAssetId, Is.Null);
+	}
+
+	[Test]
+	public void RequestLoadScene_WithFreshGameplay_LoadsWithoutBuilding()
+	{
+		var gameplayAssemblyHost = Substitute.For<IGameplayAssemblyHost>();
+		gameplayAssemblyHost.CheckSourceStale().Returns(false);
+		var fixture = CreateCommandFixture(gameplayAssemblyHost);
+		var sceneId = Guid.NewGuid();
+
+		fixture.Service.RequestLoadScene(sceneId);
+
+		gameplayAssemblyHost.DidNotReceive().BuildAndQueueReload();
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+	}
+
+	[Test]
+	public void RequestLoadScene_AfterAFailedBuildOfTheSameSource_LoadsAndWarnsWithoutRebuilding()
+	{
+		var gameplayAssemblyHost = Substitute.For<IGameplayAssemblyHost>();
+		gameplayAssemblyHost.CheckSourceStale().Returns(true);
+		gameplayAssemblyHost.LastBuildFailedForCurrentSource.Returns(true);
+		var fixture = CreateCommandFixture(gameplayAssemblyHost);
+		var sceneId = Guid.NewGuid();
+
+		fixture.Service.RequestLoadScene(sceneId);
+
+		gameplayAssemblyHost.DidNotReceive().BuildAndQueueReload();
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+		fixture.NotificationService.Received(1).ReportError(Arg.Is<string>(message => message.Contains("older than the source")));
+	}
+
+	[Test]
+	public void LoadSceneForAutomation_WithStaleGameplay_CompletesOnlyOnceTheSceneIsLoaded()
+	{
+		var gameplayAssemblyHost = Substitute.For<IGameplayAssemblyHost>();
+		gameplayAssemblyHost.CheckSourceStale().Returns(true);
+		gameplayAssemblyHost.BuildAndQueueReload().Returns(true);
+		var fixture = CreateCommandFixture(gameplayAssemblyHost);
+		var sceneId = Guid.NewGuid();
+
+		var load = fixture.Service.LoadSceneForAutomationAsync(sceneId);
+
+		Assert.That(load.IsCompleted, Is.False);
+
+		fixture.Service.ProcessDeferredSceneLoad();
+
+		Assert.That(load.IsCompletedSuccessfully, Is.True);
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+	}
+
+	private static CommandFixture CreateCommandFixture(IGameplayAssemblyHost? gameplayAssemblyHost = null)
 	{
 		var sceneWorkspace = Substitute.For<IEditorSceneWorkspace>();
 		var authoringScene = new EditorScene();
@@ -569,7 +991,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IEditorNotificationService>(),
 			Substitute.For<IEditorUndoRedoService>(),
 			operationService,
-			fileDialogService);
+			fileDialogService,
+			gameplayAssemblyHost);
 	}
 
 	private sealed record CommandFixture(
@@ -581,7 +1004,8 @@ public sealed class EditorCommandServiceTests
 		IEditorNotificationService NotificationService,
 		IEditorUndoRedoService UndoRedoService,
 		IEditorOperationService OperationService,
-		IFileDialogService FileDialogService)
+		IFileDialogService FileDialogService,
+		IGameplayAssemblyHost? GameplayAssemblyHost)
 	{
 		public EditorCommandService Service { get; } = new(
 			SceneWorkspace,
@@ -595,7 +1019,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IRenderer>(),
 			OperationService,
 			FileDialogService,
-			new InputSystem());
+			new InputSystem(),
+			gameplayAssemblyHost: GameplayAssemblyHost);
 	}
 
 	private struct SelectionTestLight : IEntityComponent;

@@ -109,7 +109,6 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
 	}
 
 	internal static object? Resolve(Guid id, Type type) =>
-		type == typeof(AnimationSequence) ? AssetDatabase.GetInstance<AnimationSequence>(id) :
 		type == typeof(AnimationClip) ? AssetDatabase.GetInstance<AnimationClip>(id) :
 		type == typeof(Skeleton) ? AssetDatabase.GetInstance<Skeleton>(id) :
 		type == typeof(BoneMask) ? AssetDatabase.GetInstance<BoneMask>(id) : null;

@@ -288,9 +288,9 @@ public sealed class VolumetricFogTests
 			Assert.That(resources.FogHistoryValid, Is.False);
 		});
 
-		var firstReadIndex = ViewState(builder).FogHistoryReadIndex;
+		var firstReadIndex = ViewState(builder).FogHistory.ReadIndex;
 		builder.CompleteFrame();
-		Assert.That(ViewState(builder).FogHistoryReadIndex, Is.EqualTo(1 - firstReadIndex));
+		Assert.That(ViewState(builder).FogHistory.ReadIndex, Is.EqualTo(1 - firstReadIndex));
 		BeginFrame(builder, new VolumetricFogConfig { Enabled = true });
 		Assert.That(Resources(builder).FogHistoryValid, Is.True);
 		builder.CompleteFrame();
@@ -310,7 +310,7 @@ public sealed class VolumetricFogTests
 		builder.CompleteFrame();
 
 		BeginFrame(builder, new VolumetricFogConfig { Enabled = false });
-		Assert.That(ViewState(builder).FogHistoryTextures[0], Is.Null);
+		Assert.That(ViewState(builder).FogHistory.IsAllocated, Is.False);
 		builder.CompleteFrame();
 		BeginFrame(builder, new VolumetricFogConfig { Enabled = true, SliceCount = 32, MaxDistance = 100.0f });
 		Assert.That(Resources(builder).FogHistoryValid, Is.False);
@@ -351,7 +351,7 @@ public sealed class VolumetricFogTests
 
 	private static ShadowFrameData Shadow(int shadowedIndex) => new(
 		shadowedIndex >= 0, 3, Matrix4x4.Identity, Matrix4x4.Identity, Matrix4x4.Identity,
-		10.0f, 30.0f, 100.0f, 2.0f, 100.0f, shadowedIndex, Vector3.Zero, 1.0f, 2048);
+		10.0f, 30.0f, 100.0f, 2.0f, 100.0f, shadowedIndex, Vector3.Zero, Vector3.Zero, 1.0f, 2048);
 
 	private static SceneDrawData Scene(params FogVolumePacket[] volumes) => Scene(volumes, []);
 

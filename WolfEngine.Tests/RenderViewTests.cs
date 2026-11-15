@@ -1,6 +1,7 @@
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Tests;
@@ -230,7 +231,9 @@ public sealed class RenderViewTests
 
 		// Give the released view some state, so a reused slot inheriting it would be visible.
 		registry.TryGet(a, out var releasedState);
-		releasedState.HistoryValid = true;
+		ViewHistoryTests.AccumulateOneFrame(
+			releasedState.TemporalHistory,
+			new TemporalHistoryShape(new Int2(8, 8), AntiAliasingMode.Taa));
 		Assert.That(registry.Release(a, null), Is.True);
 
 		var worldC = new World(WorldTag.All);
@@ -239,7 +242,7 @@ public sealed class RenderViewTests
 		Assert.Multiple(() =>
 		{
 			Assert.That(c.View, Is.EqualTo(a), "the freed slot should be reused");
-			Assert.That(c.HistoryValid, Is.False, "a reused slot must not inherit the released view's history");
+			Assert.That(c.TemporalHistory.IsValid, Is.False, "a reused slot must not inherit the released view's history");
 			Assert.That(c.World, Is.SameAs(worldC));
 			Assert.That(registry.TryGetViewForWorld(worldA, out _), Is.False);
 		});
@@ -325,15 +328,18 @@ public sealed class RenderViewTests
 		var state = new RenderViewState(RenderViewId.Primary)
 		{
 			BindingGeneration = 4,
-			HistoryValid = true,
 			HasPreviousResolvedProjection = true
 		};
+		ViewHistoryTests.AccumulateOneFrame(state.TemporalHistory, new TemporalHistoryShape(new Int2(8, 8), AntiAliasingMode.Taa));
+		ViewHistoryTests.AccumulateOneFrame(state.FogHistory, new FogHistoryShape(new Int3(4, 4, 4), 64.0f));
 
 		state.ResetHistoryForNewBinding();
 
 		Assert.Multiple(() =>
 		{
-			Assert.That(state.HistoryValid, Is.False);
+			Assert.That(state.TemporalHistory.IsValid, Is.False);
+			Assert.That(state.TemporalHistory.IsAllocated, Is.False);
+			Assert.That(state.FogHistory.IsAllocated, Is.False);
 			Assert.That(state.HasPreviousResolvedProjection, Is.False);
 			Assert.That(state.HistoryBindingGeneration, Is.EqualTo(4));
 		});

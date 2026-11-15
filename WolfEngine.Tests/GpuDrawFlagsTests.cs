@@ -6,11 +6,11 @@ namespace WolfEngine.Tests;
 public sealed class GpuDrawFlagsTests
 {
 	[TestCase("gpu_draw_cull.compute.slang")]
-	[TestCase("gpu_draw_compact.compute.slang")]
 	public void SlangDecoders_MatchTheFlagsTheEngineEncodes(string shader)
 	{
-		// The cull and compaction shaders decode GpuDrawCommand.flags themselves. A layout change that misses one
-		// of them misreads every draw's bucket or owner, and the symptom is draws vanishing from a view.
+		// The cull shader decodes GpuDrawCommand.flags itself. A layout change that misses it misreads every
+		// instance's bucket or owner, and the symptom is draws vanishing from a view. Compaction reads the lane
+		// from the batch table instead, so it decodes no flags.
 		var source = File.ReadAllText(Path.Combine(
 			MetalIndirectCompactionKernelTests.ResolveShaderDirectory(), "GpuDraw", shader));
 		Assert.Multiple(() =>

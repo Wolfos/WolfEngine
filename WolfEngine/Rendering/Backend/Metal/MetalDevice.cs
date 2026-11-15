@@ -468,6 +468,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			// so the page reports no compaction support and the shared draw passes execute the full range.
 			var compactedBuffer = default(MTLIndirectCommandBuffer);
 			var compactionArguments = default(MTLBuffer);
+			var compactionGeometry = default(MTLBuffer);
 			if (_indirectCompactionKernel.IsAvailable)
 			{
 				compactedBuffer = _device.NewIndirectCommandBuffer(
@@ -478,6 +479,9 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 				{
 					compactedBuffer.Reset(new NSRange { location = 0, length = descriptor.MaxCommandCount });
 					compactionArguments = _indirectCompactionKernel.CreateArgumentBuffer(commandBuffer, compactedBuffer);
+					compactionGeometry = MetalIndirectCommandBuffer.CreateCompactionGeometryBuffer(
+						_device,
+						descriptor.MaxCommandCount);
 				}
 			}
 
@@ -486,7 +490,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 				descriptor,
 				commandBuffer,
 				compactedBuffer,
-				compactionArguments);
+				compactionArguments,
+				compactionGeometry);
 		}
 		finally
 		{
@@ -923,6 +928,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		TextureFormat.Rg16Float => MTLPixelFormat.RG16Float,
 		TextureFormat.Rgba16Float => MTLPixelFormat.RGBA16Float,
 		TextureFormat.R32Float => MTLPixelFormat.R32Float,
+		TextureFormat.Rg32Float => MTLPixelFormat.RG32Float,
 		TextureFormat.R32Uint => MTLPixelFormat.R32Uint,
 		TextureFormat.D32Float => MTLPixelFormat.Depth32Float,
 		TextureFormat.Bc1Unorm => isSrgb ? MTLPixelFormat.BC1RGBAsRGB : MTLPixelFormat.BC1RGBA,

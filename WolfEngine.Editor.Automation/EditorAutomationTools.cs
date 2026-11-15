@@ -56,6 +56,52 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken = default) =>
 		_controller.InstantiateModelAsync(assetName, x, y, z, uniformScale, cancellationToken);
 
+	[McpServerTool(Name = "play_vfx"), Description("Play a VFX asset in the running Play-mode scene, at a world position or attached to an entity with that position as its offset. Effects advance with the gameplay world, so enter Play mode first.")]
+	public Task<VfxPlayResult> PlayVfx(
+		[Description("Project-relative path of the VFX data asset, such as 'Assets/VFX/SwordImpact.data.json'.")] string assetPath,
+		[Description("World X, or offset X when attached.")] float x = 0.0f,
+		[Description("World Y, or offset Y when attached.")] float y = 0.0f,
+		[Description("World Z, or offset Z when attached.")] float z = 0.0f,
+		[Description("Optional persistent entity GUID to attach the effect to.")] string? attachToEntityId = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.PlayVfxAsync(assetPath, new System.Numerics.Vector3(x, y, z), attachToEntityId, cancellationToken);
+
+	[McpServerTool(Name = "get_vfx_state"), Description("Report the Play-mode world's playing effects and how much of its particle pool they reserve.")]
+	public Task<VfxStateResult> GetVfxState(CancellationToken cancellationToken) =>
+		_controller.GetVfxStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "stop_all_vfx"), Description("Stop every effect in the Play-mode world. Without immediate, particles that are alive finish their lives.")]
+	public Task<VfxStateResult> StopAllVfx(bool immediate = false, CancellationToken cancellationToken = default) =>
+		_controller.StopAllVfxAsync(immediate, cancellationToken);
+
+	[McpServerTool(Name = "configure_vfx_preview"), Description("Configure the VFX editor's preview of the selected VFX asset. Select the asset with select_asset and wait for render frames first. Pause and advance to step the effect deterministically before capture_vfx_preview.")]
+	public Task<VfxPreviewStateResult> ConfigureVfxPreview(
+		[Description("Optional motion: Still, Circle or Swing.")] string? motion = null,
+		[Description("Optional: play or pause the preview clock.")] bool? playing = null,
+		[Description("Optional seconds to advance the preview, in 1/60 s steps. Works while paused.")] float? advanceSeconds = null,
+		[Description("Optional camera yaw in radians; give pitch and distance too.")] float? yaw = null,
+		[Description("Optional camera pitch in radians.")] float? pitch = null,
+		[Description("Optional camera distance in metres.")] float? distance = null,
+		[Description("Optional model or prefab asset GUID to preview with; empty GUID removes it.")] string? modelId = null,
+		[Description("Optional name of the model entity to attach the effect to, such as 'Sword'.")] string? attachTo = null,
+		[Description("Restart the effect from time zero.")] bool restart = false,
+		CancellationToken cancellationToken = default) =>
+		_controller.ConfigureVfxPreviewAsync(
+			motion,
+			playing,
+			advanceSeconds,
+			yaw.HasValue && pitch.HasValue && distance.HasValue ? new System.Numerics.Vector3(yaw.Value, pitch.Value, distance.Value) : null,
+			modelId is null ? null : Guid.Parse(modelId),
+			attachTo,
+			restart,
+			cancellationToken);
+
+	[McpServerTool(Name = "capture_vfx_preview"), Description("Write a PNG of the VFX editor's preview view, rendered by the real renderer.")]
+	public Task<FrameCaptureResult> CaptureVfxPreview(
+		[Description("Absolute or project-relative PNG output path.")] string outputPath,
+		CancellationToken cancellationToken) =>
+		_controller.CaptureVfxPreviewAsync(outputPath, cancellationToken);
+
 	[McpServerTool(Name = "get_animation_state"), Description("Report every animator in the authoring scene: bound clip and skeleton, bone and track counts, how many clip tracks resolved against the skeleton, playback time, and how far the current pose has moved from the bind pose.")]
 	public Task<AnimationStateResult> GetAnimationState(CancellationToken cancellationToken) =>
 		_controller.GetAnimationStateAsync(cancellationToken);
@@ -89,13 +135,24 @@ public sealed class EditorAutomationTools
 	public Task<SceneLoadResult> LoadPlayScene(string scenePath, CancellationToken cancellationToken) =>
 		_controller.LoadPlaySceneAsync(scenePath, cancellationToken);
 
-	[McpServerTool(Name = "enter_play_mode"), Description("Enter Play mode from the current authoring scene. Play mode creates an isolated runtime scene without saving or mutating the authoring scene.")]
+	[McpServerTool(Name = "enter_play_mode"), Description("Enter Play mode from the current authoring scene, or resume it when paused. Play mode creates an isolated runtime scene without saving or mutating the authoring scene.")]
 	public Task<PlayModeStateResult> EnterPlayMode(CancellationToken cancellationToken) =>
 		_controller.EnterPlayModeAsync(cancellationToken);
 
 	[McpServerTool(Name = "pause_play_mode"), Description("Pause the currently running Play-mode scene.")]
 	public Task<PlayModeStateResult> PausePlayMode(CancellationToken cancellationToken) =>
 		_controller.PausePlayModeAsync(cancellationToken);
+
+	[McpServerTool(Name = "set_game_pause"), Description("Hold or release one game pause reason on the running Play-mode world, the way gameplay code pauses for a menu with World.Pause and World.Resume. The world is paused while any reason is held: WorldTag.Game systems stop and WorldTag.GamePaused/AnyGame systems run. This is the game's own pause, independent of pause_play_mode. Results report the held reasons as the gamePauseReasons bit mask.")]
+	public Task<PlayModeStateResult> SetGamePause(
+		[Description("The reason's bit index, 0 to 31, as declared with new PauseReason(index) in gameplay code.")] int reasonIndex,
+		[Description("True to hold the reason; false to release it.")] bool paused,
+		CancellationToken cancellationToken) =>
+		_controller.SetGamePauseAsync(reasonIndex, paused, cancellationToken);
+
+	[McpServerTool(Name = "quit_game"), Description("Quit the running Play-mode game the way a gameplay Quit button does, through IApplicationQuitService. In the editor this stops Play mode rather than closing the editor; a built game would exit. Returns the Play state after the editor has handled the request.")]
+	public Task<PlayModeStateResult> QuitGame(CancellationToken cancellationToken) =>
+		_controller.QuitGameAsync(cancellationToken);
 
 	[McpServerTool(Name = "stop_play_mode"), Description("Stop Play mode and discard the isolated runtime scene, returning to the authoring scene.")]
 	public Task<PlayModeStateResult> StopPlayMode(CancellationToken cancellationToken) =>
@@ -122,6 +179,66 @@ public sealed class EditorAutomationTools
 	[McpServerTool(Name = "get_scene_pointer_state"), Description("Read the Scene viewport pointer availability, capture, focus, logical origin and size after completed render frames.")]
 	public Task<string> GetScenePointerState(CancellationToken cancellationToken) => _controller.GetScenePointerStateAsync(cancellationToken);
 
+	[McpServerTool(Name = "set_editor_pointer"), Description("Move the editor UI pointer in window-relative logical points and optionally change a button or send wheel input. Works when the Scene viewport is hidden, including the Animation Graph workspace. Does not inject gameplay input.")]
+	public async Task<string> SetEditorPointer(
+		float x,
+		float y,
+		CancellationToken cancellationToken,
+		bool? pressed = null,
+		int button = 0,
+		float wheel = 0.0f,
+		float wheelX = 0.0f,
+		[Description("Pinch magnification delta, e.g. 0.2 for a 20% increase or -0.2 for a 20% decrease.")] float magnification = 0.0f,
+		[Description("Optional Control key state for modifier-scroll zoom.")] bool? control = null,
+		[Description("Send trackpad scrolling instead of a mouse wheel; each unit pans 35 logical points.")] bool preciseScroll = false)
+	{
+		await _controller.SetEditorPointerAsync(
+			new(x, y),
+			pressed,
+			button,
+			wheel,
+			cancellationToken,
+			wheelX,
+			magnification,
+			control,
+			preciseScroll).ConfigureAwait(false);
+		return $"Editor pointer at ({x}, {y}).";
+	}
+
+	[McpServerTool(Name = "get_animation_editor_state"), Description("Read the open graph's last-drawn canvas, node and port bounds, zoom, selected node, toolbar bounds, and unsaved undo/redo state. Wait for render frames after an interaction before inspecting these coordinates.")]
+	public Task<UI.AnimationGraphEditorState> GetAnimationEditorState(CancellationToken cancellationToken) =>
+		_controller.GetAnimationEditorStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "get_asset_browser_state"), Description("Read the asset browser location, searches, selection, sub-asset filter, visible card and row bounds, and control bounds after a drawn frame.")]
+	public Task<UI.AssetBrowserState> GetAssetBrowserState(CancellationToken cancellationToken) =>
+		_controller.GetAssetBrowserStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "configure_asset_browser"), Description("Navigate the asset browser and optionally search or open a source's sub-assets. Changes UI state only; does not edit or import assets.")]
+	public async Task<string> ConfigureAssetBrowser(
+		string folderPath,
+		CancellationToken cancellationToken,
+		string search = "",
+		string? expandedSourceId = null,
+		string subAssetSearch = "")
+	{
+		await _controller.ConfigureAssetBrowserAsync(
+			folderPath,
+			search,
+			expandedSourceId is null ? null : Guid.Parse(expandedSourceId),
+			subAssetSearch,
+			cancellationToken).ConfigureAwait(false);
+
+		return $"Asset browser: {folderPath}.";
+	}
+
+	[McpServerTool(Name = "set_editor_key"), Description("Press or release an ImGui editor key such as LeftShift, Space, Escape or Delete. Does not inject gameplay input.")]
+	public async Task<string> SetEditorKey(string key, bool pressed, CancellationToken cancellationToken)
+	{
+		await _controller.SetEditorKeyAsync(key, pressed, cancellationToken).ConfigureAwait(false);
+
+		return $"Editor key {key}: {(pressed ? "pressed" : "released")}.";
+	}
+
 	[McpServerTool(Name = "set_input_axis_2d"), Description("Set one named two-dimensional input binding in a running Play-mode scene, through the same input system used by gameplay.")]
 	public async Task<string> SetInputAxis2D(
 		[Description("InputActionBinding name, such as MouseDelta or GamepadLeftStick.")] string binding,
@@ -134,7 +251,7 @@ public sealed class EditorAutomationTools
 		return $"Input axis '{binding}' is now ({x}, {y}).";
 	}
 
-	[McpServerTool(Name = "wait_for_render_frames"), Description("Wait for completed render-graph frames, rather than editor update ticks, and return the editor and render sequence numbers.")]
+	[McpServerTool(Name = "wait_for_render_frames"), Description("Wait for completed render-graph frames, rather than editor update ticks or frames that only redrew the UI, and return the editor, presented-frame and scene-frame sequence numbers.")]
 	public Task<RenderFrameWaitResult> WaitForRenderFrames(
 		[Description("Positive number of completed render frames to wait for.")] int frameCount,
 		CancellationToken cancellationToken) =>
@@ -152,9 +269,13 @@ public sealed class EditorAutomationTools
 	public Task<EditorWorkspaceStateResult> CreateWorkspace(string name, CancellationToken cancellationToken) =>
 		_controller.CreateWorkspaceAsync(name, cancellationToken);
 
-	[McpServerTool(Name = "rename_workspace"), Description("Rename an editor workspace without changing its stable layout identity.")]
-	public Task<EditorWorkspaceStateResult> RenameWorkspace(string workspaceId, string name, CancellationToken cancellationToken) =>
-		_controller.RenameWorkspaceAsync(workspaceId, name, cancellationToken);
+	[McpServerTool(Name = "configure_workspace"), Description("Rename an editor workspace without changing its stable layout identity, and optionally change the document it owns (None, Scene, AnimationGraph or AnimationClip). Save, Undo and Redo act on the active workspace's owned document; omit owned_document to keep it.")]
+	public Task<EditorWorkspaceStateResult> ConfigureWorkspace(
+		string workspaceId,
+		string name,
+		string? ownedDocument = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.ConfigureWorkspaceAsync(workspaceId, name, ownedDocument, cancellationToken);
 
 	[McpServerTool(Name = "activate_workspace"), Description("Activate an editor workspace by stable id.")]
 	public Task<EditorWorkspaceStateResult> ActivateWorkspace(string workspaceId, CancellationToken cancellationToken) =>
@@ -194,6 +315,10 @@ public sealed class EditorAutomationTools
 	public Task<EditorUndoResult> Undo(CancellationToken cancellationToken) =>
 		_controller.UndoAsync(cancellationToken);
 
+	[McpServerTool(Name = "get_gameplay_state"), Description("Return the loaded gameplay assembly's generation and path, whether the gameplay source changed since that build (rescanned now), whether a build is running, and whether the last build failed for the current source.")]
+	public Task<GameplayStateResult> GetGameplayState(CancellationToken cancellationToken) =>
+		_controller.GetGameplayStateAsync(cancellationToken);
+
 	[McpServerTool(Name = "get_ray_tracing_scene_state"), Description("Return the latest renderer-side TLAS, BLAS, terrain, retirement, and GPU-submission diagnostics without synchronizing or restarting the renderer.")]
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneState(CancellationToken cancellationToken) =>
 		_controller.GetRayTracingSceneStateAsync(cancellationToken);
@@ -208,6 +333,12 @@ public sealed class EditorAutomationTools
 	public Task<CpuFrameProfileResult> GetCpuFrameProfile(CancellationToken cancellationToken) =>
 		_controller.GetCpuFrameProfileAsync(cancellationToken);
 
+	[McpServerTool(Name = "set_viewport_frame_limit"), Description("Limit how often the 3D views are drawn while the editor UI keeps running every frame, as the Limit viewport FPS preference does. In memory only. Compare wait_for_render_frames' scene-frame and presented-frame sequences to measure it.")]
+	public Task<string> SetViewportFrameLimit(
+		[Description("Maximum scene frames per second; 0 turns the limit off. Values below 20 are raised to 20.")] int maxFramesPerSecond,
+		CancellationToken cancellationToken) =>
+		_controller.SetViewportFrameLimitAsync(maxFramesPerSecond, cancellationToken);
+
 	[McpServerTool(Name = "set_anti_aliasing"), Description("Switch the authoring scene's anti-aliasing method in memory without saving its render config asset. Use with frame waits, GPU profiling, and captures to compare TAA/CAS and FSR3.")]
 	public Task<string> SetAntiAliasing(
 		[Description("Taa or Fsr3.")] string mode,
@@ -215,6 +346,26 @@ public sealed class EditorAutomationTools
 		[Description("Whether to sharpen TAA with CAS after tonemapping. Does not affect FSR3 RCAS.")] bool casSharpening = true,
 		CancellationToken cancellationToken = default) =>
 		_controller.SetAntiAliasingAsync(mode, enabled, casSharpening, cancellationToken);
+
+	[McpServerTool(Name = "set_fsr3_settings"), Description("Set the active scene's FSR3 settings in memory without saving its render config: alpha-test reactivity, the transparency and composition mask scale, and RCAS sharpening.")]
+	public Task<string> SetFsr3Settings(
+		[Description("Reactivity for surviving alpha-tested samples, 0 to 1.")] float alphaTestReactiveScale,
+		[Description("Scale of the transparent-forward composition mask, 0 to 1.")] float transparencyAndCompositionMaskScale,
+		[Description("Whether RCAS sharpening runs.")] bool sharpening,
+		[Description("RCAS sharpness, 0 to 1.")] float sharpness,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetFsr3SettingsAsync(
+			alphaTestReactiveScale,
+			transparencyAndCompositionMaskScale,
+			sharpening,
+			sharpness,
+			cancellationToken);
+
+	[McpServerTool(Name = "set_render_scale"), Description("Set the active scene's render scale in memory without saving its render config. The scene renders at this per-axis fraction of the output; FSR3 upscales temporally, TAA is filtered up by tonemapping. Clamped to 0.25..1.")]
+	public Task<string> SetRenderScale(
+		[Description("Per-axis fraction of the output resolution, 0.25 to 1.")] float renderScale,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetRenderScaleAsync(renderScale, cancellationToken);
 
 	[McpServerTool(Name = "set_scene_debug_view"), Description("Sets the debug view captured from the scene viewport; pass an empty string to release it.")]
 	public async Task<string> SetSceneDebugView(
@@ -243,6 +394,19 @@ public sealed class EditorAutomationTools
 	[McpServerTool(Name = "set_ddgi_relocation"), Description("Enable or disable DDGI probe relocation in the active scene's render config in memory, without saving the asset. Works in authoring and Play mode.")]
 	public Task<string> SetDdgiRelocation(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetDdgiRelocationAsync(enabled, cancellationToken);
+
+	[McpServerTool(Name = "set_ddgi_final_gather"), Description("Enable or disable the DDGI final gather and set its trace resolution in the active scene's render config in memory, without saving the asset. Works in authoring and Play mode.")]
+	public Task<string> SetDdgiFinalGather(
+		bool enabled,
+		[Description("Trace resolution: Full, Half or Quarter.")] string resolution,
+		CancellationToken cancellationToken) =>
+		_controller.SetDdgiFinalGatherAsync(enabled, resolution, cancellationToken);
+
+	[McpServerTool(Name = "set_indirect_light_minimum"), Description("Set the render config's indirect light minimum in memory, without saving the asset: the uniform ambient radiance that diffuse and specular indirect lighting never fall below. Zero disables it. Works in authoring and Play mode.")]
+	public Task<string> SetIndirectLightMinimum(
+		[Description("Minimum indirect radiance; zero disables the floor.")] float minimum,
+		CancellationToken cancellationToken) =>
+		_controller.SetIndirectLightMinimumAsync(minimum, cancellationToken);
 
 	[McpServerTool(Name = "set_entity_scale"), Description("Set an entity's local scale in the active authoring or Play-mode scene without saving. Supports per-axis negative scales for mirrored-geometry validation.")]
 	public async Task<string> SetEntityScale(string entityId, float x, float y, float z, CancellationToken cancellationToken)
@@ -273,6 +437,12 @@ public sealed class EditorAutomationTools
 		[Description("Absolute or project-relative PNG output path.")] string outputPath,
 		CancellationToken cancellationToken) =>
 		_controller.CaptureEditorWindowAsync(outputPath, cancellationToken);
+
+	[McpServerTool(Name = "preview_splash_screen"), Description("Hold the engine splash screen at a moment of its animation, covering the editor window, so capture_editor_window or capture_frame can record it. The splash is baked from the engine's sources on first use. Omit time_seconds to hide it again.")]
+	public Task<SplashScreenPreviewResult> PreviewSplashScreen(
+		[Description("Seconds into the splash animation: the trace runs 0.3-1.9, the logo fills in by 2.4 and the text by 3.05. Omit to hide the splash.")] float? timeSeconds = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.PreviewSplashScreenAsync(timeSeconds, cancellationToken);
 
 	[McpServerTool(Name = "capture_gameplay_frame"), Description("Enter or resume Play mode, verify that an enabled gameplay Camera is driving the viewport, wait for gameplay startup frames, and capture a PNG from that camera. Fails instead of silently falling back to the authoring camera.")]
 	public Task<GameplayFrameCaptureResult> CaptureGameplayFrame(
@@ -307,4 +477,79 @@ public sealed class EditorAutomationTools
     [McpServerTool(Name = "capture_animation_preview"), Description("Capture the isolated animation preview render view without editor UI. Keep the Animation window visible.")]
     public Task<FrameCaptureResult> CaptureAnimationPreview(string outputPath, CancellationToken cancellationToken) => _controller.CaptureAnimationPreviewAsync(outputPath, cancellationToken);
 
+	[McpServerTool(Name = "open_clip_editor"), Description("Open an animation clip asset in the Animate workspace. Authored .anim.json clips are editable; imported clips open read-only. If the open clip has unsaved edits, a prompt is shown unless discardUnsavedChanges is true.")]
+	public Task<AnimationClipEditorStateResult> OpenClipEditor(string assetId, bool discardUnsavedChanges = false, CancellationToken cancellationToken = default) =>
+		_controller.OpenClipEditorAsync(Guid.Parse(assetId), discardUnsavedChanges, cancellationToken);
+
+	[McpServerTool(Name = "create_clip"), Description("Create an authored .anim.json clip in a project folder, bound to a skeleton asset, and open it. Unsaved edits to the previously open clip are discarded.")]
+	public Task<AnimationClipEditorStateResult> CreateClip(string folder, string name, string skeletonId, CancellationToken cancellationToken = default) =>
+		_controller.CreateClipAsync(folder, name, Guid.Parse(skeletonId), cancellationToken);
+
+	[McpServerTool(Name = "duplicate_clip"), Description("Copy an imported clip into a new editable .anim.json next to its source and open it. Keys off frame boundaries or with tangents are resampled to one key per frame.")]
+	public Task<AnimationClipEditorStateResult> DuplicateClip(string assetId, CancellationToken cancellationToken = default) =>
+		_controller.DuplicateClipAsync(Guid.Parse(assetId), cancellationToken);
+
+	[McpServerTool(Name = "select_bone"), Description("Select a bone in the clip editor by name, or clear the selection when bone is omitted.")]
+	public Task<AnimationClipEditorStateResult> SelectBone(string? bone = null, CancellationToken cancellationToken = default) =>
+		_controller.SelectClipBoneAsync(bone, cancellationToken);
+
+	[McpServerTool(Name = "set_bone_local_transform"), Description("Set a bone's local transform at the playhead like the inspector does: an unkeyed edit, or a key when Auto Key is on. Pass three numbers for any of position, rotationDegrees (Euler) and scale; omitted parts keep their value.")]
+	public Task<AnimationClipEditorStateResult> SetBoneLocalTransform(
+		string bone,
+		float[]? position = null,
+		float[]? rotationDegrees = null,
+		float[]? scale = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetClipBoneLocalTransformAsync(bone, ToVector(position), ToVector(rotationDegrees), ToVector(scale), cancellationToken);
+
+	[McpServerTool(Name = "set_playhead"), Description("Move the clip editor playhead to a frame and stop playback. Moving to a different frame discards unkeyed edits.")]
+	public Task<AnimationClipEditorStateResult> SetPlayhead(int frame, CancellationToken cancellationToken = default) =>
+		_controller.SetClipPlayheadAsync(frame, cancellationToken);
+
+	[McpServerTool(Name = "set_auto_key"), Description("Turn the clip editor's Auto Key on or off.")]
+	public Task<AnimationClipEditorStateResult> SetAutoKey(bool enabled, CancellationToken cancellationToken = default) =>
+		_controller.SetClipAutoKeyAsync(enabled, cancellationToken);
+
+	[McpServerTool(Name = "set_key"), Description("Key a bone's current local transform, including unkeyed edits, at the playhead. Omit bone to key the selected bone.")]
+	public Task<AnimationClipEditorStateResult> SetKey(string? bone = null, CancellationToken cancellationToken = default) =>
+		_controller.SetClipKeyAsync(bone, cancellationToken);
+
+	[McpServerTool(Name = "edit_clip_keys"), Description("Select dopesheet keys given as bone@frame, then apply operation: select, move, duplicate or delete. Move and duplicate shift by frameDelta and fail if a key would leave the clip.")]
+	public Task<AnimationClipEditorStateResult> EditClipKeys(string operation, string[] keys, int frameDelta = 0, CancellationToken cancellationToken = default) =>
+		_controller.EditClipKeysAsync(operation, keys, frameDelta, cancellationToken);
+
+	[McpServerTool(Name = "set_clip_metadata"), Description("Replace the open clip's named curves and timed markers with a JSON object containing Curves and Markers arrays. Works on authored clips and imported takes; changes are undoable and unsaved until save_clip.")]
+	public Task<AnimationClipEditorStateResult> SetClipMetadata(string metadataJson, CancellationToken cancellationToken = default) =>
+		_controller.SetClipMetadataAsync(metadataJson, cancellationToken);
+
+	[McpServerTool(Name = "clip_history"), Description("Undo or redo in the open clip's own history, separate from scene undo. operation is undo or redo.")]
+	public Task<AnimationClipEditorStateResult> ClipHistory(string operation, CancellationToken cancellationToken = default) =>
+		_controller.ClipHistoryAsync(operation, cancellationToken);
+
+	[McpServerTool(Name = "save_clip"), Description("Save the open clip or imported take annotations to their source and reimport.")]
+	public Task<AnimationClipEditorStateResult> SaveClip(CancellationToken cancellationToken = default) =>
+		_controller.SaveClipAsync(cancellationToken);
+
+	[McpServerTool(Name = "get_clip_editor_state"), Description("Inspect the clip editor: open clip, dirty state, playhead, selection, keyed frames per bone, unkeyed bones, the selected bone's local transform and a hash of the preview pose.")]
+	public Task<AnimationClipEditorStateResult> GetClipEditorState(CancellationToken cancellationToken = default) =>
+		_controller.GetClipEditorStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "capture_clip_preview"), Description("Capture the clip editor's preview render view without editor UI. Keep the Clip Viewport visible and wait for render frames after changes.")]
+	public Task<FrameCaptureResult> CaptureClipPreview(string outputPath, CancellationToken cancellationToken = default) =>
+		_controller.CaptureClipPreviewAsync(outputPath, cancellationToken);
+
+	private static System.Numerics.Vector3? ToVector(float[]? values)
+	{
+		if (values is null)
+		{
+			return null;
+		}
+
+		if (values.Length != 3)
+		{
+			throw new ArgumentException("Vectors take exactly three numbers.");
+		}
+
+		return new System.Numerics.Vector3(values[0], values[1], values[2]);
+	}
 }

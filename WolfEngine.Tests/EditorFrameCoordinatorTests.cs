@@ -63,4 +63,32 @@ public sealed class EditorFrameCoordinatorTests
 		Assert.That(wait.Wait(TimeSpan.FromSeconds(10)), Is.True, "RequestShutdown did not release the waiter.");
 		Assert.That(wait.Result, Is.False);
 	}
+
+	[Test]
+	public void WaitUntilObserved_BlocksUntilTheRenderThreadPicksUpThePublishedFrame()
+	{
+		// A UI-only editor frame writes no snapshot, so this wait is all that keeps the editor one frame ahead.
+		var coordinator = new EditorFrameCoordinator();
+		coordinator.WaitUntilObserved();
+		coordinator.PublishCompletedFrame();
+		var wait = Task.Run(coordinator.WaitUntilObserved);
+
+		Assert.That(wait.Wait(TimeSpan.FromMilliseconds(200)), Is.False, "The editor ran ahead of an unobserved frame.");
+
+		Assert.That(coordinator.TryWaitForNextFrame(0, static () => { }, out _), Is.True);
+
+		Assert.That(wait.Wait(TimeSpan.FromSeconds(10)), Is.True, "Observing the frame did not release the editor.");
+	}
+
+	[Test]
+	public void WaitUntilObserved_ReturnsOnShutdownWithoutAnObserver()
+	{
+		var coordinator = new EditorFrameCoordinator();
+		coordinator.PublishCompletedFrame();
+		var wait = Task.Run(coordinator.WaitUntilObserved);
+
+		coordinator.RequestShutdown();
+
+		Assert.That(wait.Wait(TimeSpan.FromSeconds(10)), Is.True, "RequestShutdown did not release the editor.");
+	}
 }

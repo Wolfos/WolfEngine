@@ -12,7 +12,7 @@ public readonly struct ShadowMapExecutionBucket
 		string debugName,
 		SharedDrawGraphicsBufferBindings bufferBindings,
 		IGfxPipeline pipeline,
-		ReadOnlyMemory<SharedDrawIndirectCommandPage> indirectCommandPages)
+		ReadOnlyMemory<DrawRecordPage> indirectCommandPages)
 	{
 		DrawKind = drawKind;
 		BucketId = bucketId;
@@ -29,7 +29,7 @@ public readonly struct ShadowMapExecutionBucket
 	public string DebugName { get; }
 	public SharedDrawGraphicsBufferBindings BufferBindings { get; }
 	public IGfxPipeline Pipeline { get; }
-	public ReadOnlyMemory<SharedDrawIndirectCommandPage> IndirectCommandPages { get; }
+	public ReadOnlyMemory<DrawRecordPage> IndirectCommandPages { get; }
 }
 
 public readonly struct ShadowFrameData
@@ -47,6 +47,7 @@ public readonly struct ShadowFrameData
 		float maxDistance,
 		int shadowedDirectionalLightIndex,
 		Vector3 depthBiases,
+		Vector3 normalOffsets,
 		float strength,
 		int mapResolution)
 	{
@@ -62,6 +63,7 @@ public readonly struct ShadowFrameData
 		MaxDistance = maxDistance;
 		ShadowedDirectionalLightIndex = shadowedDirectionalLightIndex;
 		DepthBiases = depthBiases;
+		NormalOffsets = normalOffsets;
 		Strength = strength;
 		MapResolution = mapResolution;
 	}
@@ -77,7 +79,13 @@ public readonly struct ShadowFrameData
 	public float CascadeBlendDistance { get; }
 	public float MaxDistance { get; }
 	public int ShadowedDirectionalLightIndex { get; }
+	/// <summary>Per-cascade constant receiver depth bias, in shadow-map depth units.</summary>
 	public Vector3 DepthBiases { get; }
+	/// <summary>
+	/// Per-cascade distance, in world units, a receiver is pushed along its normal before the shadow
+	/// lookup. Scaled in the shader by how grazing the light is.
+	/// </summary>
+	public Vector3 NormalOffsets { get; }
 	public float Strength { get; }
 	public int MapResolution { get; }
 
@@ -109,6 +117,8 @@ public struct ShadowMapPassConfig
 	public required IGfxBuffer? TerrainMaterialBuffer { get; init; }
 	public required IGfxBuffer? TerrainLayerBuffer { get; init; }
 	public required IGfxBuffer? DrawArgsBuffer { get; init; }
+	/// <summary>Bound whole: each cascade's draw args already point into that cascade's slice.</summary>
+	public required IGfxBuffer? VisibleInstanceBuffer { get; init; }
 	public required IGfxBuffer? CameraBuffer { get; init; }
 	public required IGfxBuffer? MaterialGenerationBuffer { get; init; }
 	public required IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; init; }

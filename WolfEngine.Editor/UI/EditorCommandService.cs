@@ -1,4 +1,5 @@
 using ImGuiNET;
+using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Input;
 using WolfEngine.Rendering.Shaders;
@@ -22,23 +23,53 @@ public interface IEditorCommandService
 	void BindDeletionHandlers(IEditorEntityDeletionHandler? entityDeletionHandler, IEditorAssetDeletionHandler? assetDeletionHandler);
 	bool RequestNewScene();
 	bool RequestLoadScene(Guid assetId);
+
+	/// <summary>
+	/// Closes the open scene, asking about unsaved changes first, then opens the project in the background, loads
+	/// its gameplay assembly and reopens the documents it last had open. Returns false while the user is asked.
+	/// </summary>
+	bool RequestOpenProject(string projectRoot);
+
+	/// <summary>Creates a project and opens it the way <see cref="RequestOpenProject"/> does.</summary>
+	bool RequestCreateProject(string parentFolder, string projectName);
+	bool RestoreLastScene();
+
+	/// <summary>Reopens the scene and every other document the open project last had open.</summary>
+	void RestoreLastDocuments();
 	Task LoadSceneForAutomationAsync(Guid assetId, CancellationToken cancellationToken = default);
 	Guid? LoadingSceneAssetId { get; }
 	bool SaveScene();
 	bool RefreshAssetDatabase();
 	bool ReloadEngineShaders();
-	bool Undo();
-	bool Redo();
+
+	IEditorDocument SceneDocument { get; }
+
+	/// <summary>
+	/// The document the active workspace owns, or null when it owns none. Save, undo and redo act on it.
+	/// </summary>
+	IEditorDocument? ActiveDocument { get; }
+
+	IEditorDocument? GetDocument(EditorDocumentKind kind);
+	bool SaveActiveDocument();
+	bool UndoActiveDocument();
+	bool RedoActiveDocument();
 	bool DuplicateFocusedSelection();
 	bool DeleteFocusedSelection();
 	void ProcessShortcuts();
 	void DrawPendingDialogs();
+
+	/// <summary>
+	/// Starts a scene load that waited for a gameplay rebuild, once the editor has applied the rebuilt assembly.
+	/// Call it after the editor applies gameplay build results.
+	/// </summary>
+	void ProcessDeferredSceneLoad();
 }
 
 internal enum PendingSceneReplacementKind
 {
 	NewScene,
-	LoadScene
+	LoadScene,
+	OpenProject
 }
 
 internal enum PendingSceneReplacementDecision
@@ -48,7 +79,13 @@ internal enum PendingSceneReplacementDecision
 	Cancel
 }
 
-internal readonly record struct PendingSceneReplacement(PendingSceneReplacementKind Kind, Guid AssetId);
+/// <summary>Opens or creates a project, returning false with a message when it cannot.</summary>
+internal delegate bool EditorProjectOpener(out string errorMessage);
+
+internal readonly record struct PendingSceneReplacement(
+	PendingSceneReplacementKind Kind,
+	Guid AssetId,
+	EditorProjectOpener? ProjectOpener = null);
 
 public sealed class EditorCommandService : IEditorCommandService
 {
@@ -65,6 +102,10 @@ public sealed class EditorCommandService : IEditorCommandService
 	private readonly IRenderer _renderer;
 	private readonly IEditorOperationService _operationService;
 	private readonly IFileDialogService _fileDialogService;
+	private readonly IEditorDocumentEditor[] _documentEditors;
+	private readonly IEditorDocument[] _documents;
+	private readonly IEditorWorkspaceService? _workspaces;
+	private readonly IGameplayAssemblyHost? _gameplayAssemblyHost;
 	private bool _leftCtrlDown;
 	private bool _rightCtrlDown;
 	private bool _leftShiftDown;
@@ -79,6 +120,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private bool _duplicatePressedThisFrame;
 	private bool _deletePressedThisFrame;
 	private bool _backspacePressedThisFrame;
+	private bool _tabPressedThisFrame;
 
 	private IEditorEntityDeletionHandler? _entityDeletionHandler;
 	private IEditorAssetDeletionHandler? _assetDeletionHandler;
@@ -86,6 +128,8 @@ public sealed class EditorCommandService : IEditorCommandService
 	private bool _openUnsavedScenePopup;
 	private Guid? _loadingSceneAssetId;
 	private TaskCompletionSource? _automationSceneLoadCompletion;
+	private Guid? _sceneLoadAwaitingGameplayReload;
+	private TaskCompletionSource? _deferredAutomationSceneLoadCompletion;
 
 	public EditorCommandService(
 		IEditorSceneWorkspace sceneWorkspace,
@@ -99,7 +143,11 @@ public sealed class EditorCommandService : IEditorCommandService
 		IRenderer renderer,
 		IEditorOperationService operationService,
 		IFileDialogService fileDialogService,
-		IInputSystem inputSystem)
+		IInputSystem inputSystem,
+		IEnumerable<IEditorDocumentEditor>? documentEditors = null,
+		IGameplayAssemblyHost? gameplayAssemblyHost = null,
+		IEnumerable<IEditorDocument>? documents = null,
+		IEditorWorkspaceService? workspaces = null)
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
@@ -113,6 +161,24 @@ public sealed class EditorCommandService : IEditorCommandService
 		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
 		_fileDialogService = fileDialogService ?? throw new ArgumentNullException(nameof(fileDialogService));
 		ArgumentNullException.ThrowIfNull(inputSystem);
+		_documentEditors = documentEditors?.ToArray() ?? [];
+		_gameplayAssemblyHost = gameplayAssemblyHost;
+		_workspaces = workspaces;
+		SceneDocument = new EditorSceneDocument(this);
+		_documents =
+		[
+			SceneDocument,
+			.. documents ?? []
+		];
+
+		foreach (var document in _documents)
+		{
+			if (document is IEditorReopenableDocument reopenable)
+			{
+				var kind = reopenable.Kind;
+				reopenable.OpenAssetChanged += assetId => PersistLastDocument(kind, assetId);
+			}
+		}
 
 		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRedo", InputActionBinding.KeyY, callback => _redoPressedThisFrame |= callback.Value);
@@ -122,6 +188,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		RegisterTrackedButton(inputSystem, "ShortcutDuplicate", InputActionBinding.KeyD, callback => _duplicatePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutDelete", InputActionBinding.KeyDelete, callback => _deletePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutBackspace", InputActionBinding.KeyBackspace, callback => _backspacePressedThisFrame |= callback.Value);
+		RegisterTrackedButton(inputSystem, "ShortcutTab", InputActionBinding.KeyTab, callback => _tabPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutLeftCtrl", InputActionBinding.KeyLeftControl, callback => _leftCtrlDown = callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRightCtrl", InputActionBinding.KeyRightControl, callback => _rightCtrlDown = callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutLeftShift", InputActionBinding.KeyLeftShift, callback => _leftShiftDown = callback.Value);
@@ -133,6 +200,21 @@ public sealed class EditorCommandService : IEditorCommandService
 	internal bool HasPendingSceneReplacement => _pendingSceneReplacement.HasValue;
 	internal PendingSceneReplacementKind? PendingSceneReplacementType => _pendingSceneReplacement?.Kind;
 	public Guid? LoadingSceneAssetId => _loadingSceneAssetId;
+	public IEditorDocument SceneDocument { get; }
+
+	public IEditorDocument? ActiveDocument
+	{
+		get
+		{
+			// Without workspaces, as in tests, the scene is the only document there is to act on.
+			if (_workspaces is null)
+			{
+				return SceneDocument;
+			}
+
+			return GetDocument(_workspaces.ActiveWorkspace.OwnedDocument);
+		}
+	}
 
 	public void BindDeletionHandlers(IEditorEntityDeletionHandler? entityDeletionHandler, IEditorAssetDeletionHandler? assetDeletionHandler)
 	{
@@ -164,6 +246,88 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 
 		return QueueSceneReplacement(new PendingSceneReplacement(PendingSceneReplacementKind.LoadScene, assetId));
+	}
+
+	public bool RequestOpenProject(string projectRoot)
+	{
+		if (string.IsNullOrWhiteSpace(projectRoot))
+		{
+			return false;
+		}
+
+		return RequestProjectSwitch((out string errorMessage) => _projectService.OpenProject(projectRoot, out errorMessage));
+	}
+
+	public bool RequestCreateProject(string parentFolder, string projectName)
+	{
+		return RequestProjectSwitch((out string errorMessage) => _projectService.CreateProject(parentFolder, projectName, out errorMessage));
+	}
+
+	private bool RequestProjectSwitch(EditorProjectOpener projectOpener)
+	{
+		if (_playSession.IsActive)
+		{
+			_notificationService.ReportError("Stop play mode before opening another project.");
+			return false;
+		}
+
+		if (_operationService.Current.IsActive || _loadingSceneAssetId.HasValue)
+		{
+			_notificationService.ReportError("Another editor operation is already in progress.");
+			return false;
+		}
+
+		return QueueSceneReplacement(new PendingSceneReplacement(PendingSceneReplacementKind.OpenProject, Guid.Empty, projectOpener));
+	}
+
+	public bool RestoreLastScene()
+	{
+		if (_projectService.HasOpenProject == false ||
+			string.IsNullOrWhiteSpace(_projectService.ProjectRootPath))
+		{
+			return false;
+		}
+
+		var assetId = EditorPreferences.GetLastDocumentAssetId(_projectService.ProjectRootPath, EditorDocumentKind.Scene);
+		if (assetId.HasValue == false ||
+			_projectService.TryGetAsset(assetId.Value, out var asset) == false ||
+			asset.Type != AssetType.Scene)
+		{
+			return false;
+		}
+
+		return RequestLoadScene(assetId.Value);
+	}
+
+	public void RestoreLastDocuments()
+	{
+		RestoreLastScene();
+		if (_projectService.HasOpenProject == false ||
+			string.IsNullOrWhiteSpace(_projectService.ProjectRootPath))
+		{
+			return;
+		}
+
+		foreach (var document in _documents)
+		{
+			if (document is not IEditorReopenableDocument reopenable) continue;
+
+			var assetId = EditorPreferences.GetLastDocumentAssetId(_projectService.ProjectRootPath, reopenable.Kind);
+			if (assetId.HasValue == false ||
+				_projectService.TryGetAsset(assetId.Value, out var asset) == false)
+			{
+				continue;
+			}
+
+			try
+			{
+				reopenable.Reopen(asset);
+			}
+			catch (Exception exception)
+			{
+				_notificationService.ReportError($"Failed to reopen {EditorDocumentKindNames.Get(reopenable.Kind)} '{asset.Name}': {exception.Message}");
+			}
+		}
 	}
 
 	/// <summary>
@@ -218,6 +382,8 @@ public sealed class EditorCommandService : IEditorCommandService
 
 			_sceneWorkspace.SaveCurrentScene();
 			_interactionState.ClearSceneDirty();
+			PersistLastScene(_sceneWorkspace.CurrentScene.AssetId);
+
 			return true;
 		}
 		catch (Exception ex)
@@ -321,14 +487,66 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 	}
 
-	public bool Undo()
+	public IEditorDocument? GetDocument(EditorDocumentKind kind)
 	{
-		return _undoRedoService.Undo();
+		foreach (var document in _documents)
+		{
+			if (document.Kind == kind)
+			{
+				return document;
+			}
+		}
+
+		return null;
 	}
 
-	public bool Redo()
+	public bool SaveActiveDocument()
 	{
-		return _undoRedoService.Redo();
+		var document = ActiveDocument;
+		if (document is null || document.CanSave == false)
+		{
+			return false;
+		}
+
+		return document.Save();
+	}
+
+	public bool UndoActiveDocument()
+	{
+		var document = ActiveDocument;
+		if (document is null || document.CanUndo == false)
+		{
+			return false;
+		}
+
+		return document.Undo();
+	}
+
+	public bool RedoActiveDocument()
+	{
+		var document = ActiveDocument;
+		if (document is null || document.CanRedo == false)
+		{
+			return false;
+		}
+
+		return document.Redo();
+	}
+
+	/// <summary>A document editor with keyboard focus takes delete and duplicate away from the scene.</summary>
+	private bool TryGetFocusedEditor(out IEditorDocumentEditor target)
+	{
+		foreach (var candidate in _documentEditors)
+		{
+			if (candidate.HasShortcutFocus)
+			{
+				target = candidate;
+				return true;
+			}
+		}
+
+		target = null!;
+		return false;
 	}
 
 	public bool DeleteFocusedSelection()
@@ -367,22 +585,40 @@ public sealed class EditorCommandService : IEditorCommandService
 			_deletePressedThisFrame,
 			_backspacePressedThisFrame,
 			io.WantTextInput,
-			OperatingSystem.IsMacOS());
-		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, _interactionState.FocusedWindow);
+			OperatingSystem.IsMacOS(),
+			_tabPressedThisFrame);
+		// A focused document editor owns every selection shortcut, so none of them can reach the scene
+		// through the sticky focused window while that editor has the keyboard.
+		var hasFocusedEditor = TryGetFocusedEditor(out var focusedEditor);
+		var focusedWindow = hasFocusedEditor ? EditorFocusedWindow.Document : _interactionState.FocusedWindow;
+		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, focusedWindow);
+		if (shortcut == EditorShortcutCommand.SwitchToPreviousWorkspace)
+		{
+			SwitchToPreviousWorkspace();
+			ResetShortcutPresses();
+			return;
+		}
+
+		if (hasFocusedEditor)
+		{
+			RunFocusedEditorShortcut(focusedEditor, shortcut);
+			ResetShortcutPresses();
+			return;
+		}
 
 		switch (shortcut)
 		{
 			case EditorShortcutCommand.Undo:
-				Undo();
+				UndoActiveDocument();
 				break;
 			case EditorShortcutCommand.Redo:
-				Redo();
+				RedoActiveDocument();
 				break;
 			case EditorShortcutCommand.NewScene:
 				RequestNewScene();
 				break;
-			case EditorShortcutCommand.SaveScene:
-				SaveScene();
+			case EditorShortcutCommand.Save:
+				SaveActiveDocument();
 				break;
 			case EditorShortcutCommand.RefreshAssetDatabase:
 				RefreshAssetDatabase();
@@ -398,6 +634,41 @@ public sealed class EditorCommandService : IEditorCommandService
 				break;
 		}
 
+		ResetShortcutPresses();
+	}
+
+	/// <summary>
+	/// Shortcuts while a document editor has focus. Save, undo, redo and refresh work as anywhere else;
+	/// scene-only commands such as New Scene do nothing rather than act on a window the user is not
+	/// looking at.
+	/// </summary>
+	private void RunFocusedEditorShortcut(IEditorDocumentEditor editor, EditorShortcutCommand shortcut)
+	{
+		switch (shortcut)
+		{
+			case EditorShortcutCommand.Undo:
+				UndoActiveDocument();
+				break;
+			case EditorShortcutCommand.Redo:
+				RedoActiveDocument();
+				break;
+			case EditorShortcutCommand.Save:
+				SaveActiveDocument();
+				break;
+			case EditorShortcutCommand.RefreshAssetDatabase:
+				RefreshAssetDatabase();
+				break;
+			case EditorShortcutCommand.DuplicateFocusedSelection:
+				editor.DuplicateSelection();
+				break;
+			case EditorShortcutCommand.DeleteFocusedSelection:
+				editor.DeleteSelection();
+				break;
+		}
+	}
+
+	private void ResetShortcutPresses()
+	{
 		_undoPressedThisFrame = false;
 		_redoPressedThisFrame = false;
 		_newPressedThisFrame = false;
@@ -406,10 +677,30 @@ public sealed class EditorCommandService : IEditorCommandService
 		_duplicatePressedThisFrame = false;
 		_deletePressedThisFrame = false;
 		_backspacePressedThisFrame = false;
+		_tabPressedThisFrame = false;
+	}
+
+	/// <summary>
+	/// Tab toggles between the current and the previously active workspace. A running game keeps Tab,
+	/// since games commonly bind it.
+	/// </summary>
+	private void SwitchToPreviousWorkspace()
+	{
+		if (_workspaces is null || _playSession.State == EditorPlayState.Playing)
+		{
+			return;
+		}
+
+		_workspaces.ActivatePrevious();
 	}
 
 	public void DrawPendingDialogs()
 	{
+		foreach (var editor in _documentEditors)
+		{
+			editor.DrawDialogs();
+		}
+
 		if (_openUnsavedScenePopup)
 		{
 			ImGui.OpenPopup(UnsavedScenePopupId);
@@ -517,6 +808,12 @@ public sealed class EditorCommandService : IEditorCommandService
 				return;
 			}
 
+			if (replacement.Kind == PendingSceneReplacementKind.OpenProject)
+			{
+				StartProjectOpen(replacement.ProjectOpener ?? throw new InvalidOperationException("Opening a project requires a project opener."));
+				return;
+			}
+
 			_undoRedoService.Clear();
 			switch (replacement.Kind)
 			{
@@ -531,6 +828,7 @@ public sealed class EditorCommandService : IEditorCommandService
 			}
 
 			_interactionState.ClearSceneDirty();
+			PersistLastScene(_sceneWorkspace.CurrentScene.AssetId);
 		}
 		catch (Exception ex)
 		{
@@ -543,7 +841,161 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 	}
 
+	/// <summary>
+	/// Replaces the scene with a new one before the project changes: the old scene holds the old project's assets
+	/// and gameplay components, which also keeps the old gameplay assembly from unloading.
+	/// </summary>
+	private void StartProjectOpen(EditorProjectOpener projectOpener)
+	{
+		_undoRedoService.Clear();
+		_sceneWorkspace.ResetToNewScene();
+		EditorGui.ClearEntitySelection();
+		_interactionState.ClearSceneDirty();
+
+		// The empty scene is not persisted: the closing project should still reopen the scene it last had open.
+		var gameplayAssemblyHost = _gameplayAssemblyHost;
+		if (_operationService.TryStart(
+				"Opening project",
+				progress =>
+				{
+					progress.Report("Loading project assets...");
+					if (projectOpener(out var errorMessage) == false)
+					{
+						throw new InvalidOperationException(errorMessage);
+					}
+
+					if (gameplayAssemblyHost is null)
+					{
+						return;
+					}
+
+					progress.Report("Loading gameplay assembly...");
+					var gameplayLoad = gameplayAssemblyHost.EnsureLoaded();
+					if (gameplayLoad.BuildFailureOutput is { } buildFailureOutput)
+					{
+						_notificationService.ReportError(GameplayStaleBuildMessage.Create(buildFailureOutput));
+					}
+				},
+				completed: () =>
+				{
+					PersistLastProject();
+					RestoreLastDocuments();
+				},
+				failed: exception => _notificationService.ReportError($"Failed to open project: {exception.Message}")) == false)
+		{
+			_notificationService.ReportError("Another editor operation is already in progress.");
+		}
+	}
+
+	private void PersistLastProject()
+	{
+		try
+		{
+			EditorPreferences.SetLastProjectPath(_projectService.ProjectRootPath);
+			EditorPreferences.Save();
+		}
+		catch (Exception exception)
+		{
+			_notificationService.ReportError($"Failed to save the last open project preference: {exception.Message}");
+		}
+	}
+
 	private void StartSceneLoad(Guid assetId)
+	{
+		if (TryStartGameplayBuildBeforeSceneLoad(assetId))
+		{
+			return;
+		}
+
+		StartSceneLoadWithCurrentGameplay(assetId);
+	}
+
+	public void ProcessDeferredSceneLoad()
+	{
+		if (_sceneLoadAwaitingGameplayReload is not { } assetId ||
+		    _operationService.Current.IsActive)
+		{
+			return;
+		}
+
+		// The editor applies the build result on its own thread; the scene must not be read before that.
+		if (_gameplayAssemblyHost is not null &&
+		    (_gameplayAssemblyHost.HasPendingBuildResult || _gameplayAssemblyHost.IsBuildInProgress))
+		{
+			return;
+		}
+
+		_sceneLoadAwaitingGameplayReload = null;
+		_automationSceneLoadCompletion = _deferredAutomationSceneLoadCompletion;
+		_deferredAutomationSceneLoadCompletion = null;
+
+		// The build output was already reported when the failed result was applied.
+		if (_gameplayAssemblyHost?.LastBuildFailedForCurrentSource == true)
+		{
+			_notificationService.ReportError(GameplayStaleBuildMessage.Create(buildOutput: null));
+		}
+
+		StartSceneLoadWithCurrentGameplay(assetId);
+	}
+
+	/// <summary>
+	/// Rebuilds gameplay first when its source changed since the loaded build. A scene deserialized with the older
+	/// build leaves out the components and fields only the newer source declares, and saving would remove them.
+	/// </summary>
+	private bool TryStartGameplayBuildBeforeSceneLoad(Guid assetId)
+	{
+		if (_gameplayAssemblyHost is null ||
+		    _gameplayAssemblyHost.CheckSourceStale() == false)
+		{
+			return false;
+		}
+
+		// Rebuilding a tree that just failed would fail again; load with the older build and say so.
+		if (_gameplayAssemblyHost.LastBuildFailedForCurrentSource)
+		{
+			_notificationService.ReportError(GameplayStaleBuildMessage.Create(buildOutput: null));
+			return false;
+		}
+
+		var gameplayAssemblyHost = _gameplayAssemblyHost;
+		var automationCompletion = _automationSceneLoadCompletion;
+		_automationSceneLoadCompletion = null;
+		_loadingSceneAssetId = assetId;
+		if (_operationService.TryStart(
+				"Loading scene",
+				progress =>
+				{
+					progress.Report("Building gameplay...");
+					if (gameplayAssemblyHost.BuildAndQueueReload() == false)
+					{
+						// A build started from the toolbar is already running. Its result is applied the same way.
+						while (gameplayAssemblyHost.IsBuildInProgress)
+						{
+							Thread.Sleep(50);
+						}
+					}
+				},
+				completed: () =>
+				{
+					_sceneLoadAwaitingGameplayReload = assetId;
+					_deferredAutomationSceneLoadCompletion = automationCompletion;
+				},
+				failed: exception =>
+				{
+					_loadingSceneAssetId = null;
+					_notificationService.ReportError($"Failed to build gameplay before loading the scene: {exception.Message}");
+					automationCompletion?.TrySetException(exception);
+				}) == false)
+		{
+			_loadingSceneAssetId = null;
+			_automationSceneLoadCompletion = automationCompletion;
+			return false;
+		}
+
+		return true;
+	}
+
+	private void StartSceneLoadWithCurrentGameplay(Guid assetId)
 	{
 		var automationCompletion = _automationSceneLoadCompletion;
 		_automationSceneLoadCompletion = null;
@@ -564,6 +1016,7 @@ public sealed class EditorCommandService : IEditorCommandService
 						_undoRedoService.Clear();
 						EditorGui.ClearEntitySelection();
 						_interactionState.ClearSceneDirty();
+						PersistLastScene(assetId);
 						automationCompletion?.TrySetResult();
 					}
 					catch (Exception exception)
@@ -589,9 +1042,73 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 	}
 
+	private void PersistLastScene(Guid assetId)
+	{
+		PersistLastDocument(EditorDocumentKind.Scene, assetId);
+	}
+
+	private void PersistLastDocument(EditorDocumentKind kind, Guid assetId)
+	{
+		var projectPath = _projectService.ProjectRootPath;
+		if (string.IsNullOrWhiteSpace(projectPath)) return;
+
+		try
+		{
+			EditorPreferences.SetLastDocumentAssetId(projectPath, kind, assetId);
+			EditorPreferences.Save();
+		}
+		catch (Exception exception)
+		{
+			var name = EditorDocumentKindNames.Get(kind).ToLowerInvariant();
+			_notificationService.ReportError($"Failed to save the last open {name} preference: {exception.Message}");
+		}
+	}
+
 	private bool CanSaveScene()
 	{
 		return _projectService.HasOpenProject && _playSession.IsActive == false;
+	}
+
+	/// <summary>The open scene as a document, so a workspace can own it like any other.</summary>
+	private sealed class EditorSceneDocument : IEditorDocument
+	{
+		private readonly EditorCommandService _commands;
+
+		public EditorSceneDocument(EditorCommandService commands)
+		{
+			_commands = commands;
+		}
+
+		public EditorDocumentKind Kind => EditorDocumentKind.Scene;
+
+		public string? DisplayName
+		{
+			get
+			{
+				var name = _commands._sceneWorkspace.CurrentScene.Name;
+				return string.IsNullOrWhiteSpace(name) ? "Untitled Scene" : name;
+			}
+		}
+
+		public bool IsDirty => _commands._interactionState.IsSceneDirty;
+		public bool CanSave => _commands.CanSaveScene();
+		public bool CanUndo => _commands._undoRedoService.CanUndo;
+		public bool CanRedo => _commands._undoRedoService.CanRedo;
+
+		public bool Save()
+		{
+			return _commands.SaveScene();
+		}
+
+		public bool Undo()
+		{
+			return _commands._undoRedoService.Undo();
+		}
+
+		public bool Redo()
+		{
+			return _commands._undoRedoService.Redo();
+		}
 	}
 
 	private bool IsPrimaryModifierDown()

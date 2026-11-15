@@ -21,12 +21,14 @@ internal sealed class RazorTreeRenderer : Renderer
 	private readonly Dictionary<(long Parent, int Component, int Sequence), int> _occurrences = [];
 	private readonly HashSet<long> _liveIdentities = [];
 	private readonly HashSet<string> _unboundEventWarnings = new(StringComparer.Ordinal);
+	private readonly UiImageSources _images;
 	private long _nextIdentity;
 	public bool DisplayChanged { get; set; }
 
-	public RazorTreeRenderer(IServiceProvider services, UiDispatcher? dispatcher = null)
+	public RazorTreeRenderer(IServiceProvider services, UiDispatcher? dispatcher = null, UiImageSources? images = null)
 		: base(services, services.GetService(typeof(ILoggerFactory)) as ILoggerFactory ?? NullLoggerFactory.Instance)
 	{
+		_images = images ?? new UiImageSources();
 		var owner = dispatcher ?? new UiDispatcher();
 		owner.Bind(); Dispatcher = owner;
 	}
@@ -130,6 +132,12 @@ internal sealed class RazorTreeRenderer : Renderer
 							node.Events[frames[child].AttributeName] = frames[child].AttributeEventHandlerId;
 						child++;
 					}
+
+					if (node.IsImage)
+					{
+						node.Image = _images.Resolve(node);
+					}
+
 					AppendRange(frames, child, subtreeEnd - child, node, componentId);
 					parent.Children.Add(node);
 					i = subtreeEnd;
@@ -205,6 +213,12 @@ internal sealed class RazorTreeRenderer : Renderer
 			node.Identity = identity; _liveIdentities.Add(identity);
 			if (separator >= 0) ParseAttributes(tag[(separator + 1)..], node.Attributes);
 			foreach (var attribute in node.Attributes.Keys) WarnUnboundEvent(attribute);
+
+			if (node.IsImage)
+			{
+				node.Image = _images.Resolve(node);
+			}
+
 			stack.Peek().Children.Add(node);
 			if (!selfClosing && name is not ("br" or "img" or "input" or "meta" or "link")) stack.Push(node);
 		}

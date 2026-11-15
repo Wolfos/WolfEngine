@@ -6,11 +6,12 @@ internal enum EditorShortcutCommand
 	Undo,
 	Redo,
 	NewScene,
-	SaveScene,
+	Save,
 	RefreshAssetDatabase,
 	DuplicateFocusedSelection,
 	ClearEntitySelection,
-	DeleteFocusedSelection
+	DeleteFocusedSelection,
+	SwitchToPreviousWorkspace
 }
 
 internal readonly record struct EditorShortcutSnapshot(
@@ -25,7 +26,8 @@ internal readonly record struct EditorShortcutSnapshot(
 	bool DeletePressed,
 	bool BackspacePressed,
 	bool IsTextInputActive,
-	bool IsMacOS);
+	bool IsMacOS,
+	bool TabPressed = false);
 
 internal static class EditorShortcutCommandResolver
 {
@@ -57,7 +59,7 @@ internal static class EditorShortcutCommandResolver
 
 			if (snapshot.SavePressed)
 			{
-				return EditorShortcutCommand.SaveScene;
+				return EditorShortcutCommand.Save;
 			}
 
 			if (snapshot.RefreshPressed)
@@ -65,13 +67,22 @@ internal static class EditorShortcutCommandResolver
 				return EditorShortcutCommand.RefreshAssetDatabase;
 			}
 
-			if (snapshot.DuplicatePressed && focusedWindow == EditorFocusedWindow.Entities)
+			if (snapshot.DuplicatePressed &&
+			    (focusedWindow == EditorFocusedWindow.Entities || focusedWindow == EditorFocusedWindow.Document))
 			{
 				return EditorShortcutCommand.DuplicateFocusedSelection;
 			}
 		}
 
-		if (snapshot.ShiftDown && snapshot.DuplicatePressed)
+		// Plain Tab only: Ctrl+Tab is ImGui's window switcher and Shift+Tab is reverse keyboard navigation.
+		if (snapshot.TabPressed &&
+		    snapshot.PrimaryModifierDown == false &&
+		    snapshot.ShiftDown == false)
+		{
+			return EditorShortcutCommand.SwitchToPreviousWorkspace;
+		}
+
+		if (snapshot.ShiftDown && snapshot.DuplicatePressed && focusedWindow != EditorFocusedWindow.Document)
 		{
 			return EditorShortcutCommand.ClearEntitySelection;
 		}
@@ -86,6 +97,7 @@ internal static class EditorShortcutCommandResolver
 		{
 			EditorFocusedWindow.Entities => EditorShortcutCommand.DeleteFocusedSelection,
 			EditorFocusedWindow.Assets => EditorShortcutCommand.DeleteFocusedSelection,
+			EditorFocusedWindow.Document => EditorShortcutCommand.DeleteFocusedSelection,
 			_ => EditorShortcutCommand.None
 		};
 	}

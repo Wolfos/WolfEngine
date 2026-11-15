@@ -590,7 +590,9 @@ internal sealed unsafe class MiniAudioVoice : IAudioBackendVoice
 			}
 			else
 			{
-				_stateHandle = GCHandle.Alloc(new StreamDecoderState(content.Payload));
+				// The artifact stream is positioned just past the WOLFAUD header; MiniAudio seeks are
+				// relative to the encoded payload, so remember where it starts.
+				_stateHandle = GCHandle.Alloc(new StreamDecoderState(content.Payload, content.Payload.Position));
 				MiniAudioEngine.Ensure(
 					ma.decoder_init(&Read, &Seek, (void*)GCHandle.ToIntPtr(_stateHandle), &config, _decoder),
 					"initialize stream decoder");
@@ -702,7 +704,14 @@ internal sealed unsafe class MiniAudioVoice : IAudioBackendVoice
 		try
 		{
 			var state = (StreamDecoderState)GCHandle.FromIntPtr((nint)decoder->pUserData).Target!;
-			state.Stream.Seek(offset, (int)origin == 0 ? SeekOrigin.Begin : SeekOrigin.Current);
+			var target = origin switch
+			{
+				ma_seek_origin.ma_seek_origin_start => state.PayloadStart + offset,
+				ma_seek_origin.ma_seek_origin_end => state.Stream.Length + offset,
+				_ => state.Stream.Position + offset
+			};
+			if (target < state.PayloadStart || target > state.Stream.Length) return ma_result.MA_BAD_SEEK;
+			state.Stream.Position = target;
 			return ma_result.MA_SUCCESS;
 		}
 		catch
@@ -711,5 +720,5 @@ internal sealed unsafe class MiniAudioVoice : IAudioBackendVoice
 		}
 	}
 
-	private sealed record StreamDecoderState(Stream Stream);
+	private sealed record StreamDecoderState(Stream Stream, long PayloadStart);
 }

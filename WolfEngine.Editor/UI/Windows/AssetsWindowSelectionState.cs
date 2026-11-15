@@ -8,6 +8,12 @@ internal sealed class AssetsWindowSelectionState
 	public string SelectedFolderPath { get; private set; } = AssetPipelinePaths.AssetsFolderName;
 	public string? FolderTreeRevealPath { get; private set; }
 	public Guid? ExpandedSourceId { get; set; }
+	private Guid? _observedAssetId;
+
+	public void ObserveBrowserSelection(Guid assetId)
+	{
+		_observedAssetId = assetId;
+	}
 
 	public void SetSelectedFolderPath(string relativeFolderPath)
 	{
@@ -45,13 +51,30 @@ internal sealed class AssetsWindowSelectionState
 		if (assetSelectionService.SelectedAssetId is { } selectedAssetId &&
 		    projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
 		{
-			var source = browserModel.SourcesBySourceId.Values.FirstOrDefault(item =>
-				item.PrimaryAsset.Id == selectedAssetId || item.SubAssets.Any(asset => asset.Id == selectedAssetId));
-			SetSelectedFolderPath(source?.FolderPath ?? ProjectPathUtility.GetFolderPath(selectedAsset.RelativeSourcePath));
+			if (_observedAssetId != selectedAssetId)
+			{
+				browserModel.SourcesBySourceId.TryGetValue(selectedAsset.SourceId, out var source);
+				SetSelectedFolderPath(source?.FolderPath ?? ProjectPathUtility.GetFolderPath(selectedAsset.RelativeSourcePath));
+				if (source is not null && source.PrimaryAsset.Id != selectedAssetId)
+				{
+					ExpandedSourceId = source.SourceId;
+				}
+				else if (ExpandedSourceId.HasValue)
+				{
+					ExpandedSourceId = source?.SubAssets.Count > 0 ? source.SourceId : null;
+				}
+			}
+
+			_observedAssetId = selectedAssetId;
 		}
 		else if (assetSelectionService.SelectedAssetId.HasValue)
 		{
 			assetSelectionService.Clear();
+			_observedAssetId = null;
+		}
+		else
+		{
+			_observedAssetId = null;
 		}
 	}
 

@@ -50,14 +50,14 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 		Options = options;
 		_profilerName = $"Gameplay UI.Rebuild [{options.Name ?? id.ToString()}]";
 		_parameters = new Dictionary<string, object?>(initialParameters);
-		_renderer = new RazorTreeRenderer(services, host.Dispatcher);
+		_renderer = new RazorTreeRenderer(services, host.Dispatcher, host.Images);
 		Pointer = new UiPointerController(this);
 		_rootComponentId = _renderer.AttachRoot(componentType);
 		_styleSheet = CssStyleSheet.Parse(css ?? string.Empty);
 		_text = new UiTextService(host.Fonts);
 		_text.SetFonts(_styleSheet.FontSources);
 		_layout = new YogaLayoutEngine(_text);
-		_frames = new UiFrameBuilder(_text);
+		_frames = new UiFrameBuilder(_text, host.Images);
 		if (options.Kind == UiSurfaceKind.Texture)
 		{
 			Texture = Texture.CreateRenderTarget(
@@ -299,10 +299,12 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 	private const float MaxDisplayScale = 8.0f;
 
 	internal UiFontCatalog Fonts { get; }
+	internal UiImageSources Images { get; }
 	public GameplayUiHost(IServiceProvider services)
 	{
 		_services = services;
 		Fonts = new UiFontCatalog(services.GetService<IFontContentProvider>());
+		Images = new UiImageSources(services.GetService<ITextureSourceProvider>());
 	}
 
 	/// <summary>Screen render target size, in physical pixels.</summary>

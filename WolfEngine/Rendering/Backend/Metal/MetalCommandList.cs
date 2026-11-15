@@ -426,6 +426,18 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_renderEncoder.SetFragmentBuffer(metalBuffer.Buffer, (nuint)offset, slot);
 	}
 
+	// Metal copies inline constants with setBytes, which aborts the process above this size instead of failing the call.
+	private const int MaxInlineConstantBytes = 4096;
+
+	private static void ThrowIfInlineConstantsTooLarge(uint slot, int length)
+	{
+		if (length <= MaxInlineConstantBytes) return;
+
+		throw new ArgumentOutOfRangeException(
+			nameof(length),
+			$"Constants for buffer slot {slot} are {length} bytes; Metal accepts at most {MaxInlineConstantBytes} bytes of inline constants. Bind a constant buffer instead.");
+	}
+
 	public void SetGraphicsConstants(uint slot, ReadOnlySpan<byte> data)
 	{
 		ThrowIfDisposed();
@@ -433,6 +445,8 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		{
 			return;
 		}
+
+		ThrowIfInlineConstantsTooLarge(slot, data.Length);
 
 		EnsureRenderEncoder();
 		fixed (byte* dataPtr = data)
@@ -449,6 +463,8 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		{
 			return;
 		}
+
+		ThrowIfInlineConstantsTooLarge(slot, data.Length);
 
 		EnsureComputeEncoder();
 		fixed (byte* dataPtr = data)
@@ -583,10 +599,10 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		}
 		if (metalCommandBuffer.UsesCurrentBindlessBuffers(_descriptorTable, maxAvailable) == false)
 		{
-			// An argument buffer grew after this ICB slot was encoded. The backend bridge
-			// observes the pointer change at the next frame boundary and re-encodes the
-			// active slot. Skipping one stale execution is preferable to submitting an ICB
-			// that contains a dangling Metal buffer binding.
+			// An argument buffer grew after this ICB slot was encoded. The growth raised the bindless
+			// table's generation, so IndirectDrawRecords re-encodes the slot the next time it is
+			// prepared. Skipping one stale execution is preferable to submitting an ICB that
+			// contains a dangling Metal buffer binding.
 			return;
 		}
 
@@ -715,12 +731,19 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		if (request.ExecutionRangeBuffer is not MetalBuffer executionRangeBuffer ||
 		    request.DrawArgsBuffer is not MetalBuffer drawArgsBuffer ||
-		    request.DrawCommandBuffer is not MetalBuffer drawCommandBuffer)
+		    request.BatchBuffer is not MetalBuffer batchBuffer)
 		{
 			throw new InvalidOperationException("Compaction input buffers were not created by the Metal backend.");
 		}
 
-		if (executionRangeBuffer.IsDisposed || drawArgsBuffer.IsDisposed || drawCommandBuffer.IsDisposed)
+		if (executionRangeBuffer.IsDisposed || drawArgsBuffer.IsDisposed || batchBuffer.IsDisposed)
+		{
+			return;
+		}
+
+		// A page with no encoded commands has nothing to copy, and no index buffer to issue draws from.
+		var indexBuffer = metalCommandBuffer.CompactionIndexBuffer;
+		if (indexBuffer.NativePtr == IntPtr.Zero)
 		{
 			return;
 		}
@@ -755,9 +778,19 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			(nuint)request.DrawArgsBaseOffsetBytes,
 			MetalIndirectCompactionKernel.DrawArgsBufferIndex);
 		_computeEncoder.SetBuffer(
-			drawCommandBuffer.Buffer,
+			batchBuffer.Buffer,
 			0,
-			MetalIndirectCompactionKernel.DrawCommandsBufferIndex);
+			MetalIndirectCompactionKernel.BatchesBufferIndex);
+		_computeEncoder.SetBuffer(
+			metalCommandBuffer.CompactionGeometry,
+			0,
+			MetalIndirectCompactionKernel.GeometryBufferIndex);
+		// Only the address is taken: the draw it issues reads the indices when the compacted commands execute,
+		// which is where the commands' own references make the buffer resident.
+		_computeEncoder.SetBuffer(
+			indexBuffer,
+			0,
+			MetalIndirectCompactionKernel.IndexBufferIndex);
 
 		var parameters = new MetalIndirectCompactionParams
 		{
@@ -1027,6 +1060,60 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		{
 			blit.Dispose();
 		}
+	}
+
+	public void UploadTexture(IGfxTexture texture, ReadOnlySpan<byte> texels)
+	{
+		ThrowIfDisposed();
+		if (texture is not MetalTexture metalTexture || metalTexture.Texture.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Texture was not created by the Metal backend.");
+		}
+
+		var descriptor = texture.Descriptor;
+		if (descriptor.Dimension != TextureDimension.Texture2D || TextureFormatUtilities.IsCompressed(descriptor.Format))
+		{
+			throw new NotSupportedException("Only uncompressed 2D textures can be uploaded.");
+		}
+
+		var rowBytes = TextureFormatUtilities.GetBytesPerRow(descriptor.Format, descriptor.Width);
+		if (texels.Length != rowBytes * descriptor.Height)
+		{
+			throw new ArgumentException(
+				$"Expected {rowBytes * descriptor.Height} bytes of tightly packed texels, got {texels.Length}.",
+				nameof(texels));
+		}
+
+		EndActiveEncoders();
+
+		// A blit from a staging buffer is ordered with this command buffer, where ReplaceRegion would write the
+		// texture immediately under a frame still reading it. The command buffer retains the staging buffer
+		// until it completes, so this method can release its own reference straight away.
+		MTLBuffer staging;
+		fixed (byte* source = texels)
+		{
+			staging = _queue.Device.NewBuffer((IntPtr)source, (ulong)texels.Length, MTLResourceOptions.ResourceStorageModeShared);
+		}
+
+		var blit = _commandBuffer.BlitCommandEncoder();
+		TakeOwnership(blit.NativePtr);
+		blit.CopyFromBuffer(
+			staging,
+			0,
+			(ulong)rowBytes,
+			(ulong)texels.Length,
+			new MTLSize { width = (ulong)descriptor.Width, height = (ulong)descriptor.Height, depth = 1 },
+			metalTexture.Texture,
+			0,
+			0,
+			new MTLOrigin { x = 0, y = 0, z = 0 });
+		blit.EndEncoding();
+		if (blit.NativePtr != IntPtr.Zero)
+		{
+			blit.Dispose();
+		}
+
+		staging.Dispose();
 	}
 
 	public void Barrier(in ResourceBarrierDescription barrier)

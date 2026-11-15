@@ -888,8 +888,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
-		ValidateIndirectReferences(d3d12CommandBuffer, maxAvailable);
-		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 		CommandList.ExecuteIndirect(
 			d3d12CommandBuffer.CommandSignature,
 			maxAvailable,
@@ -897,19 +895,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			0,
 			(ID3D12Resource*)null,
 			0);
-	}
-
-	private static void ValidateIndirectReferences(D3D12IndirectCommandBuffer commandBuffer, uint commandCount)
-	{
-		if (GraphicsConfig.ValidateIndirectCommandBuffers == false)
-		{
-			return;
-		}
-
-		if (commandBuffer.TryDescribeStaleReferences(out var description))
-		{
-			Console.WriteLine($"[indirect validation] {description} (executing {commandCount} commands)");
-		}
 	}
 
 	public void ExecuteCompactedIndirectCommandBuffer(
@@ -941,8 +926,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
-		ValidateIndirectReferences(d3d12CommandBuffer, maxCommandCount);
-		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 
 		// Both transitions double as the barrier that orders the compaction dispatch's writes ahead of
 		// the command processor reading them.
@@ -980,8 +963,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
-		ValidateIndirectReferences(d3d12CommandBuffer, d3d12CommandBuffer.Descriptor.MaxCommandCount);
-		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 
 		// Range mode: consume {start,count} and execute from command 0 using the count value only.
 		var countOffset = commandRangeOffsetBytes + sizeof(uint);
@@ -1322,25 +1303,94 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	private ulong UploadConstants(ReadOnlySpan<byte> data)
 	{
-		var alignedSize = Align((ulong)data.Length, 256);
-		if (_currentConstantUploadPage is null ||
-		    _currentConstantUploadOffset + alignedSize > _currentConstantUploadPage.SizeInBytes)
+		var (page, offset) = AllocateUpload((ulong)data.Length, 256);
+		fixed (byte* source = data)
+		{
+			Buffer.MemoryCopy(source, page.MappedData + (nint)offset, page.SizeInBytes - offset, (ulong)data.Length);
+		}
+
+		return page.GpuAddress + offset;
+	}
+
+	public void UploadTexture(IGfxTexture texture, ReadOnlySpan<byte> texels)
+	{
+		if (texture is not ID3D12BackendTexture d3d12Texture || d3d12Texture.Resource is null)
+		{
+			throw new InvalidOperationException("Texture was not created by the Direct3D12 backend.");
+		}
+
+		var descriptor = texture.Descriptor;
+		if (descriptor.Dimension != TextureDimension.Texture2D || TextureFormatUtilities.IsCompressed(descriptor.Format))
+		{
+			throw new NotSupportedException("Only uncompressed 2D textures can be uploaded.");
+		}
+
+		var rowBytes = (ulong)TextureFormatUtilities.GetBytesPerRow(descriptor.Format, descriptor.Width);
+		if ((ulong)texels.Length != rowBytes * (ulong)descriptor.Height)
+		{
+			throw new ArgumentException(
+				$"Expected {rowBytes * (ulong)descriptor.Height} bytes of tightly packed texels, got {texels.Length}.",
+				nameof(texels));
+		}
+
+		// Placed footprints need 256-byte row pitches and 512-byte offsets.
+		var rowPitch = Align(rowBytes, D3D12Api.TextureDataPitchAlignment);
+		var (page, offset) = AllocateUpload(rowPitch * (ulong)descriptor.Height, D3D12Api.TextureDataPlacementAlignment);
+		fixed (byte* source = texels)
+		{
+			for (var row = 0; row < descriptor.Height; row++)
+			{
+				Buffer.MemoryCopy(
+					source + (nint)((ulong)row * rowBytes),
+					page.MappedData + (nint)(offset + (ulong)row * rowPitch),
+					rowPitch,
+					rowBytes);
+			}
+		}
+
+		var destination = new TextureCopyLocation
+		{
+			PResource = d3d12Texture.Resource,
+			Type = TextureCopyType.SubresourceIndex
+		};
+		destination.Anonymous.SubresourceIndex = 0;
+		var sourceLocation = new TextureCopyLocation
+		{
+			PResource = page.Resource.Handle,
+			Type = TextureCopyType.PlacedFootprint
+		};
+		sourceLocation.Anonymous.PlacedFootprint = new PlacedSubresourceFootprint
+		{
+			Offset = offset,
+			Footprint = new SubresourceFootprint
+			{
+				Format = D3D12Device.ToDxgiFormat(descriptor.Format, descriptor.IsSrgb),
+				Width = (uint)descriptor.Width,
+				Height = (uint)descriptor.Height,
+				Depth = 1,
+				RowPitch = (uint)rowPitch
+			}
+		};
+		CommandList.CopyTextureRegion(&destination, 0, 0, 0, &sourceLocation, (Box*)null);
+	}
+
+	/// <summary>
+	/// Reserves space in this command list's upload pages. The pages return to the device only once the GPU has
+	/// finished this list, so the data stays valid for every command that reads it.
+	/// </summary>
+	private (D3D12ConstantUploadPage Page, ulong Offset) AllocateUpload(ulong sizeInBytes, ulong alignment)
+	{
+		var alignedSize = Align(sizeInBytes, 256);
+		var offset = _currentConstantUploadPage is null ? 0 : Align(_currentConstantUploadOffset, alignment);
+		if (_currentConstantUploadPage is null || offset + alignedSize > _currentConstantUploadPage.SizeInBytes)
 		{
 			_currentConstantUploadPage = _owner.RentConstantUploadPage(alignedSize);
 			_constantUploadPages.Add(_currentConstantUploadPage);
-			_currentConstantUploadOffset = 0;
+			offset = 0;
 		}
 
-		var page = _currentConstantUploadPage;
-		var destination = page.MappedData + (nint)_currentConstantUploadOffset;
-		fixed (byte* source = data)
-		{
-			Buffer.MemoryCopy(source, destination, alignedSize, (ulong)data.Length);
-		}
-
-		var gpuAddress = page.GpuAddress + _currentConstantUploadOffset;
-		_currentConstantUploadOffset += alignedSize;
-		return gpuAddress;
+		_currentConstantUploadOffset = offset + alignedSize;
+		return (_currentConstantUploadPage, offset);
 	}
 
 	internal void RecycleConstantUploadPages()
@@ -1383,17 +1433,6 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		native.Anonymous.Transition = transition;
 		CommandList.ResourceBarrier(1, &native);
 		buffer.CurrentState = targetState;
-	}
-
-	private void TransitionIndirectReferencedBuffers(D3D12IndirectCommandBuffer commandBuffer)
-	{
-		foreach (var (buffer, requiredState) in commandBuffer.ReferencedBufferStates)
-		{
-			if (buffer.IsCpuWritableDirect == false)
-			{
-				TransitionBufferIfNeeded(buffer, requiredState);
-			}
-		}
 	}
 
 	private static ResourceStates ConvertResourceState(ResourceState state)

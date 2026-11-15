@@ -9,7 +9,6 @@ namespace WolfEngine.Editor.UI;
 
 public class SceneWindow: EditorWindow
 {
-    private const float ToolbarIconSize = 15.5f;
     private static readonly SceneDebugViewOption[] FallbackDebugViews =
     [
         new SceneDebugViewOption(SceneDebugViewIds.FinalColor, "Final Color", SceneDebugViewKind.Color)
@@ -81,19 +80,9 @@ public class SceneWindow: EditorWindow
         ImGui.PopStyleVar(2);
 
         ImGui.SetCursorPosX(3);
-        if (DrawTransformModeButton("Translate", "translate", TransformGizmoMode.Translate))
+        if (TransformToolbar.DrawModeButtons(_icons, _gizmoMode, _sceneToolMode == SceneToolMode.Transform) is { } clickedMode)
         {
-            SelectTransformMode(TransformGizmoMode.Translate);
-        }
-        ImGui.SameLine();
-        if (DrawTransformModeButton("Rotate", "rotate", TransformGizmoMode.Rotate))
-        {
-            SelectTransformMode(TransformGizmoMode.Rotate);
-        }
-        ImGui.SameLine();
-        if (DrawTransformModeButton("Scale", "scale", TransformGizmoMode.Scale))
-        {
-            SelectTransformMode(TransformGizmoMode.Scale);
+            SelectTransformMode(clickedMode);
         }
         ImGui.SameLine();
         if (DrawToolbarButton("Terrain", "terrain", _sceneToolMode == SceneToolMode.Terrain))
@@ -102,21 +91,7 @@ public class SceneWindow: EditorWindow
         }
 
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(80.0f);
-        if (ImGui.BeginCombo("##Space", _transformSpace == TransformSpace.Local ? "Local" : "World"))
-        {
-            if (ImGui.Selectable("Local", _transformSpace == TransformSpace.Local))
-            {
-                _transformSpace = TransformSpace.Local;
-            }
-
-            if (ImGui.Selectable("World", _transformSpace == TransformSpace.World))
-            {
-                _transformSpace = TransformSpace.World;
-            }
-
-            ImGui.EndCombo();
-        }
+        TransformToolbar.DrawSpaceDropdown(ref _transformSpace);
 
         ImGui.SameLine();
         ImGui.SetNextItemWidth(80.0f);
@@ -391,32 +366,13 @@ public class SceneWindow: EditorWindow
 
     private bool DrawToolbarButton(string buttonId, string iconName, bool isSelected)
     {
-        if (isSelected)
-        {
-            var selectedColor = ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive];
-            ImGui.PushStyleColor(ImGuiCol.Button, selectedColor);
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, selectedColor);
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive, selectedColor);
-        }
-
-        var clicked = ImGui.ImageButton(buttonId, _icons.Get(iconName), Vector2.One * ToolbarIconSize);
-        if (isSelected)
-        {
-            ImGui.PopStyleColor(3);
-        }
-
-        return clicked;
+        return TransformToolbar.DrawToolButton(_icons, buttonId, iconName, isSelected);
     }
 
     private void SelectTransformMode(TransformGizmoMode mode)
     {
         _sceneToolMode = SceneToolMode.Transform;
         _gizmoMode = mode;
-    }
-
-    private bool DrawTransformModeButton(string buttonId, string iconName, TransformGizmoMode mode)
-    {
-        return DrawToolbarButton(buttonId, iconName, _sceneToolMode == SceneToolMode.Transform && _gizmoMode == mode);
     }
 
     private string GetDebugViewLabel(SceneDebugViewOption[] debugViews, string activeDebugViewId)

@@ -19,8 +19,9 @@ public sealed class EditorPreferencesWindow : EditorWindow
 
 		var limitFps = EditorPreferences.GetLimitFPS();
 		var maxFps = EditorPreferences.GetMaxFPS();
-		EditorUIUtility.Checkbox("Limit FPS", ref limitFps);
-		EditorUIUtility.InputInt("Max FPS", ref maxFps);
+		// Limits how often the 3D views are drawn. The editor UI keeps running at the display's rate.
+		EditorUIUtility.Checkbox("Limit viewport FPS", ref limitFps);
+		EditorUIUtility.InputInt("Max viewport FPS", ref maxFps);
 		EditorPreferences.SetLimitFPS(limitFps);
 		EditorPreferences.SetMaxFPS(maxFps);
 

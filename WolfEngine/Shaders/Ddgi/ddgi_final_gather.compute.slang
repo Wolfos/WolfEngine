@@ -1,0 +1,530 @@
+import "../Common/common.slang";
+import "../Common/constants.slang";
+import "../Common/common_bindless.slang";
+import "../Common/common_lighting.slang";
+import "../Common/draw_data.slang";
+import "../Common/normal_decode.slang";
+import "../Common/packed_vertex.slang";
+import "../Common/raytracing_common.slang";
+import "../Common/rt_hit_surface.slang";
+import "ddgi_sample.slang";
+
+// DDGI final gather: traces each pixel's first diffuse bounce and samples the probes where it lands,
+// instead of interpolating probes at the visible surface. The probe grid is far coarser than the
+// geometry, so probes on the far side of a wall still contribute at the shading point; a traced ray
+// cannot pass through the wall, which is what removes the bleeding.
+//
+// Output is in the same units deferred lighting expects from EvaluateDdgiDiffuse, irradiance / PI,
+// with albedo left out so the textures stay sharp under any later filtering. With cosine-weighted
+// directions the PDF cancels the cosine and the 1 / PI, so one sample is just the incoming radiance.
+// Alpha carries the hit distance for a future denoiser.
+
+cbuffer BindlessHandles : register(b0)
+{
+    uint depthHandle;
+    uint normalHandle;
+    uint outputHandle;
+    uint environmentHandle;
+    uint irradianceHandle;
+    uint samplerHandle;
+    uint errorTextureHandle;
+    uint ddgiIrradianceL0Handle;
+    uint ddgiIrradianceLyHandle;
+    uint ddgiIrradianceLzHandle;
+    uint ddgiIrradianceLxHandle;
+    uint ddgiVisibilityHandle;
+    uint ddgiProbeStateHandle;
+    uint ddgiProbeActivityHandle;
+    uint ddgiProbeRelocationDecisionHandle;
+    uint shadowMapHandle0;
+    uint shadowMapHandle1;
+    uint shadowMapHandle2;
+};
+
+cbuffer CameraParams : register(b1)
+{
+    CameraParams camera;
+};
+
+cbuffer FinalGatherSettings : register(b2)
+{
+    uint framebufferSizeX;
+    uint framebufferSizeY;
+    uint outputSizeX;
+    uint outputSizeY;
+    uint frameIndex;
+    uint sidecarHitShadingAvailable;
+    float maxRayDistance;
+    float bias;
+    float fireflyClamp;
+    float3 directLightDirection;
+    float3 directLightColorIntensity;
+    float finalGatherPad0;
+    float3 ddgiOrigin;
+    float ddgiProbeSpacing;
+    int ddgiStorageOffsetX;
+    int ddgiStorageOffsetY;
+    int ddgiStorageOffsetZ;
+    uint ddgiProbeCountX;
+    uint ddgiProbeCountY;
+    uint ddgiProbeCountZ;
+    uint ddgiProbeCount;
+    uint ddgiAtlasColumns;
+    uint ddgiAtlasRows;
+    uint ddgiVisibilityTileInteriorSize;
+    float ddgiMaxRayDistance;
+    float ddgiViewBias;
+    float ddgiHorizontalBlendDistance;
+    float ddgiVerticalBlendDistance;
+    uint ddgiProbeRelocationEnabled;
+    // The camera's unjittered view-projection and the directional shadow cascades, all camera-relative. The
+    // cascades answer sun visibility at hits they fully cover; see ShadowMapSunVisibility.
+    row_major float4x4 cameraViewProjection;
+    row_major float4x4 shadowViewProjection0;
+    row_major float4x4 shadowViewProjection1;
+    row_major float4x4 shadowViewProjection2;
+    // xyz: radial distance each cascade covers. w: 1 when the cascades are rendered this frame, else 0.
+    float4 shadowSplitsEnabled;
+    float4 shadowDepthBiases;
+    float4 shadowNormalOffsets;
+};
+
+RaytracingAccelerationStructure sceneTlas : register(t3);
+StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t4);
+StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t5);
+StructuredBuffer<uint> g_InstanceIndexToInstanceHandle : register(t6);
+StructuredBuffer<GpuMeshData> g_MeshTable : register(t7);
+StructuredBuffer<PackedMeshVertex> g_PackedVertices : register(t8);
+StructuredBuffer<uint> g_PackedIndices : register(t9);
+StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t10);
+StructuredBuffer<GpuTerrainLayerData> g_TerrainLayerTable : register(t11);
+StructuredBuffer<uint> g_InstanceIndexToTerrainRtResolution : register(t12);
+
+RtSceneTables FinalGatherSceneTables()
+{
+    RtSceneTables tables;
+    tables.instances = g_InstanceTable;
+    tables.materials = g_MaterialTable;
+    tables.instanceIndexToInstanceHandle = g_InstanceIndexToInstanceHandle;
+    tables.meshes = g_MeshTable;
+    tables.packedVertices = g_PackedVertices;
+    tables.packedIndices = g_PackedIndices;
+    tables.terrainMaterials = g_TerrainMaterialTable;
+    tables.terrainLayers = g_TerrainLayerTable;
+    tables.instanceIndexToTerrainRtResolution = g_InstanceIndexToTerrainRtResolution;
+    tables.errorTextureHandle = errorTextureHandle;
+    return tables;
+}
+
+DdgiSampleParams MakeDdgiSampleParams()
+{
+    DdgiSampleParams params;
+    params.origin = ddgiOrigin;
+    params.probeSpacing = ddgiProbeSpacing;
+    params.probeCount = uint3(ddgiProbeCountX, ddgiProbeCountY, ddgiProbeCountZ);
+    params.totalProbeCount = ddgiProbeCount;
+    params.storageOffset = int3(ddgiStorageOffsetX, ddgiStorageOffsetY, ddgiStorageOffsetZ);
+    params.atlasColumns = ddgiAtlasColumns;
+    params.atlasRows = ddgiAtlasRows;
+    params.tileBorderSize = DDGI_TILE_BORDER_SIZE;
+    params.visibilityTileInteriorSize = ddgiVisibilityTileInteriorSize;
+    params.maxRayDistance = ddgiMaxRayDistance;
+    params.viewBias = ddgiViewBias;
+    params.horizontalBlendDistance = ddgiHorizontalBlendDistance;
+    params.verticalBlendDistance = ddgiVerticalBlendDistance;
+    params.enabled = 1u;
+    params.probeRelocationEnabled = ddgiProbeRelocationEnabled;
+    params.irradianceL0Handle = ddgiIrradianceL0Handle;
+    params.irradianceLyHandle = ddgiIrradianceLyHandle;
+    params.irradianceLzHandle = ddgiIrradianceLzHandle;
+    params.irradianceLxHandle = ddgiIrradianceLxHandle;
+    params.visibilityHandle = ddgiVisibilityHandle;
+    params.probeStateHandle = ddgiProbeStateHandle;
+    params.probeActivityHandle = ddgiProbeActivityHandle;
+    params.relocationDecisionHandle = ddgiProbeRelocationDecisionHandle;
+    params.samplerHandle = samplerHandle;
+    return params;
+}
+
+float3 ReconstructCameraRelativePosition(float2 uv, float depth)
+{
+    float4 clip = float4(uv.x * 2.0f - 1.0f, -(uv.y * 2.0f - 1.0f), depth, 1.0f);
+    float4 positionH = mul(clip, camera.invViewProjection);
+    return positionH.xyz / positionH.w;
+}
+
+/// The full-resolution pixel a trace pixel samples: the one under its centre.
+uint2 FinalGatherRepresentativePixel(uint2 tracePixel, uint2 traceSize, uint2 fullSize)
+{
+    float2 fullPixelPosition = (float2(tracePixel) + 0.5f) * float2(fullSize) / float2(traceSize);
+    return min(uint2(fullPixelPosition), fullSize - 1u);
+}
+
+/// Decodes a g-buffer normal. A pixel whose normal was never written decodes to a zero vector, which
+/// plain normalize would turn into NaN; those get an arbitrary but valid up vector instead.
+float3 FinalGatherDecodeNormal(float3 encoded)
+{
+    float3 normal = encoded * 2.0f - 1.0f;
+    float lengthSquared = dot(normal, normal);
+    return lengthSquared > 1e-8f ? normal * rsqrt(lengthSquared) : float3(0.0f, 1.0f, 0.0f);
+}
+
+/// False for NaN or infinity in any channel. Tests the exponent bits rather than calling isfinite,
+/// which fast-math shader compilation is free to fold to true.
+bool FinalGatherIsFinite(float4 value)
+{
+    uint4 exponent = asuint(value) & 0x7F800000u;
+    return all(exponent != 0x7F800000u.xxxx);
+}
+
+/// Angle by which a gather ray's texture-filtering cone widens per unit of distance. A gather sample stands for
+/// one of the many directions the denoiser averages at a pixel, at most 64 frames of them; this is the solid
+/// angle one of 64 directions covers on the hemisphere, sqrt(2 pi / 64). Texture detail finer than that cone is
+/// averaged away by the filter anyway, so sampling it only costs bandwidth and adds noise.
+static const float FINAL_GATHER_CONE_SPREAD_ANGLE = 0.3133f;
+
+/// Device-depth increment used to measure how far one step of depth precision moves a reconstructed
+/// position at a given depth: a few ulps of 32-bit float just below 1.
+static const float DEPTH_PRECISION_STEP = 4.0e-7f;
+
+uint FinalGatherHash(uint value)
+{
+    value ^= value >> 16u;
+    value *= 0x7FEB352Du;
+    value ^= value >> 15u;
+    value *= 0x846CA68Bu;
+    value ^= value >> 16u;
+    return value;
+}
+
+/// One 2D sample per pixel per frame. Each pixel walks the R2 low-discrepancy sequence from its own
+/// random offset, so successive frames at a pixel cover the hemisphere evenly instead of clumping,
+/// which is what temporal accumulation will need. Neighbouring pixels stay decorrelated.
+float2 FinalGatherSample(uint2 pixel, uint frame)
+{
+    uint seed = FinalGatherHash(pixel.x * 1973u + FinalGatherHash(pixel.y * 9277u));
+    float2 offset = float2(
+        float(seed & 0xFFFFu) / 65536.0f,
+        float(FinalGatherHash(seed) & 0xFFFFu) / 65536.0f);
+    return frac(offset + float(frame & 0xFFFFu) * float2(0.75487766625f, 0.56984029100f));
+}
+
+float3 CosineHemisphereDirection(float3 normal, float2 u)
+{
+    // Orthonormal basis without a branch on the normal's orientation (Duff et al. 2017).
+    float signZ = normal.z >= 0.0f ? 1.0f : -1.0f;
+    float a = -1.0f / (signZ + normal.z);
+    float b = normal.x * normal.y * a;
+    float3 tangent = float3(1.0f + signZ * normal.x * normal.x * a, signZ * b, -signZ * normal.x);
+    float3 bitangent = float3(b, signZ + normal.y * normal.y * a, -normal.y);
+
+    float radius = sqrt(u.x);
+    float angle = 6.28318530718f * u.y;
+    float3 local = float3(radius * cos(angle), radius * sin(angle), sqrt(max(1.0f - u.x, 0.0f)));
+    return normalize(tangent * local.x + bitangent * local.y + normal * local.z);
+}
+
+float3 SampleSkyRadiance(float3 direction)
+{
+    return SampleEnvironment(environmentHandle, samplerHandle, direction) * IBL_EXPOSURE;
+}
+
+/// Irradiance / PI the sky delivers to a surface with this normal, ignoring everything in between.
+float3 SampleSkyIrradiance(float3 normal)
+{
+    return GetTexture(irradianceHandle)
+        .SampleLevel(GetSampler(samplerHandle), DirToEnvUV(normal), 0.0f).rgb * IBL_EXPOSURE / PI;
+}
+
+/// Irradiance / PI arriving at a world position, from the probes inside the grid and the sky
+/// irradiance outside it, blended the same way deferred lighting blends them. The sky is only
+/// fetched where it contributes: most hits sit well inside the grid, where its weight is zero.
+float3 SampleIndirectIrradiance(DdgiSampleParams params, float3 worldPosition, float3 normal)
+{
+    float gridInfluence = DdgiGridInfluence(params, worldPosition);
+    if (gridInfluence <= 0.0f)
+    {
+        return SampleSkyIrradiance(normal);
+    }
+
+    DdgiProbeDebug debug;
+    DdgiShSample sample = SampleDdgiSh(params, worldPosition, normal, gridInfluence, 0u, debug);
+    float3 probeIrradiance = EvaluateDdgiDiffuse(sample, normal);
+    if (gridInfluence >= 1.0f)
+    {
+        return probeIrradiance;
+    }
+
+    return lerp(SampleSkyIrradiance(normal), probeIrradiance, gridInfluence);
+}
+
+/// Radiance travelling back along a ray that left the gather range without hitting anything. The
+/// end point is known to be open space, so the probes there are a safe stand-in for the rest of the
+/// path. The receiver normal faces back toward the ray origin, which keeps the probe view bias on
+/// the side the ray came from.
+float3 SampleUnoccludedRadiance(DdgiSampleParams params, float3 endPosition, float3 direction)
+{
+    float gridInfluence = DdgiGridInfluence(params, endPosition);
+    if (gridInfluence <= 0.0f)
+    {
+        return SampleSkyRadiance(direction);
+    }
+
+    DdgiProbeDebug debug;
+    DdgiShSample sample = SampleDdgiSh(params, endPosition, -direction, gridInfluence, 0u, debug);
+    float3 probeRadiance = EvaluateDdgiRadiance(sample, direction);
+    if (gridInfluence >= 1.0f)
+    {
+        return probeRadiance;
+    }
+
+    return lerp(SampleSkyRadiance(direction), probeRadiance, gridInfluence);
+}
+
+/// Returned by ShadowMapSunVisibility where the cascades cannot answer and a shadow ray has to be traced.
+static const float SHADOW_MAP_NOT_COVERED = -1.0f;
+
+/// Sun visibility at a gather hit read from the directional shadow cascades, or SHADOW_MAP_NOT_COVERED.
+///
+/// A texture lookup instead of a shadow ray that can run the length of the scene. It is only valid where the
+/// cascades hold every caster: shadow casters are culled to those that can shadow a receiver inside the camera
+/// frustum, out to each cascade's split, so a hit outside the frustum, behind the camera or past the last cascade
+/// gets a traced ray instead. The gather lights its hits with the first directional light, which is also the one
+/// the cascades are rendered for.
+///
+/// One bilinear 2x2 comparison rather than deferred lighting's wide PCF kernel: one gather sample feeds one pixel
+/// of a signal the denoiser then averages, so a soft edge here is wasted work.
+float ShadowMapSunVisibility(float3 worldPosition, float3 geometricNormal, float3 lightDirection)
+{
+    if (shadowSplitsEnabled.w < 0.5f)
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    float3 relativePosition = worldPosition - camera.cameraOrigin;
+    float4 clip = mul(float4(relativePosition, 1.0f), cameraViewProjection);
+    if (clip.w <= 0.0f)
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    float2 ndc = clip.xy / clip.w;
+    if (any(abs(ndc) > 1.0f.xx))
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    // Radial distance, as deferred lighting selects cascades. It is never less than the view depth the caster
+    // culling extends each cascade to, so a hit inside a split is inside that cascade's culling volume.
+    float receiverDistance = length(relativePosition);
+    float4x4 shadowViewProjection;
+    uint shadowMapHandle;
+    float depthBias;
+    float normalOffset;
+    if (receiverDistance <= shadowSplitsEnabled.x)
+    {
+        shadowViewProjection = shadowViewProjection0;
+        shadowMapHandle = shadowMapHandle0;
+        depthBias = shadowDepthBiases.x;
+        normalOffset = shadowNormalOffsets.x;
+    }
+    else if (receiverDistance <= shadowSplitsEnabled.y)
+    {
+        shadowViewProjection = shadowViewProjection1;
+        shadowMapHandle = shadowMapHandle1;
+        depthBias = shadowDepthBiases.y;
+        normalOffset = shadowNormalOffsets.y;
+    }
+    else if (receiverDistance <= shadowSplitsEnabled.z)
+    {
+        shadowViewProjection = shadowViewProjection2;
+        shadowMapHandle = shadowMapHandle2;
+        depthBias = shadowDepthBiases.z;
+        normalOffset = shadowNormalOffsets.z;
+    }
+    else
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    // The same normal offset deferred lighting applies, so a hit surface is not shadowed by itself.
+    float nDotL = dot(geometricNormal, lightDirection);
+    float3 shadowPosition = relativePosition + geometricNormal * (normalOffset * saturate(1.0f - nDotL));
+    float4 shadowPositionH = mul(float4(shadowPosition, 1.0f), shadowViewProjection);
+    if (shadowPositionH.w <= 0.0f)
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    float3 shadowNdc = shadowPositionH.xyz / shadowPositionH.w;
+    float2 shadowUv = float2(shadowNdc.x * 0.5f + 0.5f, 0.5f - shadowNdc.y * 0.5f);
+    if (any(shadowUv <= 0.0f.xx) ||
+        any(shadowUv >= 1.0f.xx) ||
+        shadowNdc.z <= 0.0f ||
+        shadowNdc.z >= 1.0f)
+    {
+        return SHADOW_MAP_NOT_COVERED;
+    }
+
+    Texture2D<float4> shadowMap = GetTexture(shadowMapHandle);
+    uint shadowWidth;
+    uint shadowHeight;
+    shadowMap.GetDimensions(shadowWidth, shadowHeight);
+    int2 shadowMapSize = int2(max(int(shadowWidth), 1), max(int(shadowHeight), 1));
+
+    ShadowReceiverPlane receiver;
+    receiver.depth = shadowNdc.z - depthBias;
+    receiver.uv = shadowUv;
+    receiver.depthGradient = ComputeShadowReceiverDepthGradient(geometricNormal, lightDirection, shadowViewProjection);
+
+    return SampleShadowBilinearPCF(shadowMap, shadowUv, shadowMapSize, receiver);
+}
+
+float TraceDirectionalVisibility(float3 worldPosition, float3 geometricNormal, float3 lightDirection)
+{
+    RayDesc ray;
+    ray.Origin = worldPosition + geometricNormal * max(bias, 0.001f);
+    ray.Direction = lightDirection;
+    ray.TMin = 0.001f;
+    ray.TMax = 10000.0f;
+    return WolfTraceAny(sceneTlas, ray, 0xFF).hit ? 0.0f : 1.0f;
+}
+
+/// Outgoing diffuse radiance of a hit surface, lit the same way the DDGI probe rays light theirs:
+/// the primary directional light, shadowed by the cascades where they cover the hit and by a traced
+/// ray elsewhere, plus the probe irradiance at the hit.
+float3 ShadeHitSurface(DdgiSampleParams params, RtHitSurface surface)
+{
+    float3 direct = 0.0f.xxx;
+    if (dot(directLightColorIntensity, directLightColorIntensity) > 1e-10f)
+    {
+        float3 lightDirection = -normalize(directLightDirection);
+        float nDotL = saturate(dot(surface.worldNormal, lightDirection));
+        if (nDotL > 0.0f)
+        {
+            float visibility = ShadowMapSunVisibility(
+                surface.worldPosition,
+                surface.worldGeometricNormal,
+                lightDirection);
+            if (visibility == SHADOW_MAP_NOT_COVERED)
+            {
+                visibility = TraceDirectionalVisibility(
+                    surface.worldPosition,
+                    surface.worldGeometricNormal,
+                    lightDirection);
+            }
+            direct = directLightColorIntensity * nDotL * visibility / PI;
+        }
+    }
+
+    float3 indirect = SampleIndirectIrradiance(params, surface.worldPosition, surface.worldNormal);
+    return surface.albedo * (direct + indirect) + surface.emissive;
+}
+
+[numthreads(8, 8, 1)]
+void DdgiFinalGatherCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 outputPixel = dispatchThreadId.xy;
+    uint2 outputSize = uint2(outputSizeX, outputSizeY);
+    if (any(outputPixel >= outputSize))
+    {
+        return;
+    }
+
+    uint2 size = uint2(framebufferSizeX, framebufferSizeY);
+    uint2 pixel = FinalGatherRepresentativePixel(outputPixel, outputSize, size);
+
+    RWTexture2D<float4> outputTexture = GetRWTexture(outputHandle);
+    float depth = GetTexture(depthHandle).Load(int3(pixel, 0)).r;
+    if (IsBackgroundDepth(depth))
+    {
+        outputTexture[outputPixel] = 0.0f.xxxx;
+        return;
+    }
+
+    float2 screenUv = (float2(pixel) + 0.5f) / float2(size);
+    float3 cameraRelativePosition = ReconstructCameraRelativePosition(screenUv, depth);
+    float3 worldPosition = cameraRelativePosition + camera.cameraOrigin;
+    float3 normal = FinalGatherDecodeNormal(GetTexture(normalHandle).Load(int3(pixel, 0)).xyz);
+    float3 direction = CosineHemisphereDirection(normal, FinalGatherSample(outputPixel, frameIndex));
+
+    // A fixed bias only holds up close to the camera. Far away, the position rebuilt from the depth buffer
+    // is only as exact as the depth format at that range, and can land behind the surface it came from;
+    // a ray launched from there starts inside the geometry and reads as black. Push the origin off the
+    // surface by at least a pixel's width, and back toward the camera, along which the depth error lies,
+    // by a few depth steps.
+    float2 pixelStepUv = float2(1.0f / float(size.x), 0.0f);
+    float pixelFootprint = length(ReconstructCameraRelativePosition(screenUv + pixelStepUv, depth) - cameraRelativePosition);
+    float depthStep = length(ReconstructCameraRelativePosition(screenUv, min(depth + DEPTH_PRECISION_STEP, 1.0f)) - cameraRelativePosition);
+    float surfaceOffset = max(bias, max(pixelFootprint * 1.5f, 0.001f));
+    float viewOffset = depthStep * 2.0f;
+    float3 toCamera = normalize(-cameraRelativePosition);
+    RayDesc ray;
+    ray.Origin = worldPosition + normal * surfaceOffset + toCamera * viewOffset;
+    ray.Direction = direction;
+    ray.TMin = 0.0f;
+    ray.TMax = maxRayDistance;
+    float selfHitDistance = (surfaceOffset + viewOffset) * 4.0f;
+    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
+
+    // The cone starts as wide as the trace pixel it was launched from, not the full-resolution pixel the
+    // origin was reconstructed at.
+    float tracePixelScale = float(size.x) / float(outputSize.x);
+    float coneWidthAtOrigin = pixelFootprint * max(tracePixelScale, 1.0f);
+
+    DdgiSampleParams params = MakeDdgiSampleParams();
+    float3 radiance;
+    float hitDistance = maxRayDistance;
+    if (hit.hit)
+    {
+        hitDistance = hit.distance;
+        RtHitSurface surface;
+        bool resolved = sidecarHitShadingAvailable != 0u && RtTryResolveHitSurface(
+            FinalGatherSceneTables(),
+            hit.instanceIndex,
+            hit.primitiveIndex,
+            hit.barycentrics,
+            hit.distance,
+            ray.Origin,
+            direction,
+            coneWidthAtOrigin + hit.distance * FINAL_GATHER_CONE_SPREAD_ANGLE,
+            surface);
+        if (resolved == false)
+        {
+            // Geometry without a resolvable material still blocks the ray. Treat it as a mid-grey
+            // diffuser lit by the probes so it neither leaks nor punches a black hole.
+            float3 hitPosition = ray.Origin + direction * hit.distance;
+            radiance = 0.5f * SampleIndirectIrradiance(params, hitPosition, -direction);
+        }
+        else if (dot(surface.worldGeometricNormal, direction) > 0.0f)
+        {
+            // A back face right at the origin means the launch point is still inside the surface it
+            // left, which says nothing about the light there; take the probes' estimate for this point
+            // instead. Further away, the ray reached the back of a closed mesh and nothing lit can be
+            // seen from there. The probe trace makes the same call.
+            radiance = hit.distance < selfHitDistance
+                ? SampleIndirectIrradiance(params, worldPosition, normal)
+                : 0.0f.xxx;
+        }
+        else
+        {
+            radiance = ShadeHitSurface(params, surface);
+        }
+    }
+    else
+    {
+        radiance = SampleUnoccludedRadiance(params, ray.Origin + direction * maxRayDistance, direction);
+    }
+
+    radiance = FinalGatherIsFinite(float4(radiance, 0.0f)) ? max(radiance, 0.0f.xxx) : 0.0f.xxx;
+    if (fireflyClamp > 0.0f)
+    {
+        float luminance = dot(radiance, float3(0.2126f, 0.7152f, 0.0722f));
+        if (luminance > fireflyClamp)
+        {
+            radiance *= fireflyClamp / luminance;
+        }
+    }
+
+    outputTexture[outputPixel] = float4(radiance, hitDistance);
+}

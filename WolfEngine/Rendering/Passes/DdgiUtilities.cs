@@ -22,11 +22,56 @@ public static class DdgiUtilities
 	private const float VisibilityVarianceFloor = 0.000001f;
 	private const float MaxProbeRelocationDistanceFactor = 0.45f;
 	private const float RelocationMinimumTolerance = 0.001f;
+	// Mirrored by DDGI_ACTIVITY_SCATTER_ROW_WIDTH in ddgi_classify.compute.slang. Stays within D3D12's baseline limit.
+	internal const uint ActivityScatterRowWidth = 65535;
+
+	internal static (uint X, uint Y, uint Z) GetActivityScatterDispatchGroupCount(uint instanceUpperBound)
+	{
+		var groupCount = Math.Max(instanceUpperBound, 1u);
+		var x = Math.Min(groupCount, ActivityScatterRowWidth);
+		var y = ((groupCount - 1u) / ActivityScatterRowWidth) + 1u;
+
+		return (x, y, 1u);
+	}
 
 	public static bool IsRayTracedDdgiEnabled(RenderConfig config)
 	{
 		return config.DiffuseGlobalIllumination.Enabled &&
 		       config.DiffuseGlobalIllumination.Mode == DiffuseGlobalIlluminationMode.RayTracedDdgi;
+	}
+
+	public static bool IsFinalGatherEnabled(RenderConfig config)
+	{
+		return IsRayTracedDdgiEnabled(config) &&
+		       config.DiffuseGlobalIllumination.FinalGather.Enabled;
+	}
+
+	public static bool IsFinalGatherDenoiseEnabled(RenderConfig config)
+	{
+		return IsFinalGatherEnabled(config) &&
+		       config.DiffuseGlobalIllumination.FinalGather.Denoise;
+	}
+
+	public const int MaxFinalGatherFilterIterations = 5;
+
+	public static int GetFinalGatherFilterIterations(DdgiFinalGatherSettings settings) =>
+		Math.Clamp(settings.FilterIterations, 1, MaxFinalGatherFilterIterations);
+
+	public static float GetFinalGatherTemporalAlpha(DdgiFinalGatherSettings settings) =>
+		Math.Clamp(settings.TemporalAlpha, 0.01f, 1.0f);
+
+	public static Int2 GetFinalGatherTraceSize(Int2 fullSize, DdgiFinalGatherSettings settings)
+	{
+		var divisor = settings.Resolution switch
+		{
+			DdgiFinalGatherResolution.Full => 1,
+			DdgiFinalGatherResolution.Half => 2,
+			DdgiFinalGatherResolution.Quarter => 4,
+			_ => 2
+		};
+		return new Int2(
+			Math.Max((fullSize.X + divisor - 1) / divisor, 1),
+			Math.Max((fullSize.Y + divisor - 1) / divisor, 1));
 	}
 
 	public static DdgiGridShape GetGridShape(DiffuseGlobalIlluminationConfig config)
@@ -755,3 +800,34 @@ public readonly record struct DdgiRelocationResult(
 	DdgiProbeState State,
 	DdgiProbeRelocationDecision Decision,
 	int BackfaceHitCount);
+
+/// <summary>
+/// The textures the DDGI final gather's SVGF denoiser carries from one frame to the next, each with a read and a
+/// write copy.
+/// </summary>
+public static class DdgiFinalGatherHistorySlot
+{
+	/// <summary>The first a-trous level's output: filtered irradiance / PI in rgb, its variance in alpha.</summary>
+	public const int Color = 0;
+
+	/// <summary>Accumulated luminance mean and second moment in rg, history length in frames in b.</summary>
+	public const int Moments = 1;
+
+	/// <summary>
+	/// The edge-stopping guide: linear view depth of the surface each trace pixel saw in r, zero for sky, and its
+	/// world normal in g, octahedral-encoded and quantised to an integer a 32-bit float holds exactly. One texture
+	/// so every filter tap reads both with a single fetch.
+	/// </summary>
+	public const int Guide = 2;
+
+	public const int Count = 3;
+
+	private static readonly TextureFormat[] Formats =
+	[
+		TextureFormat.Rgba16Float,
+		TextureFormat.Rgba16Float,
+		TextureFormat.Rg32Float
+	];
+
+	public static TextureFormat GetFormat(int slot) => Formats[slot];
+}

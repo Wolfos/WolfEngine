@@ -25,9 +25,13 @@ public enum PrimitiveTopology
 /// Byte offset of the view's slice of the draw args, so shadow cascades compact against their own
 /// visibility rather than the first cascade's.
 /// </param>
+/// <param name="BatchBuffer">
+/// The batch table, indexed by draw id. A batch's capacity bounds its visible count, and its lane says
+/// which lane's page emits it.
+/// </param>
 /// <param name="LaneIndex">
 /// Execution lane that owns this page's draws. Every lane allocates a page over the same draw id
-/// range, so a draw is emitted only by the lane its bucket names.
+/// range, so a draw is emitted only by the lane its batch names.
 /// </param>
 public readonly record struct NativeIndirectCompactionRequest(
 	IGfxIndirectCommandBuffer CommandBuffer,
@@ -35,7 +39,7 @@ public readonly record struct NativeIndirectCompactionRequest(
 	uint ExecutionRangeIndex,
 	IGfxBuffer DrawArgsBuffer,
 	ulong DrawArgsBaseOffsetBytes,
-	IGfxBuffer DrawCommandBuffer,
+	IGfxBuffer BatchBuffer,
 	uint PageStartCommandIndex,
 	uint PageCommandCapacity,
 	uint LaneIndex,
@@ -153,6 +157,14 @@ public interface IGfxCommandList
 	void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ);
 
 	void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes);
+
+	/// <summary>
+	/// Copies tightly packed rows of texels into mip 0 of an uncompressed 2D texture, ordered with the rest of
+	/// this command list, so a frame still on the GPU keeps reading the texels it was recorded with. The texture
+	/// must already be in <see cref="ResourceState.CopyDestination"/>.
+	/// </summary>
+	void UploadTexture(IGfxTexture texture, ReadOnlySpan<byte> texels) =>
+		throw new NotSupportedException($"{GetType().Name} does not upload texture data.");
 
 	void Barrier(in ResourceBarrierDescription barrier);
 

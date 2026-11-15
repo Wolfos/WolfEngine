@@ -40,6 +40,7 @@ cbuffer BindlessHandles : register(b0)
     uint shadowMapHandle2;
     uint shadowSamplerHandle;
     uint fogIntegratedHandle;
+    uint ddgiFinalGatherHandle;
 };
 
 cbuffer CameraParams : register(b1)
@@ -65,6 +66,7 @@ cbuffer LightingParams : register(b2)
     float4 shadowSplitsBlend;
     float4 shadowTexelSizeBiasStrength;
     float4 shadowDepthBiases;
+    float4 shadowNormalOffsets;
     float3 ddgiOrigin;
     float ddgiProbeSpacing;
     int ddgiStorageOffsetX;
@@ -96,7 +98,8 @@ cbuffer LightingParams : register(b2)
     uint fogEnabled;
     uint fogSliceCount;
     float fogMaxDistance;
-    float _fogPadding;
+    float indirectLightMinimum;
+    uint ddgiFinalGatherEnabled;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
@@ -176,6 +179,7 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 emissive = gbufferEmissive.SampleLevel(linearSampler, uv, 0.0f).rgb;
 
     float occlusion = material.r;
+    float materialOcclusion = occlusion;
     float roughness = material.g;
     float metallic = material.b;
     if (aoEnabled != 0u)
@@ -243,6 +247,7 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         shadowLightIndex,
         shadowTexelSizeBiasStrength.xy,
         shadowDepthBiases.xyz,
+        shadowNormalOffsets.xyz,
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
         shadowMaxDistance);
@@ -319,8 +324,30 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         skyDiffuseContribution,
         ddgiContribution,
         ddgiGridInfluence);
-    color += diffuseIndirectContribution * diffuseIndirectMultiplier +
-        specularContribution * specularIndirectMultiplier;
+    if (ddgiFinalGatherEnabled != 0u)
+    {
+        ddgiDiffuseIrradiance = GetTexture(ddgiFinalGatherHandle).Load(int3(dispatchThreadId.xy, 0)).rgb * occlusion;
+        ddgiGridInfluence = 1.0f;
+        diffuseIndirectContribution = ddgiDiffuseIrradiance * diffuseEnergy * albedo * materialOcclusion;
+    }
+    diffuseIndirectContribution *= diffuseIndirectMultiplier;
+    specularContribution *= specularIndirectMultiplier;
+    if (indirectLightMinimum > 0.0f)
+    {
+        // Floor the incoming light rather than the final contribution, so albedo and occlusion
+        // still shape the lifted result instead of greying out dark or saturated materials.
+        diffuseIndirectContribution = max(
+            diffuseIndirectContribution,
+            indirectLightMinimum * diffuseEnergy * albedo * occlusion);
+        float3 minimumSpecularContribution = EvaluateSpecularImageBasedLightingFromRadiance(
+            surface,
+            viewDir,
+            indirectLightMinimum.xxx,
+            brdfLutHandle,
+            samplerHandle);
+        specularContribution = max(specularContribution, minimumSpecularContribution);
+    }
+    color += diffuseIndirectContribution + specularContribution;
     if (ddgiFinalContributionDebugEnabled != 0u)
     {
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);

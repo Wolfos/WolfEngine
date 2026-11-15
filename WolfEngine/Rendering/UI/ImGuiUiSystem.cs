@@ -13,7 +13,8 @@ public interface IImGuiInputSink
 	void AddChar(char c);
 	void SetMousePosition(Vector2 position);
 	void SetMouseButton(int button, bool down);
-	void AddMouseScroll(Vector2 scroll);
+	void AddMouseScroll(Vector2 scroll, Vector2? preciseDelta = null);
+	void AddMouseMagnification(float delta);
 }
 
 public interface IUiFrameProvider
@@ -40,6 +41,8 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	private readonly ConcurrentQueue<UiFrameData> _pendingFrames = new();
 	private readonly ConcurrentQueue<(ImGuiKey key, bool down)> _pendingKeys = new();
 	private readonly ConcurrentQueue<char> _pendingChars = new();
+	private readonly ConcurrentQueue<float> _pendingMagnifications = new();
+	private readonly ConcurrentQueue<(Vector2 Wheel, Vector2? Pan)> _pendingScroll = new();
 	private readonly IntPtr _context;
 	private readonly object _contextLock = new();
 	private readonly bool[] _mouseButtons = new bool[5];
@@ -50,13 +53,21 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	private bool _leftSuperDown;
 	private bool _rightSuperDown;
 	private Vector2 _mousePosition = new(-1, -1);
-	private Vector2 _mouseWheel = Vector2.Zero;
 	private UiTextureAtlas _fontAtlas;
 	private float _fontDpiScale = 1.0f;
 
 	private UiTextureAtlas? _uploadedFontAtlas;
 	private static ImFontPtr _regularFont;
 	private static ImFontPtr _boldFont;
+
+	/// <summary>Multiplicative pinch zoom for the current UI frame; one when there is no gesture.</summary>
+	public float MouseZoomFactor { get; private set; } = 1.0f;
+
+	/// <summary>Precise trackpad movement in logical points for this frame, with the user's scroll direction.</summary>
+	public Vector2 MousePanDelta { get; private set; }
+
+	/// <summary>Conventional wheel movement this frame, excluding trackpad scrolling.</summary>
+	public Vector2 MouseWheelZoomDelta { get; private set; }
 
 	public ImGuiUiSystem()
 	{
@@ -65,6 +76,11 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		var io = ImGui.GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 		io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
+		if (OperatingSystem.IsMacOS())
+		{
+			Platform.SdlImGuiClipboard.Install(ImGui.GetPlatformIO());
+		}
+
 		ApplyDefaultStyle();
 
 		RebuildFonts(1.0f);
@@ -120,9 +136,29 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			}
 
 			io.MousePos = _mousePosition;
-			io.MouseWheel = _mouseWheel.Y;
-			io.MouseWheelH = _mouseWheel.X;
-			_mouseWheel = Vector2.Zero;
+			var wheel = Vector2.Zero;
+			MousePanDelta = Vector2.Zero;
+			MouseWheelZoomDelta = Vector2.Zero;
+			while (_pendingScroll.TryDequeue(out var scroll))
+			{
+				wheel += scroll.Wheel;
+				if (scroll.Pan is { } pan)
+				{
+					MousePanDelta += pan;
+				}
+				else
+				{
+					MouseWheelZoomDelta += scroll.Wheel;
+				}
+			}
+
+			io.MouseWheel = wheel.Y;
+			io.MouseWheelH = wheel.X;
+			MouseZoomFactor = 1.0f;
+			while (_pendingMagnifications.TryDequeue(out var factor))
+			{
+				MouseZoomFactor = Math.Clamp(MouseZoomFactor * factor, 0.01f, 100.0f);
+			}
 
 			ImGui.NewFrame();
 		}
@@ -327,9 +363,18 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		}
 	}
 
-	public void AddMouseScroll(Vector2 scroll)
+	public void AddMouseScroll(Vector2 scroll, Vector2? preciseDelta = null)
 	{
-		_mouseWheel += scroll;
+		_pendingScroll.Enqueue((scroll, preciseDelta));
+	}
+
+	public void AddMouseMagnification(float delta)
+	{
+		var factor = 1.0f + delta;
+		if (float.IsFinite(factor) && factor > 0.0f)
+		{
+			_pendingMagnifications.Enqueue(factor);
+		}
 	}
 
 	[MemberNotNull(nameof(_fontAtlas))]
@@ -457,6 +502,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		var primary = new ColorRGBA(0.675f,0.78f,0.984f, 1.0f);
 		var secondary = new ColorRGBA(0.745f,0.776f,0.855f, 1.0f);
 		var secondaryContainer = new ColorRGBA(0.247f,0.275f,0.337f, 1.0f);
+		var fieldSurface = new ColorRGBA(0.188f, 0.196f, 0.216f, 1.0f);
 		var border = new ColorRGBA(0.00f, 0.00f, 0.00f, 0.35f);
 		var separator    = new ColorRGBA(1.00f, 1.00f, 1.00f, 0.06f);
 		
@@ -481,6 +527,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.WindowMenuButtonPosition = ImGuiDir.None;
 		
 		style.Colors[(int)ImGuiCol.Text] = textColor;
+		style.Colors[(int)ImGuiCol.TextDisabled] = secondary;
 		style.Colors[(int)ImGuiCol.WindowBg] = bgColor;
 		style.Colors[(int)ImGuiCol.ChildBg] = bgDark;
 		style.Colors[(int)ImGuiCol.MenuBarBg] = bgDark;
@@ -509,9 +556,9 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.Colors[(int)ImGuiCol.TabHovered] = bgColor;
 		style.Colors[(int)ImGuiCol.TabSelectedOverline] = default(ColorRGBA);
 		
-		style.Colors[(int)ImGuiCol.FrameBg] = secondaryContainer;
-		style.Colors[(int)ImGuiCol.FrameBgHovered] = secondaryContainer;
-		style.Colors[(int)ImGuiCol.FrameBgActive] = secondaryContainer;
+		style.Colors[(int)ImGuiCol.FrameBg] = fieldSurface;
+		style.Colors[(int)ImGuiCol.FrameBgHovered] = bgBright;
+		style.Colors[(int)ImGuiCol.FrameBgActive] = fieldSurface;
 		style.Colors[(int)ImGuiCol.CheckMark] = primary;
 		style.Colors[(int)ImGuiCol.SliderGrab] = primary;
 		style.Colors[(int)ImGuiCol.SliderGrabActive] = primary;

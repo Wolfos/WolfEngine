@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.AssetPipeline;
 
@@ -17,7 +18,14 @@ public sealed class WolfEngineBuildConfig
 	public CookedRuntimeSettings RuntimeSettings { get; set; } = new();
 	public string Configuration { get; set; } = "Release";
 	public bool SelfContained { get; set; } = true;
+	/// <summary>The built executable's name, without extension. Empty uses the project folder's name.</summary>
+	public string ExecutableName { get; set; } = string.Empty;
 	public string Target { get; set; } = "current-host";
+	/// <summary>
+	/// Whether the build shows the "Powered by WolfEngine" splash screen while the first scene loads. Settings files
+	/// written before this existed omit it and keep the splash.
+	/// </summary>
+	public bool ShowEngineSplashScreen { get; set; } = true;
 
 	public IReadOnlyList<Guid> GetSceneIds()
 	{
@@ -40,7 +48,18 @@ public sealed class WolfEngineBuildConfig
 public sealed class CookedRuntimeSettings
 {
 	public string Title { get; set; } = "WolfEngine Game";
+
+	/// <summary>
+	/// How the game starts. Fullscreen covers the display at its native resolution and ignores
+	/// <see cref="Width"/> and <see cref="Height"/>. Settings files written before this existed omit it and start
+	/// fullscreen.
+	/// </summary>
+	public WindowMode WindowMode { get; set; } = WindowMode.Fullscreen;
+
+	/// <summary>The window's width in points when the game starts windowed.</summary>
 	public int Width { get; set; } = 1280;
+
+	/// <summary>The window's height in points when the game starts windowed.</summary>
 	public int Height { get; set; } = 720;
 	public float FixedDeltaTime { get; set; } = 1.0f / 60.0f;
 	public int MaxPhysicsStepsPerFrame { get; set; } = 4;
@@ -50,6 +69,9 @@ public sealed class CookedRuntimeSettings
 public sealed class WolfBootstrapManifest
 {
 	public Dictionary<string, Guid> FontSources { get; set; } = new(StringComparer.Ordinal);
+
+	/// <summary>Texture source paths gameplay UI names, such as <c>Assets/UI/Potion.png</c>, by packed node id.</summary>
+	public Dictionary<string, Guid> TextureSources { get; set; } = new(StringComparer.Ordinal);
 	public const int CurrentVersion = 1;
 	public int Version { get; set; } = CurrentVersion;
 	public string Target { get; set; } = string.Empty;
@@ -59,6 +81,9 @@ public sealed class WolfBootstrapManifest
 	public Guid GameplayAssemblyId { get; set; }
 	public Guid GameplaySymbolsId { get; set; }
 	public Guid RuntimeSettingsId { get; set; }
+
+	/// <summary>The engine splash screen in the bootstrap pack, or empty for a build without one.</summary>
+	public Guid SplashScreenId { get; set; }
 	public List<WolfManifestPack> Packs { get; set; } = [];
 	public List<WolfManifestRoot> Roots { get; set; } = [];
 }

@@ -10,10 +10,29 @@ public sealed class AnimationDocument
     private readonly Stack<string> _redo = new();
     private readonly Type _type;
     private string _saved;
+    private long _dirtyRevision = -1;
+    private bool _dirty;
     public object Asset { get; private set; }
     public string Path { get; private set; }
     public long Revision { get; private set; }
-    public bool Dirty => Snapshot() != _saved;
+
+    /// <summary>
+    /// Serializes only when the revision changed, because the workspace tabs read this every frame.
+    /// Every edit reaches the document through Commit, Undo or Redo, which all bump the revision.
+    /// </summary>
+    public bool Dirty
+    {
+        get
+        {
+            if (_dirtyRevision != Revision)
+            {
+                _dirty = Snapshot() != _saved;
+                _dirtyRevision = Revision;
+            }
+
+            return _dirty;
+        }
+    }
     public bool CanUndo => _undo.Count > 0;
     public bool CanRedo => _redo.Count > 0;
     public AnimationDocument(string path)
@@ -36,5 +55,11 @@ public sealed class AnimationDocument
     public void Undo() { if (_undo.TryPop(out var state)) { _redo.Push(Snapshot()); Restore(state); } }
     public void Redo() { if (_redo.TryPop(out var state)) { _undo.Push(Snapshot()); Restore(state); } }
     private void Restore(string state) { Asset = JsonSerializer.Deserialize(state, _type, AnimationAssetJson.Options)!; Revision++; }
-    public void Save() { AnimationAssetJson.Write(Path, Asset); _saved = Snapshot(); }
+    public void Save()
+    {
+        AnimationAssetJson.Write(Path, Asset);
+        _saved = Snapshot();
+        _dirty = false;
+        _dirtyRevision = Revision;
+    }
 }

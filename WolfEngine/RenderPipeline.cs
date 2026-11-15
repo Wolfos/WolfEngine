@@ -4,6 +4,7 @@ using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using System.Numerics;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Vfx;
 
 namespace WolfEngine;
 
@@ -50,11 +51,18 @@ public class RenderPipeline : IRenderPipeline
 	private readonly Dictionary<GpuDrawDatabase, int> _forcedReconcileSnapshotsByDatabase = new();
 	private readonly Dictionary<GpuDrawDatabase, bool> _gpuHardeningStressByDatabase = new();
 	private readonly List<Entity> _dirtyWorldTransformRemovalScratch = new();
+	private readonly VfxService? _vfx;
 	private int _stressFrame;
 
 	public RenderPipeline(RenderGraph renderGraph)
+		: this(renderGraph, null)
+	{
+	}
+
+	public RenderPipeline(RenderGraph renderGraph, VfxService? vfx)
 	{
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
+		_vfx = vfx;
 	}
 
 	public void Run(Action? startup = null)
@@ -112,6 +120,12 @@ public class RenderPipeline : IRenderPipeline
 			}
 
 			PopulateSnapshot(snapshot, cameraWorldTransform, config, worlds);
+			ExtractRenderFeatures(snapshot, worlds);
+			if (worlds.Count > 0 && worlds[0] is { } firstWorld)
+			{
+				ExtractVfx(frameSnapshot, snapshot, firstWorld);
+			}
+
 			if (_renderGraph.TryPublishSnapshot() == false)
 			{
 				return;
@@ -153,9 +167,13 @@ public class RenderPipeline : IRenderPipeline
 
 		using (FrameProfiler.Instance.Measure("Build Snapshot"))
 		{
-			if (_renderGraph.TryBeginSnapshotWrite(out var frameSnapshot) == false)
+			FrameSnapshot frameSnapshot;
+			using (FrameProfiler.Instance.Measure("Wait for snapshot"))
 			{
-				return;
+				if (_renderGraph.TryBeginSnapshotWrite(out frameSnapshot) == false)
+				{
+					return;
+				}
 			}
 
 			for (var i = 0; i < views.Count; i++)
@@ -172,13 +190,18 @@ public class RenderPipeline : IRenderPipeline
 					submission.CameraWorldTransform,
 					submission.Config,
 					[worlds[i]]);
+				ExtractRenderFeatures(snapshot, [worlds[i]]);
+				ExtractVfx(frameSnapshot, snapshot, worlds[i]);
 			}
 
 			// Every database copies the process-wide generation tables after all gathers. A later view can
 			// allocate a shared draw, mesh or material slot that an earlier view must see this same frame.
-			for (var i = 0; i < frameSnapshot.Views.Count; i++)
+			using (FrameProfiler.Instance.Measure("Refresh shared handles"))
 			{
-				frameSnapshot.Views[i].GpuDrawDatabase.RefreshSharedHandleState();
+				for (var i = 0; i < frameSnapshot.Views.Count; i++)
+				{
+					frameSnapshot.Views[i].GpuDrawDatabase.RefreshSharedHandleState();
+				}
 			}
 
 			if (_renderGraph.TryPublishSnapshot() == false)
@@ -187,6 +210,30 @@ public class RenderPipeline : IRenderPipeline
 			}
 
 			_stressFrame++;
+		}
+	}
+
+	private void ExtractRenderFeatures(RenderViewSnapshot snapshot, IReadOnlyList<World> worlds)
+	{
+		using (FrameProfiler.Instance.Measure("Extract Render Features"))
+		{
+			for (var i = 0; i < worlds.Count; i++)
+			{
+				snapshot.ExtractRenderFeatures(worlds[i], _renderGraph.RenderFeatures);
+			}
+		}
+	}
+
+	private void ExtractVfx(FrameSnapshot frameSnapshot, RenderViewSnapshot snapshot, World world)
+	{
+		if (_vfx is null)
+		{
+			return;
+		}
+
+		using (FrameProfiler.Instance.Measure("Extract VFX"))
+		{
+			snapshot.VfxFrame = frameSnapshot.ExtractVfx(world, _vfx, _renderGraph);
 		}
 	}
 
@@ -354,10 +401,10 @@ public class RenderPipeline : IRenderPipeline
 						if (animator.PreviousSkinningMatrices is not { Length: > 0 } previousSkinningMatrices) continue;
 
 						var paletteStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                        var meshToRig = skinnedRenderer.MeshBindToRig ?? (world.HasComponent<WorldTransform>(animatorEntity)
+                        var meshToAnimator = world.HasComponent<WorldTransform>(animatorEntity)
                             ? transform.LocalToWorld * world.GetComponent<WorldTransform>(animatorEntity).WorldToLocal
-                            : transform.LocalToWorld);
-                        skinnedRenderer.PrepareSkinningPalette(skinningMatrices, previousSkinningMatrices, animator.PoseGeneration, meshToRig);
+                            : transform.LocalToWorld;
+                        skinnedRenderer.PrepareSkinningPalette(skinningMatrices, previousSkinningMatrices, animator.PoseGeneration, meshToAnimator);
                         paletteTicks += System.Diagnostics.Stopwatch.GetTimestamp() - paletteStart;
                         var snapshotStart = System.Diagnostics.Stopwatch.GetTimestamp();
                         snapshot.AddSkinning(sourceMesh, instanceMesh, skinnedRenderer.LocalSkinningMatrices,

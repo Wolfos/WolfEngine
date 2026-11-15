@@ -5,15 +5,24 @@ namespace WolfEngine.Rendering.Shaders;
 
 public readonly record struct ShaderProgramId
 {
+	private const string EngineNamespace = "engine://shaders/";
+	private const string AssetNamespace = "asset://shaders/";
+
 	public ShaderProgramId(string value)
 	{
-		if (string.IsNullOrWhiteSpace(value) || value.StartsWith("engine://shaders/", StringComparison.Ordinal) == false)
+		if (string.IsNullOrWhiteSpace(value) ||
+		    (value.StartsWith(EngineNamespace, StringComparison.Ordinal) == false &&
+		     value.StartsWith(AssetNamespace, StringComparison.Ordinal) == false))
 		{
-			throw new ArgumentException("Engine shader IDs must use the 'engine://shaders/' namespace.", nameof(value));
+			throw new ArgumentException(
+				$"Shader IDs must use the '{EngineNamespace}' or '{AssetNamespace}' namespace.", nameof(value));
 		}
 
 		Value = value;
 	}
+
+	/// <summary>Identifies a compute shader asset. Its kernels are compiled at import, never through the catalog.</summary>
+	public static ShaderProgramId ForAsset(Guid assetId) => new($"{AssetNamespace}{assetId:D}");
 
 	public string Value { get; }
 
@@ -46,6 +55,8 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId DdgiRelocate = Id("ddgi-relocate");
 	public static readonly ShaderProgramId DdgiIrradianceIntegrate = Id("ddgi-irradiance-integrate");
 	public static readonly ShaderProgramId DdgiIntegrate = Id("ddgi-integrate");
+	public static readonly ShaderProgramId DdgiFinalGather = Id("ddgi-final-gather");
+	public static readonly ShaderProgramId DdgiFinalGatherSvgf = Id("ddgi-final-gather-svgf");
 	public static readonly ShaderProgramId AmbientOcclusionBlur = Id("ao-blur");
 	public static readonly ShaderProgramId AmbientOcclusionUpsample = Id("ao-upsample");
 	public static readonly ShaderProgramId TaaResolve = Id("taa-resolve");
@@ -84,6 +95,10 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId ScreenSpaceDecal = Id("screen-space-decal");
 	public static readonly ShaderProgramId SelectionOutline = Id("selection-outline");
 	public static readonly ShaderProgramId GBufferDecalSeed = Id("gbuffer-decal-seed");
+	public static readonly ShaderProgramId VfxSimulate = Id("vfx-simulate");
+	public static readonly ShaderProgramId VfxSprite = Id("vfx-sprite");
+	public static readonly ShaderProgramId VfxRibbon = Id("vfx-ribbon");
+	public static readonly ShaderProgramId SplashScreen = Id("splash-screen");
 	public static readonly ShaderProgramId VolumetricFog = Id("volumetric-fog");
 
 	private static ShaderProgramId Id(string name) => new($"engine://shaders/{name}");
@@ -122,6 +137,8 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.DdgiRelocate, "Ddgi/ddgi_relocate.compute.slang"),
 			D(EngineShaderPrograms.DdgiIrradianceIntegrate, "Ddgi/ddgi_irradiance_integrate.compute.slang"),
 			D(EngineShaderPrograms.DdgiIntegrate, "Ddgi/ddgi_integrate.compute.slang"),
+			D(EngineShaderPrograms.DdgiFinalGather, "Ddgi/ddgi_final_gather.compute.slang"),
+			D(EngineShaderPrograms.DdgiFinalGatherSvgf, "Ddgi/ddgi_final_gather_svgf.compute.slang"),
 			D(EngineShaderPrograms.AmbientOcclusionBlur, "AmbientOcclusion/ao_blur.compute.slang"),
 			D(EngineShaderPrograms.AmbientOcclusionUpsample, "AmbientOcclusion/ao_upsample.compute.slang"),
 			D(EngineShaderPrograms.TaaResolve, "Taa/taa_resolve.compute.slang"),
@@ -160,7 +177,11 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.ScreenSpaceDecal, "Geometry/screen_space_decal.slang"),
 			D(EngineShaderPrograms.SelectionOutline, "Geometry/selection_outline.slang"),
 			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang"),
-			D(EngineShaderPrograms.VolumetricFog, "VolumetricFog/volumetric_fog.compute.slang")
+			D(EngineShaderPrograms.VolumetricFog, "VolumetricFog/volumetric_fog.compute.slang"),
+			D(EngineShaderPrograms.VfxSimulate, "Vfx/vfx_simulate.compute.slang"),
+			D(EngineShaderPrograms.VfxSprite, "Vfx/vfx_sprite.slang"),
+			D(EngineShaderPrograms.VfxRibbon, "Vfx/vfx_ribbon.slang"),
+			D(EngineShaderPrograms.SplashScreen, "Splash/splash_screen.slang")
 		};
 
 		_byId = new();
@@ -300,7 +321,8 @@ public sealed class EngineShaderCatalog
 		id == EngineShaderPrograms.TransparentForward || id == EngineShaderPrograms.ShadowMap ||
 		id == EngineShaderPrograms.TerrainSharedGBuffer || id == EngineShaderPrograms.DebugPrimitiveForward ||
 		id == EngineShaderPrograms.DebugPrimitiveGBuffer || id == EngineShaderPrograms.ScreenSpaceDecal ||
-		id == EngineShaderPrograms.SelectionOutline;
+		id == EngineShaderPrograms.SelectionOutline || id == EngineShaderPrograms.VfxSprite ||
+		id == EngineShaderPrograms.VfxRibbon || id == EngineShaderPrograms.SplashScreen;
 
 	private static bool IsDeclaredGraphicsEntryPointCombination(ShaderRequest request) =>
 		request.VertexEntryPoint == "vertexShader" &&
@@ -320,7 +342,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.IblBrdfLut) return ["IblBrdfCSMain"];
 		if (id == EngineShaderPrograms.IblIrradiance) return ["IblIrradianceCSMain"];
 		if (id == EngineShaderPrograms.IblPrefilter) return ["IblPrefilterCSMain"];
-		if (id == EngineShaderPrograms.GpuDrawCull) return ["CSCull"];
+		if (id == EngineShaderPrograms.GpuDrawCull) return ["CSPrepareBatchArgs", "CSCull"];
 		if (id == EngineShaderPrograms.GpuDrawCompact) return ["CSCompact"];
 		if (id == EngineShaderPrograms.AmbientOcclusionVbao) return ["AmbientOcclusionVisibilityBitmaskCS"];
 		if (id == EngineShaderPrograms.AmbientOcclusionRayTraced) return ["AmbientOcclusionRayTracedCS"];
@@ -332,6 +354,8 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.DdgiRelocate) return ["DdgiRelocationSolveCS"];
 		if (id == EngineShaderPrograms.DdgiIrradianceIntegrate) return ["DdgiIrradianceIntegrateCS"];
 		if (id == EngineShaderPrograms.DdgiIntegrate) return ["DdgiVisibilityIntegrateCS"];
+		if (id == EngineShaderPrograms.DdgiFinalGather) return ["DdgiFinalGatherCS"];
+		if (id == EngineShaderPrograms.DdgiFinalGatherSvgf) return ["DdgiSvgfTemporalCS", "DdgiSvgfVarianceCS", "DdgiSvgfFilterCS"];
 		if (id == EngineShaderPrograms.AmbientOcclusionBlur) return ["AmbientOcclusionBlurCS"];
 		if (id == EngineShaderPrograms.AmbientOcclusionUpsample) return ["AmbientOcclusionUpsampleCS"];
 		if (id == EngineShaderPrograms.TaaResolve) return ["TaaResolveCS"];
@@ -366,6 +390,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.TerrainAuthoringBrushes) return ["ApplyHeightmapRaiseLowerBrush", "ApplyHeightmapFlattenBrush", "ApplyHeightmapSmoothBrush", "ApplyLayerMapLayerBrush"];
 		if (id == EngineShaderPrograms.GBufferDecalSeed) return ["GBufferDecalSeedCS"];
 		if (id == EngineShaderPrograms.VolumetricFog) return ["VolumetricFogInjectCS", "VolumetricFogTemporalCS", "VolumetricFogIntegrateCS"];
+		if (id == EngineShaderPrograms.VfxSimulate) return ["VfxSimulateCS", "VfxEmitCS"];
 		return [];
 	}
 }

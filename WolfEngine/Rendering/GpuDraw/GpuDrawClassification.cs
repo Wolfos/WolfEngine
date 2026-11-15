@@ -8,6 +8,24 @@ public static class GpuDrawClassification
 	/// <summary>Reflection parity of the full world transform, including inherited scales.</summary>
 	public static bool ReversesWinding(in Matrix4x4 world) => world.GetDeterminant() < 0.0f;
 
+	/// <summary>
+	/// The lane key a draw executes in. Material state is shared by rigid and skinned meshes, so a draw is only
+	/// specialised by its mesh and transform after its material has been resolved to a bucket and sidedness.
+	/// </summary>
+	public static GpuDrawExecutionKey ResolveExecutionKey(
+		GpuDrawKind drawKind,
+		GpuDrawBucketId bucketId,
+		GpuDrawSidedness sidedness,
+		Mesh? mesh,
+		in Matrix4x4 world)
+	{
+		var isSkinned = drawKind == GpuDrawKind.Mesh &&
+		                bucketId != GpuDrawBucketId.AlphaBlend &&
+		                mesh?.IsSkinned == true;
+
+		return new GpuDrawExecutionKey(drawKind, bucketId, sidedness, isSkinned, ReversesWinding(world));
+	}
+
 	public static bool TryResolveBucketId(GpuDrawKind drawKind, Material material, out GpuDrawBucketId bucketId)
 	{
 		ArgumentNullException.ThrowIfNull(material);

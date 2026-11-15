@@ -20,12 +20,16 @@ public static class EditorToolingServiceCollectionExtensions
 		return services;
 	}
 
-	/// <summary>Registers editor-only 3D and font source tooling and their authoring dependencies.</summary>
+	/// <summary>
+	/// Registers editor-only 3D, font and compute shader source tooling and their authoring dependencies. Compute
+	/// shader import needs <see cref="AddEditorToolingShaders"/> too, for the engine's public shader module.
+	/// </summary>
 	public static IServiceCollection AddEditorToolingImporter(this IServiceCollection services)
 	{
 		ArgumentNullException.ThrowIfNull(services);
 		services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
 		services.AddSingleton<IFontCompiler, Fonts.FontCompiler>();
+		services.AddSingleton<IComputeShaderCompiler, ComputeShaderCompiler>();
 		return services;
 	}
 }

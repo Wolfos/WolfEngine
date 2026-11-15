@@ -4,13 +4,15 @@ import "../Common/draw_data.slang";
 import "../Common/normal_decode.slang";
 import "terrain_layer_blend.slang";
 
-#define WOLF_MAX_INSTANCE_COUNT 65535
-#define WOLF_MAX_MATERIAL_COUNT 65535
+#define WOLF_MAX_INSTANCE_COUNT 1048576
+#define WOLF_MAX_MATERIAL_COUNT 1048576
 
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
+// Instance ids of each batch's visible members, from the batch's draw args start onwards.
+StructuredBuffer<uint> g_VisibleInstances : register(t9);
 StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t14);
 StructuredBuffer<GpuTerrainLayerData> g_TerrainLayerTable : register(t15);
 
@@ -36,7 +38,9 @@ cbuffer CameraParams : register(b2)
     row_major float4x4 viewMatrix;
     float nearPlane;
     float farPlane;
-    float2 _cameraPadding;
+    // LOD bias for material textures; see SceneDrawData.MaterialMipBias.
+    float materialMipBias;
+    float _cameraPadding;
 };
 
 struct VSInput
@@ -160,7 +164,15 @@ VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
     GpuDrawArgs drawArgs = g_DrawArgsTable[drawIndex];
-    if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
+    // A record executed without compaction draws its batch's full capacity; instances past the visible count
+    // are discarded here.
+    uint instanceId = 0;
+    if (input.instanceId < drawArgs.instanceCount)
+    {
+        instanceId = g_VisibleInstances[drawArgs.startInstance + input.instanceId];
+    }
+
+    if (instanceId == 0 || instanceId >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);
         output.normal = float3(0.0f, 1.0f, 0.0f);
@@ -173,7 +185,6 @@ VSOutput vertexShader(VSInput input)
         return output;
     }
 
-    uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
     GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
@@ -212,10 +223,12 @@ float2 ClipToPixel(float4 clipPosition, uint2 frameSize)
         (-ndc.y * 0.5f + 0.5f) * frameSize.y);
 }
 
-float ClipToDepth(float4 clipPosition)
+/// View-space depth of a clip position: clip w, for a left-handed perspective projection. The velocity
+/// target is a half float, so it stores the previous frame's view depth rather than device depth: view depth
+/// keeps its relative precision at any distance, where device depth near 1 cannot tell surfaces metres apart.
+float ClipToViewDepth(float4 clipPosition)
 {
-    float invW = abs(clipPosition.w) > 1e-5f ? rcp(clipPosition.w) : 0.0f;
-    return clipPosition.z * invW;
+    return clipPosition.w;
 }
 
 uint ResolveMaterialIndex(uint materialHandle)
@@ -259,9 +272,9 @@ float2 GetTriplanarUvZ(float3 worldPosition, float layerScale)
 float4 SampleTriplanarFloat4(uint textureHandle, SamplerState samplerState, float3 worldPosition, float3 worldNormal, float layerScale)
 {
     float3 weights = GetTriplanarWeights(worldNormal);
-    float4 sampleX = GetTexture(textureHandle).Sample(samplerState, GetTriplanarUvX(worldPosition, layerScale));
-    float4 sampleY = GetTexture(textureHandle).Sample(samplerState, GetTriplanarUvY(worldPosition, layerScale));
-    float4 sampleZ = GetTexture(textureHandle).Sample(samplerState, GetTriplanarUvZ(worldPosition, layerScale));
+    float4 sampleX = GetTexture(textureHandle).SampleBias(samplerState, GetTriplanarUvX(worldPosition, layerScale), materialMipBias);
+    float4 sampleY = GetTexture(textureHandle).SampleBias(samplerState, GetTriplanarUvY(worldPosition, layerScale), materialMipBias);
+    float4 sampleZ = GetTexture(textureHandle).SampleBias(samplerState, GetTriplanarUvZ(worldPosition, layerScale), materialMipBias);
     return sampleX * weights.x + sampleY * weights.y + sampleZ * weights.z;
 }
 
@@ -278,9 +291,9 @@ float3 DecodeTriplanarNormal(uint normalHandle, SamplerState samplerState, float
         NonZeroSign(geometryNormal.x),
         NonZeroSign(geometryNormal.y),
         NonZeroSign(geometryNormal.z));
-    float3 normalX = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvX(worldPosition, layerScale)));
-    float3 normalY = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvY(worldPosition, layerScale)));
-    float3 normalZ = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvZ(worldPosition, layerScale)));
+    float3 normalX = DecodeNormalMapSample(GetTexture(normalHandle).SampleBias(samplerState, GetTriplanarUvX(worldPosition, layerScale), materialMipBias));
+    float3 normalY = DecodeNormalMapSample(GetTexture(normalHandle).SampleBias(samplerState, GetTriplanarUvY(worldPosition, layerScale), materialMipBias));
+    float3 normalZ = DecodeNormalMapSample(GetTexture(normalHandle).SampleBias(samplerState, GetTriplanarUvZ(worldPosition, layerScale), materialMipBias));
 
     float3 worldNormalX = normalize(float3(normalX.z * axisSign.x, normalX.y, normalX.x));
     float3 worldNormalY = normalize(float3(normalY.x, normalY.z * axisSign.y, normalY.y));
@@ -332,7 +345,7 @@ PSOutput fragmentShader(VSOutput input)
         output.normal = float4(0.5f, 0.5f, 1.0f, 1.0f);
         output.material = float4(0.0f, 1.0f, 1.0f, 1.0f);
         output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
-        output.velocity = float4(0.0f, 0.0f, 1.0f, 1.0f);
+        output.velocity = float4(0.0f, 0.0f, ClipToViewDepth(input.currentClip), 1.0f);
         return output;
     }
 
@@ -413,7 +426,7 @@ PSOutput fragmentShader(VSOutput input)
     uint2 frameSize = uint2(max(frameSizeX, 1u), max(frameSizeY, 1u));
     float2 currentPixel = ClipToPixel(input.currentClip, frameSize);
     float2 previousPixel = ClipToPixel(input.previousClip, frameSize);
-    float previousDepth = ClipToDepth(input.previousClip);
-    output.velocity = float4(previousPixel - currentPixel, previousDepth, 1.0f);
+    float previousViewDepth = ClipToViewDepth(input.previousClip);
+    output.velocity = float4(previousPixel - currentPixel, previousViewDepth, 1.0f);
     return output;
 }

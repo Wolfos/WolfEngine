@@ -76,4 +76,51 @@ public sealed class ThreeDFileImporterTests
         Assert.That(indices, Is.EqualTo(new uint[] { 3, 1, 0, 0, 3, 0, 0, 0 }));
         Assert.That(weights, Is.EqualTo(new float[] { .25f, .75f, 0, 0, 1, 0, 0, 0 }).Within(.00001f));
     }
+
+    [Test]
+    public void RemoveBindPlacement_KeepsOnlyThePlacementTheOffsetsDoNotApply()
+    {
+        // Unity-exported FBX (RPG Monster Wave): the scene root turns the Z-up mesh into the rig, the mesh hangs under
+        // it, and Assimp measures the bone offsets from the mesh node, so the offsets apply that turn themselves.
+        var rootTurn = Matrix4x4.CreateRotationX(MathF.PI / 2);
+        var boneBindModel = Matrix4x4.CreateTranslation(0, .5f, 0) * rootTurn;
+        Matrix4x4.Invert(boneBindModel, out var boneFromRig);
+        var offset = rootTurn * boneFromRig;
+        var bindPlacement = offset * boneBindModel;
+
+        // KayKit: the offsets ignore where the mesh hangs, so its node placement is the whole bind.
+        var headPlacement = Matrix4x4.CreateTranslation(0, 1.216f, 0);
+
+        var nodes = new List<ImportedNode>
+        {
+            new("Slime", Matrix4x4.Identity, [], -1, "RootNode", rootTurn),
+            new("Prop", Matrix4x4.Identity, [], -1)
+        };
+        ThreeDFileImporter.RemoveBindPlacement(nodes, bindPlacement);
+
+        Assert.That(IsIdentity(nodes[0].SkinBindToRig!.Value), Is.True);
+        Assert.That(nodes[1].SkinBindToRig, Is.Null);
+
+        // A rotated bone must pivot where Assimp's convention puts it, not around a twice-turned point.
+        var posedModel = Matrix4x4.CreateRotationZ(.7f) * boneBindModel;
+        var vertex = new Vector3(.1f, -.3f, .6f);
+        var expected = Vector3.Transform(vertex, offset * posedModel);
+        var actual = Vector3.Transform(vertex, nodes[0].SkinBindToRig!.Value * offset * posedModel);
+        Assert.That(Vector3.Distance(actual, expected), Is.LessThan(.00001f));
+
+        var kayKit = new List<ImportedNode> { new("Rogue_Head", headPlacement, [], -1, null, headPlacement) };
+        ThreeDFileImporter.RemoveBindPlacement(kayKit, Matrix4x4.Identity);
+
+        Assert.That(kayKit[0].SkinBindToRig, Is.EqualTo(headPlacement));
+    }
+
+    private static bool IsIdentity(Matrix4x4 matrix)
+    {
+        var difference = matrix - Matrix4x4.Identity;
+
+        return MathF.Abs(difference.M11) + MathF.Abs(difference.M12) + MathF.Abs(difference.M13) +
+               MathF.Abs(difference.M21) + MathF.Abs(difference.M22) + MathF.Abs(difference.M23) +
+               MathF.Abs(difference.M31) + MathF.Abs(difference.M32) + MathF.Abs(difference.M33) +
+               MathF.Abs(difference.M41) + MathF.Abs(difference.M42) + MathF.Abs(difference.M43) < .0001f;
+    }
 }

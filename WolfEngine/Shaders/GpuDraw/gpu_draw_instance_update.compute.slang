@@ -1,9 +1,8 @@
 import "../Common/draw_data.slang";
 
-#define WOLF_MAX_DRAW_COUNT 65535
-#define WOLF_MAX_INSTANCE_COUNT 65535
-#define WOLF_MAX_MATERIAL_COUNT 65535
-#define WOLF_MAX_MESH_COUNT 65535
+#define WOLF_MAX_INSTANCE_COUNT 1048576
+#define WOLF_MAX_MATERIAL_COUNT 1048576
+#define WOLF_MAX_MESH_COUNT 1048576
 
 static const uint UPDATE_REMOVE = 1;
 static const uint FALLBACK_HANDLE = (1u << WOLF_HANDLE_GEN_SHIFT);
@@ -20,8 +19,8 @@ cbuffer UpdateParams : register(b11)
 
 RWStructuredBuffer<GpuDrawInstanceUpdateData> g_Updates : register(u0);
 RWStructuredBuffer<GpuInstanceData> g_InstanceTable : register(u1);
+// Indexed by instance index, like the instance table.
 RWStructuredBuffer<GpuDrawCommand> g_DrawCommands : register(u2);
-RWStructuredBuffer<uint> g_DrawGenerations : register(u3);
 RWStructuredBuffer<uint> g_InstanceGenerations : register(u4);
 RWStructuredBuffer<uint> g_Diagnostics : register(u5);
 
@@ -45,40 +44,6 @@ void CSUpdateInstance(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     GpuDrawInstanceUpdateData update = g_Updates[index];
-    if (!IsPackedHandleValid(update.drawHandle))
-    {
-        InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
-        return;
-    }
-
-    uint drawIndex = GetHandleIndex(update.drawHandle);
-    uint drawGeneration = GetHandleGeneration(update.drawHandle);
-    if (drawIndex == 0 || drawIndex >= WOLF_MAX_DRAW_COUNT)
-    {
-        InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
-        return;
-    }
-
-    if (update.type == UPDATE_REMOVE)
-    {
-        GpuDrawCommand cmd = g_DrawCommands[drawIndex];
-        cmd.flags = 0;
-        g_DrawCommands[drawIndex] = cmd;
-        g_DrawGenerations[drawIndex] = NextGeneration(drawGeneration);
-
-        if (IsPackedHandleValid(update.instanceHandle))
-        {
-            uint instanceIndex = GetHandleIndex(update.instanceHandle);
-            uint instanceGeneration = GetHandleGeneration(update.instanceHandle);
-            if (instanceIndex > 0 && instanceIndex < WOLF_MAX_INSTANCE_COUNT)
-            {
-                g_InstanceGenerations[instanceIndex] = NextGeneration(instanceGeneration);
-            }
-        }
-
-        return;
-    }
-
     if (!IsPackedHandleValid(update.instanceHandle))
     {
         InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
@@ -90,6 +55,16 @@ void CSUpdateInstance(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (instanceIndex == 0 || instanceIndex >= WOLF_MAX_INSTANCE_COUNT)
     {
         InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
+        return;
+    }
+
+    if (update.type == UPDATE_REMOVE)
+    {
+        GpuDrawCommand cmd = g_DrawCommands[instanceIndex];
+        cmd.flags = 0;
+        cmd.batchIndex = 0;
+        g_DrawCommands[instanceIndex] = cmd;
+        g_InstanceGenerations[instanceIndex] = NextGeneration(instanceGeneration);
         return;
     }
 
@@ -120,13 +95,13 @@ void CSUpdateInstance(uint3 dispatchThreadId : SV_DispatchThreadID)
     instanceData.flags = update.drawFlags;
     g_InstanceTable[instanceIndex] = instanceData;
 
-    g_DrawGenerations[drawIndex] = drawGeneration;
     g_InstanceGenerations[instanceIndex] = instanceGeneration;
 
+    // An instance in no batch is not drawn, whatever its flags say.
     GpuDrawCommand drawCommand = (GpuDrawCommand)0;
     drawCommand.instanceHandle = update.instanceHandle;
-    drawCommand.drawHandle = update.drawHandle;
-    drawCommand.flags = update.drawFlags;
+    drawCommand.batchIndex = update.batchIndex;
+    drawCommand.flags = update.batchIndex == 0 ? 0 : update.drawFlags;
     drawCommand.pad0 = 0;
-    g_DrawCommands[drawIndex] = drawCommand;
+    g_DrawCommands[instanceIndex] = drawCommand;
 }

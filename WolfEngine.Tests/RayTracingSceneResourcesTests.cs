@@ -12,6 +12,50 @@ namespace WolfEngine.Tests;
 [TestFixture]
 public sealed class RayTracingSceneResourcesTests
 {
+	[TestCase(0u)]
+	[TestCase(1u)]
+	[TestCase(65534u)]
+	[TestCase(65535u)]
+	[TestCase(65536u)]
+	[TestCase(131070u)]
+	[TestCase((uint)GpuDrawResources.MaxInstanceCount)]
+	public void DdgiActivityScatterDispatch_CoversEveryInstanceWithinBaselineGroupLimits(uint instanceUpperBound)
+	{
+		var (x, y, z) = DdgiUtilities.GetActivityScatterDispatchGroupCount(instanceUpperBound);
+		var source = File.ReadAllText(ShaderPath("Ddgi/ddgi_classify.compute.slang"));
+		var rowWidth = MetalIndirectCompactionKernelTests.ReadUintConstant(source, "DDGI_ACTIVITY_SCATTER_ROW_WIDTH");
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(x, Is.InRange(1u, 65535u));
+			Assert.That(y, Is.InRange(1u, 65535u));
+			Assert.That(z, Is.EqualTo(1u));
+			Assert.That(rowWidth, Is.EqualTo(DdgiUtilities.ActivityScatterRowWidth));
+		});
+
+		var nextInstance = 0u;
+		for (var groupY = 0u; groupY < y; groupY++)
+		{
+			for (var groupX = 0u; groupX < x; groupX++)
+			{
+				var instanceIndex = groupX + groupY * rowWidth;
+				if (instanceIndex >= instanceUpperBound)
+				{
+					continue;
+				}
+
+				if (instanceIndex != nextInstance)
+				{
+					Assert.Fail($"Expected instance {nextInstance}, got {instanceIndex}.");
+				}
+
+				nextInstance++;
+			}
+		}
+
+		Assert.That(nextInstance, Is.EqualTo(instanceUpperBound));
+	}
+
 	[Test]
 	public void DdgiScatterBoundsCoverEveryIntersectingProbe()
 	{
@@ -1140,13 +1184,15 @@ public sealed class RayTracingSceneResourcesTests
 		var defaults = new RenderConfig().Lighting;
 		Assert.That(defaults.DiffuseIndirectMultiplier, Is.EqualTo(1.0f));
 		Assert.That(defaults.SpecularIndirectMultiplier, Is.EqualTo(1.0f));
+		Assert.That(defaults.IndirectLightMinimum, Is.EqualTo(0.0f));
 
 		var config = new RenderConfig
 		{
 			Lighting = new LightingConfig
 			{
 				DiffuseIndirectMultiplier = 0.4f,
-				SpecularIndirectMultiplier = 1.6f
+				SpecularIndirectMultiplier = 1.6f,
+				IndirectLightMinimum = 0.02f
 			}
 		};
 		var roundTripped = JsonSerializer.Deserialize<RenderConfig>(
@@ -1155,6 +1201,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		Assert.That(roundTripped.Lighting.DiffuseIndirectMultiplier, Is.EqualTo(0.4f));
 		Assert.That(roundTripped.Lighting.SpecularIndirectMultiplier, Is.EqualTo(1.6f));
+		Assert.That(roundTripped.Lighting.IndirectLightMinimum, Is.EqualTo(0.02f));
 	}
 
 	[Test]
@@ -2028,12 +2075,14 @@ public sealed class RayTracingSceneResourcesTests
 		public IGfxDevice GetGfxDevice() => _device;
 		public Int2 GetFrameBufferSize() => throw new NotSupportedException();
 		public Int2 GetWindowSize() => throw new NotSupportedException();
+		public bool VSyncEnabled { get; set; } = true;
 		public void BeginFrame() => throw new NotSupportedException();
 		public void Render(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle finalColor) => throw new NotSupportedException();
 		public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height) => throw new NotSupportedException();
 		public void ReleaseMeshResources(Mesh mesh) { }
 		public IGfxBuffer GetPackedMeshVertexBuffer() => _vertexBuffer;
 		public IGfxBuffer GetPackedMeshIndexBuffer() => _indexBuffer;
+		public ulong PackedGeometryGeneration => 0;
 		public uint GetPackedMeshVertexStride() => throw new NotSupportedException();
 		public bool SupportsGpuCapture => false;
 		public bool IsGpuCaptureActive => false;
@@ -2220,5 +2269,6 @@ public sealed class RayTracingSceneResourcesTests
 		public DescriptorHandle AllocateSampler(in SamplerDescriptor sampler) => throw new NotSupportedException();
 		public BindlessFallbackHandles GetOrCreateFallbackHandles() => throw new NotSupportedException();
 		public void Free(DescriptorHandle handle) => throw new NotSupportedException();
+		public ulong Generation => 0;
 	}
 }

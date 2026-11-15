@@ -1,17 +1,11 @@
-// Compacts a page of CPU-encoded indirect command records down to the draws the cull pass marked
-// visible, so ExecuteIndirect walks only the visible commands instead of every draw slot.
+// Compacts a page of CPU-encoded indirect command records down to the batches the cull pass left with visible
+// instances, so ExecuteIndirect walks only those instead of every batch slot, and patches each copied record's
+// instance count down from the batch's capacity to the instances culling left visible.
 //
 // Records are copied verbatim as raw uints: their layout is owned by the backend command signature,
-// and this kernel deliberately knows nothing about it beyond the stride and where the index count
-// sits, so signature changes do not require a shader change.
+// and this kernel deliberately knows nothing about it beyond the stride and where the index and
+// instance counts sit, so signature changes do not require a shader change.
 import "../Common/draw_data.slang";
-
-// Mirrors GpuDrawFlags in GpuDrawData.cs.
-static const uint DRAW_FLAG_ACTIVE = 1;
-static const uint DRAW_FLAG_BUCKET_SHIFT = 1;
-static const uint DRAW_FLAG_BUCKET_MASK = 0x1F;
-static const uint DRAW_FLAG_OWNER_VIEW_SHIFT = 6;
-static const uint DRAW_FLAG_OWNER_VIEW_MASK = 0x7F;
 
 cbuffer CompactParams : register(b12)
 {
@@ -22,7 +16,7 @@ cbuffer CompactParams : register(b12)
     uint recordStrideUints;
     uint recordIndexCountUintOffset;
     uint activeDrawCommandUpperBound;
-    uint pad0;
+    uint recordInstanceCountUintOffset;
 };
 
 RWStructuredBuffer<uint> g_DestinationRecords : register(u0);
@@ -33,7 +27,8 @@ RWStructuredBuffer<uint> g_ExecutionRanges : register(u1);
 StructuredBuffer<uint> g_SourceRecords : register(t2);
 // Bound with the view's base offset already applied, so this indexes by draw id directly.
 StructuredBuffer<GpuDrawArgs> g_DrawArgs : register(t3);
-StructuredBuffer<GpuDrawCommand> g_DrawCommands : register(t4);
+// Indexed by draw id, which is the batch index.
+StructuredBuffer<GpuDrawBatchData> g_Batches : register(t4);
 
 [numthreads(64, 1, 1)]
 void CSCompact(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -50,22 +45,24 @@ void CSCompact(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    GpuDrawCommand cmd = g_DrawCommands[drawId];
-    if ((cmd.flags & DRAW_FLAG_ACTIVE) == 0)
+    GpuDrawBatchData batch = g_Batches[drawId];
+    if (batch.capacity == 0)
     {
         return;
     }
 
     // Every lane allocates a page for the same draw id range, and the lanes that do not own this
-    // draw hold a reset record here. Emitting only from the owning lane keeps the other lanes'
+    // batch hold a reset record here. Emitting only from the owning lane keeps the other lanes'
     // compacted lists free of the resets they would otherwise have to skip at execute time.
-    uint bucketIndex = (cmd.flags >> DRAW_FLAG_BUCKET_SHIFT) & DRAW_FLAG_BUCKET_MASK;
-    if (bucketIndex != laneIndex)
+    if (batch.laneIndex != laneIndex)
     {
         return;
     }
 
-    if (g_DrawArgs[drawId].instanceCount == 0)
+    // Culling can count past capacity only if the batch and command tables disagree, and the
+    // instances past it were never written, so they are not drawn.
+    uint visibleCount = min(g_DrawArgs[drawId].instanceCount, batch.capacity);
+    if (visibleCount == 0)
     {
         return;
     }
@@ -90,4 +87,6 @@ void CSCompact(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         g_DestinationRecords[destinationBase + i] = g_SourceRecords[sourceBase + i];
     }
+
+    g_DestinationRecords[destinationBase + recordInstanceCountUintOffset] = visibleCount;
 }

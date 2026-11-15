@@ -9,7 +9,7 @@ public interface IUiDrawRenderer
 
 	void InvalidateShaderPipeline();
 
-	void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
+	void Record(IGfxCommandList commandList, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
 		ColorRGBA? clearColor = null);
 }
 

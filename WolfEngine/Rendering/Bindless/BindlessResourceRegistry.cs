@@ -99,8 +99,7 @@ public sealed class BindlessResourceRegistry
 		{
 			LogTableFullOnce(
 				ref _loggedSrvTableFull,
-				"SRV",
-				GpuDrawResources.MaxDrawCount);
+				"SRV");
 			return _errorTextureHandle;
 		}
 		_srvHandles[texture] = handle;
@@ -149,8 +148,7 @@ public sealed class BindlessResourceRegistry
 		{
 			LogTableFullOnce(
 				ref _loggedSrvTableFull,
-				"Depth SRV",
-				GpuDrawResources.MaxDrawCount);
+				"Depth SRV");
 			return _errorTextureHandle;
 		}
 
@@ -208,8 +206,7 @@ public sealed class BindlessResourceRegistry
 		{
 			LogTableFullOnce(
 				ref _loggedUavTableFull,
-				"UAV",
-				GpuDrawResources.MaxDrawCount);
+				"UAV");
 			return _errorRwTextureHandle;
 		}
 		_uavHandles[texture] = handle;
@@ -236,8 +233,7 @@ public sealed class BindlessResourceRegistry
 		{
 			LogTableFullOnce(
 				ref _loggedCbvTableFull,
-				"CBV",
-				GpuDrawResources.MaxDrawCount);
+				"CBV");
 			return _errorBufferHandle;
 		}
 		_cbvHandles[buffer] = handle;
@@ -264,8 +260,7 @@ public sealed class BindlessResourceRegistry
 		{
 			LogTableFullOnce(
 				ref _loggedSamplerTableFull,
-				"Sampler",
-				GpuDrawResources.MaxDrawCount);
+				"Sampler");
 			return _errorSamplerHandle;
 		}
 		_samplerHandles[descriptor] = handle;
@@ -318,7 +313,7 @@ public sealed class BindlessResourceRegistry
 		return exception.Message.Contains("descriptor table is full", StringComparison.OrdinalIgnoreCase);
 	}
 
-	private static void LogTableFullOnce(ref bool flag, string tableKind, int drawLimit)
+	private static void LogTableFullOnce(ref bool flag, string tableKind)
 	{
 		if (flag)
 		{
@@ -327,7 +322,7 @@ public sealed class BindlessResourceRegistry
 
 		flag = true;
 		Console.WriteLine(
-			$"Bindless {tableKind} table is full. Falling back to error resources for new bindings. Draw limit={drawLimit}.");
+			$"Bindless {tableKind} table is full. Falling back to error resources for new bindings.");
 	}
 
 	private void LogDepthSrvFallbackOnce()

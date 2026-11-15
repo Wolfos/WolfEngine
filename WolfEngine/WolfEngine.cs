@@ -24,6 +24,8 @@ public static class WolfEngine
 		services.AddSingleton<ILogService, LogService>();
 		services.AddSingleton<Gameplay.SceneLoadRequests>();
 		services.AddSingleton<Gameplay.ISceneLoadService>(sp => sp.GetRequiredService<Gameplay.SceneLoadRequests>());
+		services.AddSingleton<Gameplay.ApplicationQuitRequests>();
+		services.AddSingleton<Gameplay.IApplicationQuitService>(sp => sp.GetRequiredService<Gameplay.ApplicationQuitRequests>());
 		services.AddSingleton<EngineShaderCatalog>();
 		services.AddSingleton<IImageLoader, StbImageLoader>();
 		services.AddSingleton<ITextureFactory, TextureFactory>();
@@ -42,9 +44,12 @@ public static class WolfEngine
 		services.AddSingleton<GameplayUiGpuRenderer>();
 		services.AddSingleton<EditorViewportStateBus>();
 		services.AddSingleton(new RenderPresentationOptions());
+		services.AddSingleton<GraphicsSettingsService>();
+		services.AddSingleton<IGraphicsSettings>(sp => sp.GetRequiredService<GraphicsSettingsService>());
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
 		services.AddSingleton<EditorFrameCoordinator>();
 		services.AddSingleton<RenderFrameCoordinator>();
+		services.AddSingleton<Rendering.Splash.SplashScreen>();
 		services.AddSingleton<IFileDialogService, FileDialogService>();
 		services.AddSingleton<IFileManagerService, FileManagerService>();
 		services.AddSingleton<GpuDrawResources>();
@@ -52,7 +57,12 @@ public static class WolfEngine
 		services.AddSingleton<GpuProfiler>();
 		services.AddSingleton<BindlessResourceRegistry>();
 		services.AddSingleton<RenderGraphResourceRegistry>();
+		services.AddSingleton<Rendering.Features.RenderFeatureRegistry>();
+		services.AddSingleton<Rendering.Features.IRenderFeatureRegistry>(sp =>
+			sp.GetRequiredService<Rendering.Features.RenderFeatureRegistry>());
 		services.AddSingleton<RenderGraph>();
+		services.AddSingleton<Vfx.VfxService>();
+		services.AddSingleton<Vfx.IVfxService>(sp => sp.GetRequiredService<Vfx.VfxService>());
 		
 #pragma warning disable CA1416
 		services.AddSingleton<WindowChromeController>();
@@ -66,7 +76,8 @@ public static class WolfEngine
 		{
 			services.AddSingleton<IMacOSInputHandler, MacOsInputHandler>();
 			services.AddSingleton<IMetalSurface, SdlMetalSurface>();
-			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
+			services.AddSingleton<IDrawRecordEncoder, MetalDrawRecordEncoder>();
+			services.AddSingleton<IGpuDrawDiagnosticsSampler, MetalGpuDrawDiagnosticsSampler>();
 			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
@@ -75,14 +86,16 @@ public static class WolfEngine
 		{
 			// The app owns the view and the main loop, so it registers its layer with AddHostMetalSurface and drives
 			// frames through IRenderPipeline.Start and RenderFrame.
-			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
+			services.AddSingleton<IDrawRecordEncoder, MetalDrawRecordEncoder>();
+			services.AddSingleton<IGpuDrawDiagnosticsSampler, MetalGpuDrawDiagnosticsSampler>();
 			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
 		}
 		else if (OperatingSystem.IsWindows())
 		{
-			services.AddSingleton<IGpuDrawBackendBridge, D3D12GpuDrawBackendBridge>();
+			services.AddSingleton<IDrawRecordEncoder, D3D12DrawRecordEncoder>();
+			services.AddSingleton<IGpuDrawDiagnosticsSampler, D3D12GpuDrawDiagnosticsSampler>();
 			services.AddSingleton<IImGuiRenderer, D3D12UiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererD3D>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();

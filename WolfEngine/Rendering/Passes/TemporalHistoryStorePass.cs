@@ -43,7 +43,9 @@ public sealed class TemporalHistoryStorePass
 			SourceDepthHandle = _bindlessRegistry.RegisterDepthTexture(sourceDepth),
 			HistoryColorHandle = _bindlessRegistry.RegisterRwTexture(historyColor),
 			HistoryDepthHandle = _bindlessRegistry.RegisterRwTexture(historyDepth),
-			RenderSize = resources.SceneFramebufferSize
+			RenderSize = resources.SceneFramebufferSize,
+			ProjectionZBias = context.SceneData.UnjitteredProjection.M33,
+			ProjectionZScale = context.SceneData.UnjitteredProjection.M43
 		};
 	}
 
@@ -68,6 +70,8 @@ public sealed class TemporalHistoryStorePass
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("renderSizeX", (uint)Math.Max(config.RenderSize.X, 1));
 		settingsWriter.SetUInt("renderSizeY", (uint)Math.Max(config.RenderSize.Y, 1));
+		settingsWriter.SetFloat("projectionZBias", config.ProjectionZBias);
+		settingsWriter.SetFloat("projectionZScale", config.ProjectionZScale);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var threadGroupSize = _threadGroupSize

@@ -57,7 +57,9 @@ public sealed class AnimationClip
 		TransformTrack[] transformTracks,
 		PropertyTrack[] propertyTracks,
 		string sourceSkeletonName,
-		BoneTransform[] sourceBindPoseLocal)
+		BoneTransform[] sourceBindPoseLocal,
+		AnimationCurve[]? curves = null,
+		AnimationMarker[]? markers = null)
 	{
 		Name = name ?? string.Empty;
 		Duration = MathF.Max(0.0f, duration);
@@ -67,6 +69,8 @@ public sealed class AnimationClip
 		PropertyTracks = propertyTracks ?? Array.Empty<PropertyTrack>();
 		SourceSkeletonName = sourceSkeletonName ?? string.Empty;
 		SourceBindPoseLocal = sourceBindPoseLocal ?? Array.Empty<BoneTransform>();
+		Curves = curves ?? [];
+		Markers = markers ?? [];
 
 		var nonBoneCount = 0;
 		for (var i = 0; i < TransformTracks.Length; i++)
@@ -86,6 +90,8 @@ public sealed class AnimationClip
 	public bool Loop { get; }
 	public TransformTrack[] TransformTracks { get; }
 	public PropertyTrack[] PropertyTracks { get; }
+	public AnimationCurve[] Curves { get; }
+	public AnimationMarker[] Markers { get; }
 
 	/// <summary>Number of transform tracks that target something other than a skeleton bone.</summary>
 	public int NonBoneTransformTrackCount { get; }

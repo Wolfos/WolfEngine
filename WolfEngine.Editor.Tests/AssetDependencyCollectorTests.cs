@@ -88,30 +88,27 @@ public sealed class AssetDependencyCollectorTests
 	}
 
 	[Test]
-	public void Collect_PreservesAnimationGuidReferencesWithoutIncludingGraphNodeIds()
+	public void Collect_FindsAnimationAssetReferencesWithoutIncludingGraphNodeIds()
 	{
 		var skeletonId = Guid.NewGuid();
-		var sequenceId = Guid.NewGuid();
 		var clipId = Guid.NewGuid();
 		var maskId = Guid.NewGuid();
-		var set = new AnimationSet { SkeletonId = skeletonId, Clips = new() { ["run"] = sequenceId } };
-		var sequence = new AnimationSequence { ClipId = clipId };
-		var mask = new BoneMask { SkeletonId = skeletonId };
+		var set = new AnimationSet { Skeleton = new() { NodeId = skeletonId }, Clips = new() { ["run"] = new() { Clip = new() { NodeId = clipId } } } };
+		var mask = new BoneMask { Skeleton = new() { NodeId = skeletonId } };
 		var nodeId = Guid.NewGuid();
 		var graph = new AnimationGraph
 		{
 			Output = nodeId,
-			Nodes = [new() { Id = nodeId, Inputs = [Guid.NewGuid()], MaskId = maskId }, new()],
+			Nodes = [new() { Id = nodeId, Inputs = [Guid.NewGuid()], Mask = new() { NodeId = maskId } }, new()],
 			Layout = [new() { NodeId = nodeId }]
 		};
 
 		Assert.Multiple(() =>
 		{
-			Assert.That(AssetDependencyCollector.Collect(set), Is.EquivalentTo(new[] { skeletonId, sequenceId }));
-			Assert.That(AssetDependencyCollector.Collect(sequence), Is.EqualTo(new[] { clipId }));
+			Assert.That(AssetDependencyCollector.Collect(set), Is.EquivalentTo(new[] { skeletonId, clipId }));
 			Assert.That(AssetDependencyCollector.Collect(mask), Is.EqualTo(new[] { skeletonId }));
 			Assert.That(AssetDependencyCollector.Collect(graph), Is.EqualTo(new[] { maskId }));
-			Assert.That(AssetDependencyCollector.Collect(new AnimationSequence()), Is.Empty);
+			Assert.That(AssetDependencyCollector.Collect(new AnimationSet()), Is.Empty);
 		});
 	}
 

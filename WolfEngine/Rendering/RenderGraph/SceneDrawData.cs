@@ -88,6 +88,12 @@ public sealed class SceneDrawData
 
 	public bool ResetHistory { get; }
 
+	/// <summary>
+	/// LOD bias for scene material textures. Non-zero only when a temporal upscaler reconstructs detail
+	/// beyond what the render resolution's own mips would show.
+	/// </summary>
+	public float MaterialMipBias { get; init; }
+
 	public IReadOnlyList<LightPacket> Lights { get; }
 
 	public IReadOnlyList<DecalProjectorPacket> Decals { get; }

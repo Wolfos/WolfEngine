@@ -7,6 +7,12 @@ namespace WolfEngine.Rendering;
 
 public sealed class GpuDrawDatabase
 {
+	/// <summary>
+	/// Pending updates kept across snapshot writes. Past this, replaying them costs more than rebuilding the GPU
+	/// tables from the records, so they are dropped and the render thread rebuilds instead.
+	/// </summary>
+	public const int MaxRetainedUpdateCount = 1 << 16;
+
 	private readonly GpuDrawTransformHistory _transformHistory;
 	private readonly Dictionary<DrawRecordKey, DrawRecord> _records = new();
 	private readonly Dictionary<Mesh, ResourceId> _meshHandles = new(new ReferenceComparer<Mesh>());
@@ -18,11 +24,10 @@ public sealed class GpuDrawDatabase
 	private readonly GpuDrawHandleRegistry _handles;
 	// Copied from the shared registry at the end of each sync, because the render thread reads them while
 	// the other snapshot's sync is changing the registry.
-	private readonly List<uint> _drawGenerations = new();
 	private readonly List<uint> _instanceGenerations = new();
 	private readonly List<uint> _meshGenerations = new();
 	private readonly List<uint> _materialGenerations = new();
-	private uint _activeDrawCommandUpperBound = 1;
+	private uint _activeInstanceUpperBound = 1;
 	private int _copiedHandleVersion = -1;
 	private int _syncStamp;
 	private int _currentWorldId;
@@ -62,8 +67,8 @@ public sealed class GpuDrawDatabase
 		// The render thread skips the GPU draw update when the scene is not drawn (a hidden scene viewport),
 		// so updates can still be pending here. They are owed to the GPU tables, and discarding them would
 		// leave those draws stale until something happened to touch them again. Keep them, unless the
-		// backlog outgrew the tables, in which case the pass rebuilds everything from the records.
-		if (_updates.Count > GpuDrawResources.MaxDrawCount)
+		// backlog grew past MaxRetainedUpdateCount, in which case the pass rebuilds everything from the records.
+		if (_updates.Count > MaxRetainedUpdateCount)
 		{
 			_updates.Clear();
 			_updatesDropped = true;
@@ -123,7 +128,6 @@ public sealed class GpuDrawDatabase
 
 		_updates.Add(GpuDrawUpdate.CreateAdd(
 			newRecord.DrawKind,
-			newRecord.DrawHandle,
 			newRecord.InstanceHandle,
 			newRecord.MeshHandle,
 			newRecord.MaterialHandle,
@@ -180,7 +184,6 @@ public sealed class GpuDrawDatabase
 
 		_updates.Add(GpuDrawUpdate.CreateAdd(
 			newRecord.DrawKind,
-			newRecord.DrawHandle,
 			newRecord.InstanceHandle,
 			newRecord.MeshHandle,
 			newRecord.MaterialHandle,
@@ -247,7 +250,6 @@ public sealed class GpuDrawDatabase
 
 		_updates.Add(GpuDrawUpdate.CreateAdd(
 			newRecord.DrawKind,
-			newRecord.DrawHandle,
 			newRecord.InstanceHandle,
 			newRecord.MeshHandle,
 			newRecord.MaterialHandle,
@@ -285,8 +287,8 @@ public sealed class GpuDrawDatabase
 			return;
 		}
 
-		_handles.CopyGenerationTables(_drawGenerations, _instanceGenerations, _meshGenerations, _materialGenerations);
-		_activeDrawCommandUpperBound = _handles.GetActiveDrawCommandUpperBound();
+		_handles.CopyGenerationTables(_instanceGenerations, _meshGenerations, _materialGenerations);
+		_activeInstanceUpperBound = _handles.GetActiveInstanceUpperBound();
 		_copiedHandleVersion = _handles.Version;
 	}
 
@@ -328,7 +330,7 @@ public sealed class GpuDrawDatabase
 
 		_persistentMeshKeys.Remove(key);
 		_transientKeys.Remove(key);
-		_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawKind, record.DrawHandle, record.InstanceHandle));
+		_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawKind, record.InstanceHandle));
 		ReleaseRecord(key, record);
 		_transformHistory.Remove(key);
 	}
@@ -346,7 +348,6 @@ public sealed class GpuDrawDatabase
 
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -367,7 +368,6 @@ public sealed class GpuDrawDatabase
 		{
 			destination.Add(new GpuDrawEntry(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -408,16 +408,23 @@ public sealed class GpuDrawDatabase
 		return false;
 	}
 
-	/// <summary>Covers draws held by any snapshot database, since they share the GPU draw tables.</summary>
-	public uint GetActiveDrawCommandUpperBound() => _activeDrawCommandUpperBound;
+	/// <summary>Covers instances held by any snapshot database, since they share the GPU draw tables.</summary>
+	public uint GetActiveInstanceUpperBound() => _activeInstanceUpperBound;
+
+	/// <summary>Instance slots handed out so far, including slot zero: what the instance tables must hold.</summary>
+	public int InstanceSlotCount => _instanceGenerations.Count;
+
+	/// <summary>Mesh slots handed out so far, including slot zero: what the mesh table must hold.</summary>
+	public int MeshSlotCount => _meshGenerations.Count;
+
+	/// <summary>Material slots handed out so far, including slot zero: what the material tables must hold.</summary>
+	public int MaterialSlotCount => _materialGenerations.Count;
 
 	public void CopyGenerationTables(
-		List<uint> drawGenerations,
 		List<uint> instanceGenerations,
 		List<uint> meshGenerations,
 		List<uint> materialGenerations)
 	{
-		CopyList(_drawGenerations, drawGenerations);
 		CopyList(_instanceGenerations, instanceGenerations);
 		CopyList(_meshGenerations, meshGenerations);
 		CopyList(_materialGenerations, materialGenerations);
@@ -427,8 +434,10 @@ public sealed class GpuDrawDatabase
 
 	public GpuDrawHandle FallbackMaterialHandle => GpuDrawHandle.Create(0, (ushort)_materialGenerations[0]);
 
-	public bool IsCurrentDrawHandle(in GpuDrawHandle handle) =>
-		(uint)handle.Index < (uint)_drawGenerations.Count && _drawGenerations[handle.Index] == handle.Generation;
+	public bool IsCurrentInstanceHandle(in GpuDrawHandle handle) =>
+		handle.IsValid &&
+		(uint)handle.Index < (uint)_instanceGenerations.Count &&
+		_instanceGenerations[handle.Index] == handle.Generation;
 
 	private static void CopyList(List<uint> source, List<uint> destination)
 	{
@@ -497,7 +506,6 @@ public sealed class GpuDrawDatabase
 		{
 			_updates.Add(GpuDrawUpdate.CreateMeshUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -511,7 +519,6 @@ public sealed class GpuDrawDatabase
 		{
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -526,7 +533,6 @@ public sealed class GpuDrawDatabase
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -584,7 +590,6 @@ public sealed class GpuDrawDatabase
 		{
 			_updates.Add(GpuDrawUpdate.CreateMeshUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -601,7 +606,6 @@ public sealed class GpuDrawDatabase
 			material.AlphaMode = alphaMode;
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -617,7 +621,6 @@ public sealed class GpuDrawDatabase
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -712,7 +715,6 @@ public sealed class GpuDrawDatabase
 		{
 			_updates.Add(GpuDrawUpdate.CreateMeshUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -729,7 +731,6 @@ public sealed class GpuDrawDatabase
 		{
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -747,7 +748,6 @@ public sealed class GpuDrawDatabase
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawKind,
-				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
@@ -771,12 +771,13 @@ public sealed class GpuDrawDatabase
 		BoundingSphere? localBoundsOverride = null,
 		TerrainChunkInstanceData? terrainInstanceData = null)
 	{
-		_handles.AcquireDraw(key, out var drawHandle, out var instanceHandle);
+		// An invalid handle means the instance table is full. The record is still kept so the entity is
+		// reconciled like any other, but nothing is uploaded for it and the key is never released.
+		var instanceHandle = _handles.AcquireInstance(key);
 		var record = new DrawRecord
 		{
 			Entity = key.Entity,
 			DrawKind = drawKind,
-			DrawHandle = drawHandle,
 			InstanceHandle = instanceHandle,
 			Mesh = mesh,
 			Material = material,
@@ -801,7 +802,11 @@ public sealed class GpuDrawDatabase
 
 	private void ReleaseRecord(in DrawRecordKey key, DrawRecord record)
 	{
-		_handles.ReleaseDraw(key);
+		if (record.InstanceHandle.IsValid)
+		{
+			_handles.ReleaseInstance(key);
+		}
+
 		ReleaseMesh(record.MeshHandle, record.Mesh);
 		ReleaseMaterial(record.MaterialHandle, record.Material);
 	}
@@ -962,7 +967,6 @@ public sealed class GpuDrawDatabase
 	{
 		public Entity Entity = default;
 		public GpuDrawKind DrawKind;
-		public GpuDrawHandle DrawHandle;
 		public GpuDrawHandle InstanceHandle;
 		public GpuDrawHandle MeshHandle;
 		public GpuDrawHandle MaterialHandle;
@@ -1014,7 +1018,6 @@ public readonly struct GpuDrawEntry
 {
 	public GpuDrawEntry(
 		GpuDrawKind drawKind,
-		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
@@ -1028,7 +1031,6 @@ public readonly struct GpuDrawEntry
 		Vector4 boundsCenterRadius)
 	{
 		DrawKind = drawKind;
-		DrawHandle = drawHandle;
 		InstanceHandle = instanceHandle;
 		MeshHandle = meshHandle;
 		MaterialHandle = materialHandle;
@@ -1043,7 +1045,6 @@ public readonly struct GpuDrawEntry
 	}
 
 	public GpuDrawKind DrawKind { get; }
-	public GpuDrawHandle DrawHandle { get; }
 	public GpuDrawHandle InstanceHandle { get; }
 	public GpuDrawHandle MeshHandle { get; }
 	public GpuDrawHandle MaterialHandle { get; }
@@ -1056,7 +1057,6 @@ public readonly struct GpuDrawEntry
 	public Matrix4x4 World { get; }
 	public Vector4 BoundsCenterRadius { get; }
 
-	public int DrawIndex => DrawHandle.Index;
 	public int InstanceIndex => InstanceHandle.Index;
 	public int MeshIndex => MeshHandle.Index;
 	public int MaterialIndex => MaterialHandle.Index;
@@ -1067,7 +1067,6 @@ public readonly struct GpuDrawUpdate
 	private GpuDrawUpdate(
 		GpuDrawUpdateType type,
 		GpuDrawKind drawKind,
-		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
@@ -1082,7 +1081,6 @@ public readonly struct GpuDrawUpdate
 	{
 		Type = type;
 		DrawKind = drawKind;
-		DrawHandle = drawHandle;
 		InstanceHandle = instanceHandle;
 		MeshHandle = meshHandle;
 		MaterialHandle = materialHandle;
@@ -1098,7 +1096,6 @@ public readonly struct GpuDrawUpdate
 
 	public GpuDrawUpdateType Type { get; }
 	public GpuDrawKind DrawKind { get; }
-	public GpuDrawHandle DrawHandle { get; }
 	public GpuDrawHandle InstanceHandle { get; }
 	public GpuDrawHandle MeshHandle { get; }
 	public GpuDrawHandle MaterialHandle { get; }
@@ -1111,14 +1108,12 @@ public readonly struct GpuDrawUpdate
 	public TerrainDrawSurface? TerrainSurface { get; }
 	public TerrainRayTracingChunkData TerrainRayTracingChunk { get; }
 
-	public int DrawIndex => DrawHandle.Index;
 	public int InstanceIndex => InstanceHandle.Index;
 	public int MeshIndex => MeshHandle.Index;
 	public int MaterialIndex => MaterialHandle.Index;
 
 	public static GpuDrawUpdate CreateAdd(
 		GpuDrawKind drawKind,
-		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
@@ -1134,7 +1129,6 @@ public readonly struct GpuDrawUpdate
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.Add,
 			drawKind,
-			drawHandle,
 			instanceHandle,
 			meshHandle,
 			materialHandle,
@@ -1148,12 +1142,11 @@ public readonly struct GpuDrawUpdate
 			terrainRayTracingChunk);
 	}
 
-	public static GpuDrawUpdate CreateRemove(GpuDrawKind drawKind, GpuDrawHandle drawHandle, GpuDrawHandle instanceHandle)
+	public static GpuDrawUpdate CreateRemove(GpuDrawKind drawKind, GpuDrawHandle instanceHandle)
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.Remove,
 			drawKind,
-			drawHandle,
 			instanceHandle,
 			GpuDrawHandle.Invalid,
 			GpuDrawHandle.Invalid,
@@ -1169,7 +1162,6 @@ public readonly struct GpuDrawUpdate
 
 	public static GpuDrawUpdate CreateTransformUpdate(
 		GpuDrawKind drawKind,
-		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
@@ -1183,7 +1175,6 @@ public readonly struct GpuDrawUpdate
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateTransform,
 			drawKind,
-			drawHandle,
 			instanceHandle,
 			meshHandle,
 			materialHandle,
@@ -1199,7 +1190,6 @@ public readonly struct GpuDrawUpdate
 
 	public static GpuDrawUpdate CreateMaterialUpdate(
 		GpuDrawKind drawKind,
-		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
@@ -1215,7 +1205,6 @@ public readonly struct GpuDrawUpdate
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateMaterial,
 			drawKind,
-			drawHandle,
 			instanceHandle,
 			meshHandle,
 			materialHandle,
@@ -1231,7 +1220,6 @@ public readonly struct GpuDrawUpdate
 
 	public static GpuDrawUpdate CreateMeshUpdate(
 		GpuDrawKind drawKind,
-		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
@@ -1246,7 +1234,6 @@ public readonly struct GpuDrawUpdate
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateMesh,
 			drawKind,
-			drawHandle,
 			instanceHandle,
 			meshHandle,
 			materialHandle,
