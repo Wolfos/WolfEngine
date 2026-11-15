@@ -1393,7 +1393,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			Height = (uint)texture.Height,
 			DepthOrArraySize = (ushort)texture.Depth,
 			MipLevels = (ushort)texture.MipCount,
-			Format = ToDxgiTextureFormat(texture.Format, texture.IsSrgb),
+			Format = D3D12Device.ToDxgiFormat(texture.Format, texture.IsSrgb),
 			SampleDesc = new(1, 0),
 			Layout = TextureLayout.LayoutUnknown,
 			Flags = supportsUnorderedAccess ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None
@@ -1560,23 +1560,6 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		       TextureFormatUtilities.SupportsUnorderedAccess(texture.Format, texture.IsSrgb);
 	}
 
-	private static Format ToDxgiTextureFormat(TextureFormat format, bool isSrgb)
-	{
-		return format switch
-		{
-			TextureFormat.Bgra8Unorm => isSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
-			TextureFormat.Rgba8Unorm => isSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
-			TextureFormat.Rgba8Uint => Format.FormatR8G8B8A8Uint,
-			TextureFormat.R16Unorm => Format.FormatR16Unorm,
-			TextureFormat.Bc1Unorm => isSrgb ? Format.FormatBC1UnormSrgb : Format.FormatBC1Unorm,
-			TextureFormat.Bc3Unorm => isSrgb ? Format.FormatBC3UnormSrgb : Format.FormatBC3Unorm,
-			TextureFormat.Bc4Unorm => Format.FormatBC4Unorm,
-			TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
-			TextureFormat.Bc7Unorm => isSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
-			TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
-			_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported runtime texture format.")
-		};
-	}
 
 	public IGfxDevice GetGfxDevice()
 	{

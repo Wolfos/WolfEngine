@@ -2252,6 +2252,14 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported texture format.")
 	};
 
+	/// <summary>The format shaders read a texture through. A depth texture is read as its float channel.</summary>
+	internal static Format ToDxgiShaderResourceFormat(TextureFormat format, bool isSrgb = false) =>
+		format == TextureFormat.D32Float ? Format.FormatR32Float : ToDxgiFormat(format, isSrgb);
+
+	/// <summary>The format shaders write a texture through. Depth textures cannot be written that way.</summary>
+	internal static Format ToDxgiUnorderedAccessFormat(TextureFormat format, bool isSrgb = false) =>
+		format == TextureFormat.D32Float ? Format.FormatUnknown : ToDxgiFormat(format, isSrgb);
+
 	private static ResourceFlags DetermineResourceFlags(TextureUsage usage)
 	{
 		var flags = ResourceFlags.None;
