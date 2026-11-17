@@ -1393,6 +1393,47 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		return (_currentConstantUploadPage, offset);
 	}
 
+	/// <summary>
+	/// Records a copy of CPU data into a GPU-only buffer. The data is staged in this list's own upload pages, so the
+	/// copy reads what was passed now even if the caller writes the same range again before the GPU gets to it.
+	/// The buffer's tracked state is left as it was: the copy transitions out of it and back.
+	/// </summary>
+	internal void RecordBufferUpload(D3D12Buffer destination, ulong destinationOffset, byte* source, ulong byteCount)
+	{
+		var (page, stagingOffset) = AllocateUpload(byteCount, 16);
+		Buffer.MemoryCopy(source, page.MappedData + stagingOffset, byteCount, byteCount);
+
+		var previousState = destination.CurrentState;
+		if (previousState != ResourceStates.CopyDest)
+		{
+			RecordBufferTransition(destination, previousState, ResourceStates.CopyDest);
+		}
+
+		CommandList.CopyBufferRegion(destination.Resource, destinationOffset, page.Resource, stagingOffset, byteCount);
+
+		if (previousState != ResourceStates.CopyDest)
+		{
+			RecordBufferTransition(destination, ResourceStates.CopyDest, previousState);
+		}
+	}
+
+	private void RecordBufferTransition(D3D12Buffer buffer, ResourceStates before, ResourceStates after)
+	{
+		var barrier = new ResourceBarrier
+		{
+			Type = ResourceBarrierType.Transition,
+			Flags = ResourceBarrierFlags.None
+		};
+		barrier.Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = buffer.Resource.Handle,
+			Subresource = D3D12Api.ResourceBarrierAllSubresources,
+			StateBefore = before,
+			StateAfter = after
+		};
+		CommandList.ResourceBarrier(1, &barrier);
+	}
+
 	internal void RecycleConstantUploadPages()
 	{
 		if (_constantUploadPages.Count > 0)

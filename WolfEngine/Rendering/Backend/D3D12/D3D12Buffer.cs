@@ -5,12 +5,15 @@ using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
+/// <summary>Copies CPU data into a range of a buffer the CPU cannot write directly.</summary>
+internal unsafe delegate void D3D12BufferUpload(D3D12Buffer buffer, ulong byteOffset, byte* source, ulong byteCount);
+
 internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffer, IDisposable
 {
 	private readonly BufferDescriptor _descriptor;
 	private readonly bool _cpuWritableDirect;
 	private readonly bool _cpuReadableDirect;
-	private readonly Action<D3D12Buffer, ulong, ulong>? _flushUploadRange;
+	private readonly D3D12BufferUpload? _flushUploadRange;
 	private readonly Func<int>? _getDeviceRemovedReason;
 	private void* _writeMappedPtr;
 	private void* _readMappedPtr;
@@ -21,17 +24,15 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 		BufferDescriptor descriptor,
 		ComPtr<ID3D12Resource> resource,
 		ulong sizeInBytes,
-		ComPtr<ID3D12Resource> uploadResource = default,
 		bool cpuWritableDirect = false,
 		bool cpuReadableDirect = false,
-		Action<D3D12Buffer, ulong, ulong>? flushUploadRange = null,
+		D3D12BufferUpload? flushUploadRange = null,
 		Func<int>? getDeviceRemovedReason = null,
 		ResourceStates initialState = ResourceStates.Common)
 	{
 		Name = name;
 		_descriptor = descriptor;
 		Resource = resource;
-		UploadResource = uploadResource;
 		SizeInBytes = sizeInBytes;
 		_cpuWritableDirect = cpuWritableDirect;
 		_cpuReadableDirect = cpuReadableDirect;
@@ -45,8 +46,6 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 	public BufferDescriptor Descriptor => _descriptor;
 
 	public ComPtr<ID3D12Resource> Resource { get; private set; }
-
-	public ComPtr<ID3D12Resource> UploadResource { get; private set; }
 
 	public ulong SizeInBytes { get; }
 
@@ -94,7 +93,22 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 			throw new ArgumentOutOfRangeException(nameof(elementOffset), "Write range exceeds buffer size.");
 		}
 
-		var target = _cpuWritableDirect ? Resource : UploadResource;
+		if (_cpuWritableDirect == false)
+		{
+			if (_flushUploadRange is null)
+			{
+				throw new InvalidOperationException("Buffer does not support CPU writes on this backend.");
+			}
+
+			fixed (T* uploadSource = source)
+			{
+				_flushUploadRange(this, byteOffset, (byte*)uploadSource, byteCount);
+			}
+
+			return;
+		}
+
+		var target = Resource;
 		if (target.Handle is null)
 		{
 			throw new InvalidOperationException("Buffer does not support CPU writes on this backend.");
@@ -131,11 +145,6 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 		{
 			var dest = (byte*)_writeMappedPtr + (nint)byteOffset;
 			Buffer.MemoryCopy(src, dest, byteCount, byteCount);
-		}
-
-		if (_cpuWritableDirect == false)
-		{
-			_flushUploadRange?.Invoke(this, byteOffset, byteCount);
 		}
 	}
 
@@ -193,10 +202,9 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 		_disposed = true;
 		if (_writeMappedPtr is not null)
 		{
-			var mappedResource = _cpuWritableDirect ? Resource : UploadResource;
-			if (mappedResource.Handle is not null)
+			if (Resource.Handle is not null)
 			{
-				mappedResource.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+				Resource.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
 			}
 
 			_writeMappedPtr = null;
@@ -210,12 +218,6 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 			}
 
 			_readMappedPtr = null;
-		}
-
-		if (UploadResource.Handle is not null)
-		{
-			UploadResource.Dispose();
-			UploadResource = default;
 		}
 
 		if (Resource.Handle is not null)

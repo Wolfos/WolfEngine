@@ -502,37 +502,20 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			null,
 			out ComPtr<ID3D12Resource> resource));
 
-		ComPtr<ID3D12Resource> upload = default;
-		if (cpuWritableDirect == false && cpuReadableDirect == false)
-		{
-			var uploadDesc = resourceDesc;
-			// Upload heap buffers cannot use UAV resource flags.
-			uploadDesc.Flags = ResourceFlags.None;
-
-			var uploadHeap = new HeapProperties(HeapType.Upload);
-			SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
-				&uploadHeap,
-				HeapFlags.None,
-				in uploadDesc,
-				ResourceStates.GenericRead,
-				null,
-				out upload));
-		}
-
 		if (descriptor.Name is not null)
 		{
 			_ = resource.SetName(descriptor.Name);
 		}
 
+		// Default-heap buffers take CPU writes as copies staged per upload; readback buffers take none.
 		var buffer = new D3D12Buffer(
 			descriptor.Name,
 			descriptor,
 			resource,
 			sizeInBytes,
-			upload,
 			cpuWritableDirect: cpuWritableDirect,
 			cpuReadableDirect: cpuReadableDirect,
-			flushUploadRange: cpuWritableDirect ? null : FlushUploadRange,
+			flushUploadRange: cpuWritableDirect || cpuReadableDirect ? null : FlushUploadRange,
 			getDeviceRemovedReason: () => _device.GetDeviceRemovedReason(),
 			initialState: defaultState);
 		return buffer;
@@ -757,8 +740,11 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	internal D3D12ConstantUploadPage RentConstantUploadPage(ulong requestedSize)
 	{
 		var alignedSize = Align(requestedSize, ConstantUploadAlignment);
+
+		// Pages are pooled by size. Rounding oversized ones up to a power of two lets the next large upload reuse
+		// one, rather than every distinct size (buffer uploads at a scene load, say) leaving its own page behind.
 		var pageSize = alignedSize > DefaultConstantUploadPageSize
-			? alignedSize
+			? System.Numerics.BitOperations.RoundUpToPowerOf2(alignedSize)
 			: DefaultConstantUploadPageSize;
 
 		lock (_constantUploadLock)
@@ -1189,65 +1175,29 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		PumpCompleted();
 	}
 
-	private void FlushUploadRange(D3D12Buffer buffer, ulong byteOffset, ulong byteCount)
+	/// <summary>
+	/// Copies CPU data into a range of a GPU-only buffer. The copy goes on the graphics queue ahead of anything
+	/// submitted after it, so later GPU work sees the new data, but the CPU does not wait for it: the data is staged
+	/// in the copy's own command list, whose upload pages and allocator are only reused once the copy has finished.
+	/// </summary>
+	private void FlushUploadRange(D3D12Buffer buffer, ulong byteOffset, byte* source, ulong byteCount)
 	{
-		if (buffer.Resource.Handle is null || buffer.UploadResource.Handle is null || byteCount == 0)
+		if (buffer.Resource.Handle is null || byteCount == 0)
 		{
 			return;
 		}
 
+		// Serialises concurrent writers, so their copies reach the queue in the order they wrote.
 		lock (_uploadLock)
 		{
-			EnsureUploadCommandList();
-			SilkMarshal.ThrowHResult(_uploadAllocator.Reset());
-			SilkMarshal.ThrowHResult(_uploadCommandList.Reset(_uploadAllocator, (ID3D12PipelineState*)null));
-
-			var previousState = buffer.CurrentState;
-			if (previousState != ResourceStates.CopyDest)
+			var commandList = (D3D12CommandList)CreateCommandList(CommandListType.Direct);
+			commandList.SetDebugName("Buffer upload");
+			commandList.RecordBufferUpload(buffer, byteOffset, source, byteCount);
+			var fenceValue = SubmitCommandList(commandList);
+			lock (_commandListLock)
 			{
-				var toCopyDest = new ResourceBarrier
-				{
-					Type = ResourceBarrierType.Transition,
-					Flags = ResourceBarrierFlags.None
-				};
-				toCopyDest.Anonymous.Transition = new ResourceTransitionBarrier
-				{
-					PResource = buffer.Resource.Handle,
-					Subresource = D3D12Api.ResourceBarrierAllSubresources,
-					StateBefore = previousState,
-					StateAfter = ResourceStates.CopyDest
-				};
-				_uploadCommandList.ResourceBarrier(1, &toCopyDest);
+				_inFlightCommandLists.Add(new(commandList, fenceValue));
 			}
-
-			_uploadCommandList.CopyBufferRegion(
-				buffer.Resource,
-				byteOffset,
-				buffer.UploadResource,
-				byteOffset,
-				byteCount);
-
-			if (previousState != ResourceStates.CopyDest)
-			{
-				var toOriginal = new ResourceBarrier
-				{
-					Type = ResourceBarrierType.Transition,
-					Flags = ResourceBarrierFlags.None
-				};
-				toOriginal.Anonymous.Transition = new ResourceTransitionBarrier
-				{
-					PResource = buffer.Resource.Handle,
-					Subresource = D3D12Api.ResourceBarrierAllSubresources,
-					StateBefore = ResourceStates.CopyDest,
-					StateAfter = previousState
-				};
-				_uploadCommandList.ResourceBarrier(1, &toOriginal);
-			}
-
-			SilkMarshal.ThrowHResult(_uploadCommandList.Close());
-			ID3D12CommandList* uploadLists = (ID3D12CommandList*)_uploadCommandList.Handle;
-			var fenceValue = ExecuteCommandList(_graphicsQueue, uploadLists);
-			WaitForFence(fenceValue);
 		}
 	}
 
