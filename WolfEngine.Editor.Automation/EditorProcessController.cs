@@ -105,6 +105,19 @@ public sealed class EditorProcessController : IAsyncDisposable
 		await GetRunningEditor().DeleteEntityAsync(parsedId, cancellationToken).ConfigureAwait(false);
 	}
 
+	public Task<SavedPrefabResult> SaveEntityAsPrefabAsync(
+		string entityId,
+		string folderPath,
+		CancellationToken cancellationToken)
+	{
+		if (Guid.TryParse(entityId, out var parsedId) == false)
+		{
+			throw new InvalidOperationException("entity_id must be a GUID.");
+		}
+
+		return GetRunningEditor().SaveEntityAsPrefabAsync(parsedId, folderPath, cancellationToken);
+	}
+
 	public Task<InstantiatedModelResult> InstantiateModelAsync(
 		string assetName,
 		float? x,

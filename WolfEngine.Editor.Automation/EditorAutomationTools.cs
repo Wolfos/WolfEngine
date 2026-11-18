@@ -56,6 +56,13 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken = default) =>
 		_controller.InstantiateModelAsync(assetName, x, y, z, uniformScale, cancellationToken);
 
+	[McpServerTool(Name = "save_entity_as_prefab"), Description("Save an authoring-scene entity and its children as a prefab asset, through the same path as the hierarchy's Save as Prefab. The prefab is written to disk immediately; the authoring scene itself is not saved.")]
+	public Task<SavedPrefabResult> SaveEntityAsPrefab(
+		[Description("Persistent entity GUID, such as the rootEntityId from instantiate_model.")] string entityId,
+		[Description("Project-relative folder for the prefab, such as 'Assets/Prefabs'. The file is named after the entity.")] string folderPath,
+		CancellationToken cancellationToken = default) =>
+		_controller.SaveEntityAsPrefabAsync(entityId, folderPath, cancellationToken);
+
 	[McpServerTool(Name = "play_vfx"), Description("Play a VFX asset in the running Play-mode scene, at a world position or attached to an entity with that position as its offset. Effects advance with the gameplay world, so enter Play mode first.")]
 	public Task<VfxPlayResult> PlayVfx(
 		[Description("Project-relative path of the VFX data asset, such as 'Assets/VFX/SwordImpact.data.json'.")] string assetPath,

@@ -84,6 +84,12 @@ public sealed record EditorUndoResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+/// <summary>A prefab written from an authoring-scene entity subtree, as the hierarchy's Save as Prefab writes it.</summary>
+public sealed record SavedPrefabResult(
+	Guid PrefabNodeId,
+	string RelativeSourcePath,
+	long EditorFrameSequence);
+
 public sealed record InstantiatedModelResult(
 	string AssetName,
 	Guid ModelNodeId,
