@@ -1,6 +1,5 @@
 using HarfBuzzSharp;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using WolfEngine.Editor.Tooling.Imaging;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Editor.Tooling.Fonts;
@@ -10,7 +9,7 @@ internal static class FontPreview
 {
 	public static void Write(Font font, FontArtifact artifact, string path)
 	{
-		using var image = new Image<Rgba32>(1920, 1152, new Rgba32(16, 24, 38));
+		var image = new RgbaImage(1920, 1152, new RgbaPixel(16, 24, 38));
 		var glyphs = artifact.Glyphs.ToDictionary(g => g.Id);
 		var y = 28f;
 		foreach (var size in new[] { 18, 32, 64 })
@@ -19,7 +18,7 @@ internal static class FontPreview
 			foreach (var line in FontCompiler.PreviewText.Split('\n')) DrawLine(line, size, ref y);
 			y += 24;
 		}
-		image.SaveAsPng(path);
+		image.SavePng(path);
 
 		void DrawLine(string text, int size, ref float top)
 		{
@@ -40,7 +39,7 @@ internal static class FontPreview
 		}
 	}
 
-	private static void DrawGlyph(Image<Rgba32> image, FontArtifact font, FontGlyph glyph, float x, float y, int size)
+	private static void DrawGlyph(RgbaImage image, FontArtifact font, FontGlyph glyph, float x, float y, int size)
 	{
 		if (glyph.AtlasWidth == 0) return;
 		var left = x + glyph.Left * size;
@@ -56,7 +55,7 @@ internal static class FontPreview
 				var median = Math.Max(Math.Min(r, g), Math.Min(Math.Max(r, g), b));
 				var alpha = Math.Clamp((median - 0.5f) * font.Metrics.DistanceRange * size / font.Metrics.PixelsPerEm + 0.5f, 0, 1);
 				var previous = image[px, py];
-				image[px, py] = new Rgba32((byte)(previous.R + (229 - previous.R) * alpha),
+				image[px, py] = new RgbaPixel((byte)(previous.R + (229 - previous.R) * alpha),
 					(byte)(previous.G + (238 - previous.G) * alpha), (byte)(previous.B + (248 - previous.B) * alpha));
 			}
 	}

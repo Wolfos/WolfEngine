@@ -1157,7 +1157,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		};
 	}
 
-	private struct RemovableTestComponent : IEntityComponent
+	internal struct RemovableTestComponent : IEntityComponent
 	{
 	}
 

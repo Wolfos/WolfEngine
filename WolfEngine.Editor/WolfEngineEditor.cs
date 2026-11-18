@@ -140,8 +140,9 @@ public class WolfEngineEditor
 		_audioRuntime = audioRuntime ?? throw new ArgumentNullException(nameof(audioRuntime));
 		_gameplayExceptionReporter = new GameplayExceptionReporter(logService);
 		_worldManager.SetExceptionHandler(SystemExecutionGroup.Gameplay, _gameplayExceptionReporter.ReportSystem);
-		_editorRenderViews = serviceProvider?.GetService(typeof(EditorRenderViews)) as EditorRenderViews;
-		_renderFeatures = serviceProvider?.GetService(typeof(IRenderFeatureRegistry)) as IRenderFeatureRegistry;
+		ArgumentNullException.ThrowIfNull(serviceProvider);
+		_editorRenderViews = serviceProvider.GetService(typeof(EditorRenderViews)) as EditorRenderViews;
+		_renderFeatures = serviceProvider.GetService(typeof(IRenderFeatureRegistry)) as IRenderFeatureRegistry;
 		_serviceProvider = serviceProvider;
 		_rigidbodySystem = serviceProvider.GetRequiredService<RigidbodySystem>();
 	}

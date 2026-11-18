@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Logging;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.UI;
@@ -15,13 +16,23 @@ public static class Program
 {
 	public static int Main(string[] args)
 	{
+		// Set up before the arguments are parsed, so a bad argument is logged and shown like any other failure.
+		using var log = RuntimeLog.Start(
+			args,
+			openConsole: args.Contains("--console"),
+			showDialogs: args.Contains("--frames") == false);
 		try
 		{
-			return Run(RuntimeOptions.Parse(args));
+			var exitCode = Run(RuntimeOptions.Parse(args));
+			Console.WriteLine($"runtime exited with code {exitCode}");
+
+			return exitCode;
 		}
 		catch (Exception exception)
 		{
 			Console.Error.WriteLine($"runtime failed: {exception}");
+			log.Flush();
+			log.ShowFatalError(exception);
 
 			return 1;
 		}
@@ -47,7 +58,11 @@ public static class Program
 			Catalog = catalog,
 			Gameplay = gameplay,
 			ComponentAssemblies = [gameplayAssembly, typeof(ServiceCollectionExtensions).Assembly],
-			ConfigureServices = services => services.AddWolfEngineGameplayUi(),
+			ConfigureServices = services =>
+			{
+				services.AddWolfEngineGameplayUi();
+				services.AddSingleton<ILogSink, ConsoleLogSink>();
+			},
 			FrameCount = options.Frames,
 			ShowSplashScreen = true,
 			ConfigureGraphicsSettings = options.ApplyTo
@@ -172,8 +187,9 @@ public static class Program
 				else if (args[i] == "--window-size" && ++i < args.Length && TryParseSize(args[i], out windowSize))
 				{
 				}
-				else if (args[i] == "--quit")
+				else if (args[i] is "--quit" or "--console")
 				{
+					// --console is handled before parsing, by RuntimeLog.
 				}
 				else
 				{

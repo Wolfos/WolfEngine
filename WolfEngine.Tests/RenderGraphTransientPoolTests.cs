@@ -33,7 +33,7 @@ public sealed class RenderGraphTransientPoolTests
 		var device = new TestDevice();
 		var registry = new RenderGraphResourceRegistry();
 		registry.SetDevice(device);
-		var texture = (TestTexture)RunFrame(registry, device, 1, ColorTarget);
+		var texture = (TestTexture)RunFrame(registry, device, 1, ColorTarget)!;
 
 		registry.BeginFrame();
 		registry.InvalidateTransientTexturePool();
@@ -53,7 +53,7 @@ public sealed class RenderGraphTransientPoolTests
 		var device = new TestDevice();
 		var registry = new RenderGraphResourceRegistry();
 		registry.SetDevice(device);
-		var texture = (TestTexture)RunFrame(registry, device, 1, ColorTarget);
+		var texture = (TestTexture)RunFrame(registry, device, 1, ColorTarget)!;
 
 		for (ulong submission = 2; submission < 200; submission++)
 		{
