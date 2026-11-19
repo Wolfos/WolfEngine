@@ -81,6 +81,8 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId Bc4Compress = Id("bc4-compress");
 	public static readonly ShaderProgramId Bc3Stitch = Id("bc3-stitch");
 	public static readonly ShaderProgramId Bc5Stitch = Id("bc5-stitch");
+	public static readonly ShaderProgramId Bc6hCompress = Id("bc6h-compress");
+	public static readonly ShaderProgramId TextureSampleProbe = Id("texture-sample-probe");
 	public static readonly ShaderProgramId TerrainSharedGBuffer = Id("terrain-shared-gbuffer");
 	public static readonly ShaderProgramId DebugPrimitiveForward = Id("debug-primitive-forward");
 	public static readonly ShaderProgramId DebugPrimitiveGBuffer = Id("debug-primitive-gbuffer");
@@ -163,6 +165,8 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.Bc4Compress, "ThirdParty/Betsy/bc4_compress.compute.slang"),
 			D(EngineShaderPrograms.Bc3Stitch, "ThirdParty/Betsy/bc3_stitch.compute.slang"),
 			D(EngineShaderPrograms.Bc5Stitch, "ThirdParty/Betsy/bc5_stitch.compute.slang"),
+			D(EngineShaderPrograms.Bc6hCompress, "ThirdParty/Betsy/bc6h_compress.compute.slang"),
+			D(EngineShaderPrograms.TextureSampleProbe, "Tools/texture_sample_probe.compute.slang"),
 			D(EngineShaderPrograms.TerrainSharedGBuffer, "Terrain/terrain_shared_gbuffer.slang"),
 			D(EngineShaderPrograms.DebugPrimitiveForward, "Geometry/debug_primitive_forward.slang"),
 			D(EngineShaderPrograms.DebugPrimitiveGBuffer, "Geometry/debug_primitive_gbuffer.slang"),
@@ -254,7 +258,9 @@ public sealed class EngineShaderCatalog
 		{
 			if (descriptor.Id == EngineShaderPrograms.Bc1Compress ||
 			    descriptor.Id == EngineShaderPrograms.Bc4Compress || descriptor.Id == EngineShaderPrograms.Bc3Stitch ||
-			    descriptor.Id == EngineShaderPrograms.Bc5Stitch || descriptor.Id == EngineShaderPrograms.TerrainAuthoringBrushes)
+			    descriptor.Id == EngineShaderPrograms.Bc5Stitch || descriptor.Id == EngineShaderPrograms.Bc6hCompress ||
+			    descriptor.Id == EngineShaderPrograms.TextureSampleProbe ||
+			    descriptor.Id == EngineShaderPrograms.TerrainAuthoringBrushes)
 				continue;
 			if (IsGraphicsProgram(descriptor.Id))
 			{
@@ -380,6 +386,8 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.Bc4Compress) return ["CompressBc4"];
 		if (id == EngineShaderPrograms.Bc3Stitch) return ["StitchBc3"];
 		if (id == EngineShaderPrograms.Bc5Stitch) return ["StitchBc5"];
+		if (id == EngineShaderPrograms.Bc6hCompress) return ["CompressBc6h"];
+		if (id == EngineShaderPrograms.TextureSampleProbe) return ["SampleTextureCS"];
 		if (id == EngineShaderPrograms.GpuDrawInstanceUpdate) return ["CSUpdateInstance"];
 		if (id == EngineShaderPrograms.GpuDrawMaterialUpdate) return ["CSUpdateMaterial"];
 		if (id == EngineShaderPrograms.GpuDrawMeshUpdate) return ["CSUpdateMesh"];

@@ -61,6 +61,8 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private MetalTexture? _fallbackTexture;
 	private MetalTexture? _fallbackVolumeTexture;
 	private uint _fallbackVolumeTextureIndex;
+	private MetalTexture? _fallbackCubeTexture;
+	private uint _fallbackCubeTextureIndex;
 	private uint _fallbackRwVolumeTextureIndex;
 	private MetalBuffer? _fallbackConstantBuffer;
 
@@ -283,6 +285,38 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		_fallbackVolumeTexture.SetHandles(volumeSrvHandle, DescriptorHandle.Invalid, volumeUavHandle);
 		_fallbackVolumeTextureIndex = (uint)volumeSrvHandle.Index;
 		_fallbackRwVolumeTextureIndex = (uint)volumeUavHandle.Index;
+
+		// GetTextureCube likewise needs a cube in the cube view, which SRV 0 is not encoded in.
+		var cubeDescriptor = new TextureDescriptor(1, 1, TextureFormat.Rgba8Unorm, TextureUsage.ShaderResource,
+			dimension: TextureDimension.Cube,
+			depth: TextureDescriptor.CubeFaceCount);
+		var metalCubeDescriptor = new MTLTextureDescriptor
+		{
+			Width = 1,
+			Height = 1,
+			Depth = 1,
+			MipmapLevelCount = 1,
+			PixelFormat = MTLPixelFormat.RGBA8Unorm,
+			TextureType = MTLTextureType.Cube,
+			StorageMode = MTLStorageMode.Shared,
+			Usage = MTLTextureUsage.ShaderRead
+		};
+		var cubeTexture = _device.NewTexture(metalCubeDescriptor);
+		metalCubeDescriptor.Dispose();
+		if (cubeTexture.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to create Metal bindless fallback cube texture.");
+		}
+
+		for (var face = 0; face < TextureDescriptor.CubeFaceCount; face++)
+		{
+			UploadFallbackTexture(cubeTexture, isVolume: false, slice: face);
+		}
+
+		_fallbackCubeTexture = new MetalTexture("__BindlessFallbackCubeTexture", cubeDescriptor, cubeTexture, this);
+		var cubeSrvHandle = AllocateShaderResourceView(_fallbackCubeTexture);
+		_fallbackCubeTexture.SetHandles(cubeSrvHandle, DescriptorHandle.Invalid, DescriptorHandle.Invalid);
+		_fallbackCubeTextureIndex = (uint)cubeSrvHandle.Index;
 		UpdateCountBuffer();
 
 		var fallbackBuffer = _device.NewBuffer(16, MTLResourceOptions.ResourceStorageModeShared);
@@ -316,12 +350,13 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			_generation++;
 		}
 
-		var counts = new uint[5];
+		var counts = new uint[6];
 		counts[0] = (uint)_srvCount;
 		counts[1] = (uint)_uavCount;
 		counts[2] = (uint)_samplerCount;
 		counts[3] = _fallbackVolumeTextureIndex;
 		counts[4] = _fallbackRwVolumeTextureIndex;
+		counts[5] = _fallbackCubeTextureIndex;
 		BufferHelper.CopyToBuffer(counts, _countBuffer);
 	}
 
@@ -528,7 +563,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		}
 	}
 
-	private static unsafe void UploadFallbackTexture(MTLTexture texture, bool isVolume = false)
+	private static unsafe void UploadFallbackTexture(MTLTexture texture, bool isVolume = false, int slice = 0)
 	{
 		var color = stackalloc byte[4];
 		color[0] = 255;
@@ -542,9 +577,9 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			size = new MTLSize { width = 1, height = 1, depth = 1 }
 		};
 
-		if (isVolume)
+		if (isVolume || slice > 0)
 		{
-			texture.ReplaceRegion(region, 0, 0, (nint)color, 4, 4);
+			texture.ReplaceRegion(region, 0, (ulong)slice, (nint)color, 4, 4);
 		}
 		else
 		{
@@ -600,12 +635,15 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			return;
 		}
 
-		// common_bindless.slang declares Texture2D and Texture3D arrays back to back in the texture
-		// argument buffer, so the volume view of descriptor `index` lives at MaxDescriptors + index.
+		// common_bindless.slang declares Texture2D, Texture3D and TextureCube arrays back to back in the
+		// texture argument buffer, so view n of descriptor `index` lives at n * MaxDescriptors + index.
 		// Argument slots are typed, so only the view matching the texture's dimension is written.
-		var slot = srvTexture.Descriptor.Dimension == TextureDimension.Texture3D
-			? MaxDescriptors + index
-			: index;
+		var slot = srvTexture.Descriptor.Dimension switch
+		{
+			TextureDimension.Texture3D => MaxDescriptors + index,
+			TextureDimension.Cube => 2 * MaxDescriptors + index,
+			_ => index
+		};
 		_singleTexture[0] = texture;
 		_textureEncoder.SetTextures(_singleTexture, new NSRange { location = (ulong)slot, length = 1 });
 	}

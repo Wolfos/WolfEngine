@@ -26,6 +26,26 @@ public readonly struct TextureDescriptor
 			}
 		}
 
+		if (dimension == TextureDimension.Cube)
+		{
+			if (depth != CubeFaceCount)
+			{
+				throw new ArgumentOutOfRangeException(nameof(depth), $"Cube textures must have a depth of {CubeFaceCount}, one slice per face.");
+			}
+
+			if (width != height)
+			{
+				throw new ArgumentException("Cube texture faces must be square.", nameof(height));
+			}
+
+			// Cubes are sampled through GetTextureCube only. Neither backend has a bindless view that renders
+			// to or writes a cube face yet.
+			if ((usage & (TextureUsage.RenderTarget | TextureUsage.DepthStencil | TextureUsage.UnorderedAccess)) != 0)
+			{
+				throw new ArgumentException("Cube textures can only be shader resources.", nameof(usage));
+			}
+		}
+
 		Width = width;
 		Height = height;
 		Format = format;
@@ -38,11 +58,17 @@ public readonly struct TextureDescriptor
 		Depth = depth;
 	}
 
+	/// <summary>Number of faces in a cube texture, which is also its <see cref="Depth"/>.</summary>
+	public const int CubeFaceCount = 6;
+
 	public int Width { get; }
 
 	public int Height { get; }
 
-	/// <summary>Number of slices along Z. Always one for 2D textures.</summary>
+	/// <summary>
+	/// Number of slices: along Z for 3D textures, one per face for cube textures
+	/// (<see cref="CubeFaceCount"/>), and always one for 2D textures.
+	/// </summary>
 	public int Depth { get; }
 
 	public TextureDimension Dimension { get; }
@@ -63,7 +89,13 @@ public readonly struct TextureDescriptor
 public enum TextureDimension
 {
 	Texture2D = 0,
-	Texture3D = 1
+	Texture3D = 1,
+
+	/// <summary>
+	/// Six square faces in the order +X, -X, +Y, -Y, +Z, -Z, which is the face order of both D3D12 and Metal.
+	/// Each face keeps its full size in every mip, so a mip holds six slices back to back.
+	/// </summary>
+	Cube = 2
 }
 
 public enum TextureFormat
@@ -85,7 +117,9 @@ public enum TextureFormat
 	Bc4Unorm = 14,
 	/// <summary>Single-channel 32-bit unsigned integer. Required for textures written by integer atomics.</summary>
 	R32Uint = 15,
-	Rg32Float = 16
+	Rg32Float = 16,
+	/// <summary>Unsigned half-float HDR RGB, 4x4 blocks of 16 bytes. Negative values cannot be represented.</summary>
+	Bc6hUfloat = 17
 }
 
 [Flags]

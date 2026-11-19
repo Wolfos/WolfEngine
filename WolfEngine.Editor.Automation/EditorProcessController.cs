@@ -135,6 +135,14 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<AnimationStateResult> GetAnimationStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetAnimationStateAsync(cancellationToken);
 
+	public Task<TextureSampleResult> SampleTextureAsync(
+		string assetPath,
+		float[][] coordinates,
+		float mipLevel,
+		bool linearFilter,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SampleTextureAsync(assetPath, coordinates, mipLevel, linearFilter, cancellationToken);
+
 	public Task<VfxPlayResult> PlayVfxAsync(
 		string assetPath,
 		System.Numerics.Vector3 position,

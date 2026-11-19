@@ -146,6 +146,12 @@ public sealed class TextureAssetSummary
 	public int Channels { get; set; }
 	public TextureSemantic Semantic { get; set; }
 	public string SourceExtension { get; set; } = string.Empty;
+
+	/// <summary>Shape of the imported texture. For a cube, <see cref="Width"/> and <see cref="Height"/> are its face size.</summary>
+	public TextureDimension Dimension { get; set; } = TextureDimension.Texture2D;
+
+	/// <summary>Whether the source held HDR (half-float) content rather than 8-bit color.</summary>
+	public bool IsHdr { get; set; }
 }
 
 public sealed class ComputeShaderAssetSummary
@@ -242,8 +248,33 @@ public sealed class TextureAsset
 
 public sealed class TextureImportSettings
 {
+	/// <summary>
+	/// What the texture holds, which picks its color space and compression. HDR sources are always linear;
+	/// they compress to BC6H unless the semantic is <see cref="TextureSemantic.Unknown"/>, which keeps them as
+	/// uncompressed half floats.
+	/// </summary>
 	public TextureSemantic TextureSemantic { get; set; } = TextureSemantic.BaseColor;
 	public int MaxResolution { get; set; } = 8192;
+
+	/// <summary>Whether the source is imported as a 2D texture or converted to a cube texture.</summary>
+	public TextureShape Shape { get; set; } = TextureShape.Texture2D;
+
+	/// <summary>
+	/// Face size in texels of a <see cref="TextureShape.Cube"/> import, or zero to derive it from the source:
+	/// a quarter of an equirectangular source's width, or the face size of a strip, rounded to a power of two.
+	/// </summary>
+	public int CubemapFaceSize { get; set; }
+}
+
+public enum TextureShape
+{
+	Texture2D = 0,
+
+	/// <summary>
+	/// Six faces, read from an equirectangular (2:1) panorama, or from a horizontal (6:1) or vertical (1:6)
+	/// strip of faces in +X, -X, +Y, -Y, +Z, -Z order.
+	/// </summary>
+	Cube = 1
 }
 
 /// <summary>An extra clip sub-asset compiled from a take in the same source file.</summary>

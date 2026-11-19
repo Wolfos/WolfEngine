@@ -43,6 +43,8 @@ cbuffer BindlessCounts : register(b27)
     // so GetTexture3D falls back here instead.
     uint g_BindlessFallbackTexture3D;
     uint g_BindlessFallbackRWTexture3D;
+    // SRV index of a 1x1 cube texture, which GetTextureCube falls back to for the same reason.
+    uint g_BindlessFallbackTextureCube;
 };
 
 // The D3D12 accessors below mark a handle's index with NonUniformResourceIndex. A handle is not uniform across a
@@ -66,19 +68,21 @@ uint SafeDescriptorIndex(uint handle, uint expectedKind, uint descriptorCount)
 }
 
 #if defined(WOLF_TARGET_METAL)
-// Two views over the SRV descriptors - same handle, same index, different dimension. Metal
+// Three views over the SRV descriptors - same handle, same index, different dimension. Metal
 // argument buffer slots are typed, so unlike D3D12 the views cannot share slots: they are laid
-// out back to back, and index i of the 3D view sits at WOLF_BINDLESS_TEXTURE_MAX + i.
-// MetalDescriptorTable.EncodeSrv writes only the slot matching the texture's dimension; keep
-// that in sync with the order here.
+// out back to back, and index i of view n sits at n * WOLF_BINDLESS_TEXTURE_MAX + i (2D, then
+// 3D, then cube). MetalDescriptorTable.EncodeSrv writes only the slot matching the texture's
+// dimension; keep that in sync with the order here.
 struct DescriptorHeapTextures
 {
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
     Texture2D<float4> g_Textures[WOLF_BINDLESS_TEXTURE_MAX];
     Texture3D<float4> g_Textures3D[WOLF_BINDLESS_TEXTURE_MAX];
+    TextureCube<float4> g_TexturesCube[WOLF_BINDLESS_TEXTURE_MAX];
 #else
     Texture2D<float4> g_Textures[];
     Texture3D<float4> g_Textures3D[];
+    TextureCube<float4> g_TexturesCube[];
 #endif
 };
 
@@ -145,6 +149,18 @@ Texture3D<float4> GetTexture3D(uint handle)
         return g_TextureHeap.g_Textures3D[g_BindlessFallbackTexture3D];
     }
     return g_TextureHeap.g_Textures3D[index];
+}
+
+/// Same descriptors as GetTexture, viewed as cubes. Only valid for textures created with
+/// TextureDimension.Cube. Sample with a direction; faces follow the API's cube convention.
+TextureCube<float4> GetTextureCube(uint handle)
+{
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_SRV, g_BindlessSrvCount);
+    if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
+    {
+        return g_TextureHeap.g_TexturesCube[g_BindlessFallbackTextureCube];
+    }
+    return g_TextureHeap.g_TexturesCube[index];
 }
 
 #if !defined(WOLF_NO_RW_TEXTURES)
@@ -225,6 +241,8 @@ Texture2D<float4> g_Textures[WOLF_BINDLESS_TEXTURE_MAX] : register(t0, space1);
 // Aliases the same SRV descriptor range as g_Textures. The matching D3D12_DESCRIPTOR_RANGE is
 // added to the bindless SRV root parameter in D3D12Device with the same table offset.
 Texture3D<float4> g_Textures3D[WOLF_BINDLESS_TEXTURE_MAX] : register(t0, space2);
+// Aliases the same range again, as cubes.
+TextureCube<float4> g_TexturesCube[WOLF_BINDLESS_TEXTURE_MAX] : register(t0, space3);
 SamplerState g_Samplers[WOLF_BINDLESS_SAMPLER_MAX] : register(s0, space1);
 #if !defined(WOLF_NO_RW_TEXTURES)
 RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_RW_TEXTURE_MAX] : register(u0, space1);
@@ -238,6 +256,7 @@ RWTexture3D<float4> g_RWTextures3D[WOLF_BINDLESS_RW_TEXTURE_MAX] : register(u0, 
 #else
 Texture2D<float4> g_Textures[] : register(t0, space1);
 Texture3D<float4> g_Textures3D[] : register(t0, space2);
+TextureCube<float4> g_TexturesCube[] : register(t0, space3);
 SamplerState g_Samplers[] : register(s0, space1);
 #if !defined(WOLF_NO_RW_TEXTURES)
 RWTexture2D<float4> g_RWTextures[] : register(u0, space1);
@@ -267,6 +286,18 @@ Texture3D<float4> GetTexture3D(uint handle)
         return g_Textures3D[g_BindlessFallbackTexture3D];
     }
     return g_Textures3D[NonUniformResourceIndex(index)];
+}
+
+/// Same descriptors as GetTexture, viewed as cubes. Only valid for textures created with
+/// TextureDimension.Cube. Sample with a direction; faces follow the API's cube convention.
+TextureCube<float4> GetTextureCube(uint handle)
+{
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_SRV, g_BindlessSrvCount);
+    if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
+    {
+        return g_TexturesCube[g_BindlessFallbackTextureCube];
+    }
+    return g_TexturesCube[NonUniformResourceIndex(index)];
 }
 
 #if !defined(WOLF_NO_RW_TEXTURES)

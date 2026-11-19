@@ -57,6 +57,8 @@ public sealed partial class EditorRemoteAutomationController
 	private readonly VfxAssetEditor _vfxEditor;
 	private readonly Rendering.Splash.SplashScreen _splashScreen;
 	private readonly Rendering.Shaders.EngineShaderOptions _engineShaderOptions;
+	private readonly Rendering.Shaders.IShaderProvider _shaderProvider;
+	private readonly Rendering.BindlessResourceRegistry _bindlessRegistry;
 
 	public EditorRemoteAutomationController(
 		string projectPath,
@@ -89,10 +91,14 @@ public sealed partial class EditorRemoteAutomationController
 		VfxService vfx,
 		VfxAssetEditor vfxEditor,
 		Rendering.Splash.SplashScreen splashScreen,
-		Rendering.Shaders.EngineShaderOptions engineShaderOptions)
+		Rendering.Shaders.EngineShaderOptions engineShaderOptions,
+		Rendering.Shaders.IShaderProvider shaderProvider,
+		Rendering.BindlessResourceRegistry bindlessRegistry)
 	{
 		_splashScreen = splashScreen;
 		_engineShaderOptions = engineShaderOptions;
+		_shaderProvider = shaderProvider;
+		_bindlessRegistry = bindlessRegistry;
 		_clipEditor = clipEditor;
 		_vfx = vfx;
 		_vfxEditor = vfxEditor;

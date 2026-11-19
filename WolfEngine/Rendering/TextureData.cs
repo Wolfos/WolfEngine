@@ -1,8 +1,9 @@
 namespace WolfEngine.Rendering;
 
 /// <summary>
-/// One mip level of texture content. For volume textures, <see cref="Data"/> holds
-/// <see cref="Depth"/> slices back to back, each laid out as a 2D mip of the same size.
+/// One mip level of texture content. For volume and cube textures, <see cref="Data"/> holds
+/// <see cref="Depth"/> slices back to back, each laid out as a 2D mip of the same size. A cube's
+/// slices are its faces in <see cref="TextureDimension.Cube"/> order.
 /// </summary>
 public readonly record struct TextureMipData(
 	int Width,
@@ -25,6 +26,7 @@ public static class TextureFormatUtilities
 		TextureFormat.Bc4Unorm or
 		TextureFormat.Bc5Unorm or
 		TextureFormat.Bc7Unorm or
+		TextureFormat.Bc6hUfloat or
 		TextureFormat.Astc4x4Unorm;
 
 	/// <summary>
@@ -48,6 +50,7 @@ public static class TextureFormatUtilities
 		TextureFormat.Bc4Unorm => 4,
 		TextureFormat.Bc5Unorm => 4,
 		TextureFormat.Bc7Unorm => 4,
+		TextureFormat.Bc6hUfloat => 4,
 		TextureFormat.Astc4x4Unorm => 4,
 		_ => 1
 	};
@@ -59,6 +62,7 @@ public static class TextureFormatUtilities
 		TextureFormat.Bc4Unorm => 4,
 		TextureFormat.Bc5Unorm => 4,
 		TextureFormat.Bc7Unorm => 4,
+		TextureFormat.Bc6hUfloat => 4,
 		TextureFormat.Astc4x4Unorm => 4,
 		_ => 1
 	};
@@ -70,6 +74,7 @@ public static class TextureFormatUtilities
 		TextureFormat.Bc4Unorm => 8,
 		TextureFormat.Bc5Unorm => 16,
 		TextureFormat.Bc7Unorm => 16,
+		TextureFormat.Bc6hUfloat => 16,
 		TextureFormat.Astc4x4Unorm => 16,
 		TextureFormat.Bgra8Unorm => 4,
 		TextureFormat.Rgba8Unorm => 4,
@@ -95,6 +100,34 @@ public static class TextureFormatUtilities
 		}
 
 		return width * GetBytesPerBlock(format);
+	}
+
+	/// <summary>
+	/// Number of slices a mip of a texture holds back to back: the mip's depth for 3D textures, which halves
+	/// each level, and one per face for cube textures, which keeps all six at every level.
+	/// </summary>
+	public static int GetMipSliceCount(TextureDimension dimension, int depth, int mipLevel)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(depth);
+		ArgumentOutOfRangeException.ThrowIfNegative(mipLevel);
+
+		return dimension switch
+		{
+			TextureDimension.Texture3D => Math.Max(depth >> mipLevel, 1),
+			TextureDimension.Cube => TextureDescriptor.CubeFaceCount,
+			_ => 1
+		};
+	}
+
+	/// <summary>
+	/// Number of array layers the GPU resource has, each with its own subresource per mip: six for a cube,
+	/// one otherwise. A 3D texture's slices live inside one subresource and do not count.
+	/// </summary>
+	public static int GetArrayLayerCount(TextureDimension dimension)
+	{
+		return dimension == TextureDimension.Cube
+			? TextureDescriptor.CubeFaceCount
+			: 1;
 	}
 
 	public static int GetMipDataSize(TextureFormat format, int width, int height, int depth = 1)

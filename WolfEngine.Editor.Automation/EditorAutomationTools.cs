@@ -73,6 +73,15 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken = default) =>
 		_controller.PlayVfxAsync(assetPath, new System.Numerics.Vector3(x, y, z), attachToEntityId, cancellationToken);
 
+	[McpServerTool(Name = "sample_texture"), Description("Load an imported texture's runtime artifact for the running backend onto the GPU and sample it in a compute shader through the bindless GetTexture or GetTextureCube accessor. Returns RGBA per coordinate as the GPU decodes it, which checks block compression, cube face layout and the bindless view for the texture's dimension. Reports the texture's dimension, format and size.")]
+	public Task<TextureSampleResult> SampleTexture(
+		[Description("Project-relative path of the texture's source file, such as 'Assets/Skies/Sunset.hdr'.")] string assetPath,
+		[Description("Coordinates to sample: a direction [x, y, z] for a cube texture, or a UV [u, v] for a 2D texture. At most 4096.")] float[][] coordinates,
+		[Description("Mip level to sample.")] float mipLevel = 0.0f,
+		[Description("Sample with bilinear filtering instead of point sampling.")] bool linearFilter = false,
+		CancellationToken cancellationToken = default) =>
+		_controller.SampleTextureAsync(assetPath, coordinates, mipLevel, linearFilter, cancellationToken);
+
 	[McpServerTool(Name = "get_vfx_state"), Description("Report the Play-mode world's playing effects and how much of its particle pool they reserve.")]
 	public Task<VfxStateResult> GetVfxState(CancellationToken cancellationToken) =>
 		_controller.GetVfxStateAsync(cancellationToken);

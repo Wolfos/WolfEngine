@@ -36,12 +36,22 @@ public sealed class TextureFactory : ITextureFactory
 			throw new ArgumentException("Imported texture must contain mip data.", nameof(importedTexture));
 		}
 
+		if (importedTexture.Dimension == TextureDimension.Cube)
+		{
+			return GetTexture(Texture.CreateCube(
+				importedTexture.NameOrPath,
+				importedTexture.Width,
+				importedTexture.IsSrgb,
+				importedTexture.Format,
+				importedTexture.MipLevels));
+		}
+
 		return GetTexture(new Texture(
 			importedTexture.NameOrPath,
 			importedTexture.Width,
 			importedTexture.Height,
 			importedTexture.IsSrgb,
-			TextureFormat.Rgba8Unorm,
+			importedTexture.Format,
 			importedTexture.MipLevels));
 	}
 
