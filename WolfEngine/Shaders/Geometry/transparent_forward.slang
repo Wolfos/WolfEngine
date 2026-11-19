@@ -27,7 +27,6 @@ cbuffer DrawIndexParams : register(b1)
 
 cbuffer TransparentEnvironmentParams : register(b0)
 {
-    uint environmentHandle;
     uint irradianceHandle;
     uint prefilteredHandle;
     uint brdfLutHandle;

@@ -1,3 +1,4 @@
+using System.Reflection;
 using WolfEngine.Rendering;
 
 namespace WolfEngine.Tests;
@@ -23,14 +24,14 @@ public sealed class RenderFrameResourceOwnershipTests
 	public void PerViewResources_OwnTheViewsSky()
 	{
 		var properties = typeof(RenderViewResources)
-			.GetProperties()
+			.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
 			.Select(property => property.Name)
 			.ToHashSet(StringComparer.Ordinal);
 
 		// Each view is lit by its own sun, so a preview world must not draw the scene view's sky.
 		Assert.That(properties, Is.SupersetOf(new[]
 		{
-			nameof(RenderViewResources.SkyboxEnvironment),
+			nameof(RenderViewResources.SkyEnvironment),
 			nameof(RenderViewResources.SkyboxIrradiance),
 			nameof(RenderViewResources.SkyboxPrefilter)
 		}));

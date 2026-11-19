@@ -363,6 +363,24 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken = default) =>
 		_controller.SetAntiAliasingAsync(mode, enabled, casSharpening, cancellationToken);
 
+	[McpServerTool(Name = "set_sky"), Description("Switch the active scene's sky mode and its settings in memory without saving its render config asset. Settings left out keep their current values.")]
+	public Task<string> SetSky(
+		[Description("Procedural, Hdri or Gradient.")] string mode,
+		[Description("Project-relative source path of an imported HDR texture to use in HDRI mode, such as 'Assets/Skies/Sunset.hdr'.")] string? hdriAssetPath = null,
+		[Description("Clear the HDRI texture, which draws a black sky in HDRI mode.")] bool clearHdri = false,
+		[Description("HDRI rotation about the vertical axis, in degrees.")] float? hdriRotationDegrees = null,
+		[Description("HDRI radiance multiplier.")] float? hdriIntensity = null,
+		[Description("Gradient sky color multiplier.")] float? gradientIntensity = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetSkyAsync(
+			mode,
+			hdriAssetPath,
+			clearHdri,
+			hdriRotationDegrees,
+			hdriIntensity,
+			gradientIntensity,
+			cancellationToken);
+
 	[McpServerTool(Name = "set_fsr3_settings"), Description("Set the active scene's FSR3 settings in memory without saving its render config: alpha-test reactivity, the transparency and composition mask scale, and RCAS sharpening.")]
 	public Task<string> SetFsr3Settings(
 		[Description("Reactivity for surviving alpha-tested samples, 0 to 1.")] float alphaTestReactiveScale,

@@ -16,7 +16,6 @@ public readonly struct ReflectionsPassConfig
 	public required DescriptorHandle Normal { get; init; }
 	public required DescriptorHandle Material { get; init; }
 	public required DescriptorHandle Velocity { get; init; }
-	public required DescriptorHandle Environment { get; init; }
 	public required DescriptorHandle Irradiance { get; init; }
 	public required DescriptorHandle PrefilteredEnvironment { get; init; }
 	public required DescriptorHandle BrdfLut { get; init; }

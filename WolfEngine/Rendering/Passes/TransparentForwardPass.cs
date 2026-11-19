@@ -142,7 +142,6 @@ public sealed class TransparentForwardPass
 			ShadowMapDepth0 = shadowMap0,
 			ShadowMapDepth1 = shadowMap1,
 			ShadowMapDepth2 = shadowMap2,
-			SkyboxEnvironment = ResolveSkyboxHandle(context, resources.SkyboxEnvironment),
 			SkyboxIrradiance = ResolveSkyboxHandle(context, resources.SkyboxIrradiance),
 			SkyboxPrefilter = ResolveSkyboxHandle(context, resources.SkyboxPrefilter),
 			SkyboxBrdfLut = ResolveSkyboxHandle(context, sharedResources.SkyboxBrdfLut),
@@ -230,7 +229,6 @@ public sealed class TransparentForwardPass
 		var environmentWriter = _environmentWriter
 			?? throw new InvalidOperationException("Transparent environment writer was not initialized.");
 		environmentWriter.Clear();
-		environmentWriter.SetUInt("environmentHandle", config.SkyboxEnvironment.Value);
 		environmentWriter.SetUInt("irradianceHandle", config.SkyboxIrradiance.Value);
 		environmentWriter.SetUInt("prefilteredHandle", config.SkyboxPrefilter.Value);
 		environmentWriter.SetUInt("brdfLutHandle", config.SkyboxBrdfLut.Value);

@@ -121,9 +121,6 @@ public sealed class DeferredLightingPass
 		var shadowMapDepth2 = context.GetTexture(resources.ShadowMapDepth2);
 		var fogIntegrated = resources.FogIntegrated.IsValid ? context.GetTexture(resources.FogIntegrated) : null;
 
-		var environment = resources.SkyboxEnvironment.IsValid
-			? context.GetTexture(resources.SkyboxEnvironment)
-			: emissive;
 		var irradiance = resources.SkyboxIrradiance.IsValid
 			? context.GetTexture(resources.SkyboxIrradiance)
 			: emissive;
@@ -194,7 +191,7 @@ public sealed class DeferredLightingPass
 			ShadowMapDepth0 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth0),
 			ShadowMapDepth1 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth1),
 			ShadowMapDepth2 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth2),
-			SkyboxEnvironment = _bindlessRegistry.GetTextureHandle(environment),
+			SkyEnvironment = resources.SkyEnvironment.Resolve(context, _bindlessRegistry),
 			SkyboxIrradiance = _bindlessRegistry.GetTextureHandle(irradiance),
 			SkyboxPrefilter = _bindlessRegistry.GetTextureHandle(prefilter),
 			SkyboxBrdfLut = _bindlessRegistry.GetTextureHandle(brdfLut),
@@ -288,7 +285,7 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("ddgiDominantProbeCoordDebugHandle", config.DdgiDominantProbeCoordDebug.Value);
 		bindlessWriter.SetUInt("ddgiProbeRelocationDebugHandle", config.DdgiProbeRelocationDebug.Value);
 		bindlessWriter.SetUInt("ddgiProbeRelocationDecisionDebugHandle", config.DdgiProbeRelocationDecisionDebug.Value);
-		bindlessWriter.SetUInt("environmentHandle", config.SkyboxEnvironment.Value);
+		config.SkyEnvironment.Write(bindlessWriter);
 		bindlessWriter.SetUInt("irradianceHandle", config.SkyboxIrradiance.Value);
 		bindlessWriter.SetUInt("prefilteredHandle", config.SkyboxPrefilter.Value);
 		bindlessWriter.SetUInt("brdfLutHandle", config.SkyboxBrdfLut.Value);

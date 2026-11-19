@@ -37,7 +37,7 @@ public readonly struct DdgiPassConfig
 	public required DescriptorHandle ProbeActivityMarksHandle { get; init; }
 	public required IGfxTexture ProbeActivityMarksTexture { get; init; }
 	public required DescriptorHandle ProbeRelocationDecisionHandle { get; init; }
-	public required DescriptorHandle EnvironmentHandle { get; init; }
+	public required SkyEnvironmentBinding SkyEnvironment { get; init; }
 	public required DescriptorHandle SamplerHandle { get; init; }
 	public required DescriptorHandle ErrorTextureHandle { get; init; }
 	public required IGfxBuffer InstanceBuffer { get; init; }

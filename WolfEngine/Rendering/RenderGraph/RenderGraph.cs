@@ -703,11 +703,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		_snapshotBuffer.Complete();
 	}
 
-	public void SetSkybox(SkyboxResources skybox)
-	{
-		_frameBuilder.SetSkybox(skybox);
-	}
-
 	public void OnRender(float deltaTime)
 	{
 		FrameProfiler.Instance.BeginFrame("Render Frame");
@@ -1105,7 +1100,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				viewSnapshot.Config,
 				viewCameraPosition,
 				viewSnapshot.SunDirection,
-				viewSnapshot.SunIntensityScale);
+				viewSnapshot.SunIntensityScale,
+				viewSnapshot.SkyHdri);
 			_frameBuilder.SetViewRenderFeatures(viewSnapshot.RenderFeatureFrames);
 			_frameBuilder.SetViewVfx(viewSnapshot.VfxFrame);
 		}

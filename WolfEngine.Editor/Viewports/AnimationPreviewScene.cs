@@ -30,6 +30,10 @@ public sealed class AnimationPreviewScene : IEditorRenderViewSource, IDisposable
 		ShadowMaps = new ShadowMapConfig
 		{
 			Enabled = false
+		},
+		Sky = new SkyConfig
+		{
+			Mode = SkyConfigMode.Gradient
 		}
 	};
 	private bool _disposed;

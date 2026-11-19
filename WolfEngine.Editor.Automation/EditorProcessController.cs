@@ -350,6 +350,23 @@ public sealed class EditorProcessController : IAsyncDisposable
 			sharpness,
 			cancellationToken);
 
+	public Task<string> SetSkyAsync(
+		string mode,
+		string? hdriAssetPath,
+		bool clearHdri,
+		float? hdriRotationDegrees,
+		float? hdriIntensity,
+		float? gradientIntensity,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SetSkyAsync(
+			mode,
+			hdriAssetPath,
+			clearHdri,
+			hdriRotationDegrees,
+			hdriIntensity,
+			gradientIntensity,
+			cancellationToken);
+
 	public Task<string> SetRenderScaleAsync(float renderScale, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetRenderScaleAsync(renderScale, cancellationToken);
 

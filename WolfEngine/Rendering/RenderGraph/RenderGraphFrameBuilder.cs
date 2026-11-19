@@ -151,10 +151,10 @@ public readonly struct RenderViewResources
 	public Fsr3FrameResources Fsr3 { get; init; }
 
 	/// <summary>
-	/// The sky this view draws and is lit by: its own procedural sky, built from its own sun and sky settings, or
-	/// the external skybox every view shares when one is set.
+	/// The sky this view draws and is lit by, from its own sky settings and sun: where its radiance is read
+	/// from, and the image-based lighting derived from it.
 	/// </summary>
-	public RenderGraphResourceHandle SkyboxEnvironment { get; init; }
+	internal SkyEnvironmentSource SkyEnvironment { get; init; }
 	public RenderGraphResourceHandle SkyboxIrradiance { get; init; }
 	public RenderGraphResourceHandle SkyboxPrefilter { get; init; }
 	public RenderConfig Config { get; init; }
@@ -230,7 +230,6 @@ internal sealed class RenderGraphFrameBuilder
     public int LastSkinningDispatchCount => _skinningPass.LastDispatchedInstanceCount;
 	private readonly SkyboxPass _skyboxPass;
 	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
-	private SkyboxResources? _externalSkybox;
 	private RenderFrameSharedResources _sharedResources;
 
 	/// <summary>
@@ -313,9 +312,6 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _skyboxPrefilterExecute;
 	private readonly Action<RenderGraphContext> _skyboxBrdfExecute;
 	private bool _recordProceduralSkyBrdf;
-	private RenderGraphResourceHandle _externalSkyboxEnvironment;
-	private RenderGraphResourceHandle _externalSkyboxIrradiance;
-	private RenderGraphResourceHandle _externalSkyboxPrefilter;
 	private readonly RenderFeatureHost _renderFeatureHost;
 
 
@@ -440,11 +436,6 @@ internal sealed class RenderGraphFrameBuilder
 
 	public RayTracingSceneState GetRayTracingSceneState() => _rayTracingSceneResources.GetState();
 
-	public void SetSkybox(SkyboxResources skybox)
-	{
-		_externalSkybox = skybox;
-	}
-
 	/// <summary>
 	/// Single-view convenience: the shared frame setup followed by the primary view's.
 	/// </summary>
@@ -474,9 +465,9 @@ internal sealed class RenderGraphFrameBuilder
 	}
 
 	/// <summary>
-	/// Sets up what every view in the frame shares: gameplay UI texture targets, the external skybox or the shared
-	/// BRDF LUT, and the final presentation target. Once per frame, before any view. Each view's procedural sky is
-	/// set up by <see cref="BeginViewFrame"/>.
+	/// Sets up what every view in the frame shares: gameplay UI texture targets, the shared BRDF LUT, and the
+	/// final presentation target. Once per frame, before any view. Each view's sky is set up by
+	/// <see cref="BeginViewFrame"/>.
 	/// </summary>
 	public void BeginSharedFrame(Int2 framebufferSize)
 	{
@@ -492,27 +483,12 @@ internal sealed class RenderGraphFrameBuilder
 		}
 		_gameplayUiRenderer.PruneTargets(device, _gameplayUiFrame);
 
-		_externalSkyboxEnvironment = default;
-		_externalSkyboxIrradiance = default;
-		_externalSkyboxPrefilter = default;
-		_recordProceduralSkyBrdf = false;
-		var skyboxBrdfHandle = default(RenderGraphResourceHandle);
-		if (_externalSkybox is { } external)
-		{
-			_externalSkyboxEnvironment = _resources.ImportTexture(external.EnvironmentTexture, takeOwnership: false, initialState: ResourceState.ShaderResource);
-			_externalSkyboxIrradiance = _resources.ImportTexture(external.IrradianceTexture, takeOwnership: false, initialState: ResourceState.ShaderResource);
-			_externalSkyboxPrefilter = _resources.ImportTexture(external.PrefilteredEnvironment, takeOwnership: false, initialState: ResourceState.ShaderResource);
-			skyboxBrdfHandle = _resources.ImportTexture(external.BrdfLut, takeOwnership: false, initialState: ResourceState.ShaderResource);
-		}
-		else
-		{
-			_skyboxPass.PrepareBrdfLut(device);
-			_recordProceduralSkyBrdf = _skyboxPass.ShouldRecordBrdfLutUpdate;
-			skyboxBrdfHandle = _resources.ImportTexture(
-				_skyboxPass.ProceduralBrdfLut,
-				takeOwnership: false,
-				initialState: _skyboxPass.BrdfLutInitialState);
-		}
+		_skyboxPass.PrepareBrdfLut(device);
+		_recordProceduralSkyBrdf = _skyboxPass.ShouldRecordBrdfLutUpdate;
+		var skyboxBrdfHandle = _resources.ImportTexture(
+			_skyboxPass.BrdfLut,
+			takeOwnership: false,
+			initialState: _skyboxPass.BrdfLutInitialState);
 
 		_sharedResources = new()
 		{
@@ -540,7 +516,8 @@ internal sealed class RenderGraphFrameBuilder
 		RenderConfig config,
 		Vector3 cameraPosition,
 		Vector3 sunDirection,
-		float sunIntensityScale)
+		float sunIntensityScale,
+		Texture? skyHdri = null)
 	{
 		_view = GetOrCreateViewState(view);
 		if (sceneEnabled && _frameViews.Contains(view) == false)
@@ -1143,13 +1120,13 @@ internal sealed class RenderGraphFrameBuilder
 			? CreateEncodedSceneColor(framebufferSize)
 			: default;
 
-		var (skyboxEnvironmentHandle, skyboxIrradianceHandle, skyboxPrefilterHandle) = sceneEnabled
-			? ImportViewSky(sunDirection, sunIntensityScale, config.SkyboxConfig)
+		var (skyEnvironment, skyboxIrradianceHandle, skyboxPrefilterHandle) = sceneEnabled
+			? ImportViewSky(sunDirection, sunIntensityScale, config.Sky, skyHdri)
 			: default;
 
 		_view.FrameResources = new()
 		{
-			SkyboxEnvironment = skyboxEnvironmentHandle,
+			SkyEnvironment = skyEnvironment,
 			SkyboxIrradiance = skyboxIrradianceHandle,
 			SkyboxPrefilter = skyboxPrefilterHandle,
 			FramebufferSize = framebufferSize,
@@ -1426,25 +1403,40 @@ internal sealed class RenderGraphFrameBuilder
 	}
 
 	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
-	/// <summary>Regenerates the bound view's procedural sky when its sun or settings changed since it was built.</summary>
+	/// <summary>
+	/// Regenerates the bound view's sky when what it is built from changed since it was last built: its settings,
+	/// its sun in Procedural mode, or its HDRI texture in HDRI mode.
+	/// </summary>
 	private void RecordViewSkyUpdate(RenderGraph graph)
 	{
-		if (_externalSkybox is not null || _view.Sky.ShouldRecordLightingUpdate == false)
+		if (_view.Sky.ShouldRecordLightingUpdate == false)
 		{
 			return;
 		}
 
-		graph.AddPass("Skybox Environment", PassKind.Compute)
-			.WriteTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.UnorderedAccess)
-			.SetExecute(_skyboxEnvironmentExecute);
+		var environment = _view.FrameResources.SkyEnvironment.ViewEnvironment;
+		if (environment.IsValid)
+		{
+			graph.AddPass("Skybox Environment", PassKind.Compute)
+				.WriteTexture(environment, ResourceState.UnorderedAccess)
+				.SetExecute(_skyboxEnvironmentExecute);
+		}
 
-		graph.AddPass("Skybox Irradiance", PassKind.Compute)
-			.ReadTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.ShaderResource)
+		var irradianceBuilder = graph.AddPass("Skybox Irradiance", PassKind.Compute);
+		if (environment.IsValid)
+		{
+			irradianceBuilder.ReadTexture(environment, ResourceState.ShaderResource);
+		}
+		irradianceBuilder
 			.WriteTexture(_view.FrameResources.SkyboxIrradiance, ResourceState.UnorderedAccess)
 			.SetExecute(_skyboxIrradianceExecute);
 
-		graph.AddPass("Skybox Prefilter", PassKind.Compute)
-			.ReadTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.ShaderResource)
+		var prefilterBuilder = graph.AddPass("Skybox Prefilter", PassKind.Compute);
+		if (environment.IsValid)
+		{
+			prefilterBuilder.ReadTexture(environment, ResourceState.ShaderResource);
+		}
+		prefilterBuilder
 			.WriteTexture(_view.FrameResources.SkyboxPrefilter, ResourceState.UnorderedAccess)
 			.SetExecute(_skyboxPrefilterExecute);
 	}
@@ -1640,9 +1632,9 @@ internal sealed class RenderGraphFrameBuilder
 					.ReadTexture(_view.FrameResources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
 					.WriteTexture(_view.FrameResources.DdgiTraceIrradiance, ResourceState.UnorderedAccess)
 					.WriteTexture(_view.FrameResources.DdgiTraceVisibility, ResourceState.UnorderedAccess);
-				if (_view.FrameResources.SkyboxEnvironment.IsValid)
+				if (_view.FrameResources.SkyEnvironment.ViewEnvironment.IsValid)
 				{
-					ddgiTraceBuilder.ReadTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+					ddgiTraceBuilder.ReadTexture(_view.FrameResources.SkyEnvironment.ViewEnvironment, ResourceState.ShaderResource);
 				}
 				ddgiTraceBuilder.SetExecute(_ddgiTraceExecute);
 
@@ -2032,9 +2024,9 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ReadSkyboxTextures(RenderGraphBuilder builder)
 	{
-		if (_view.FrameResources.SkyboxEnvironment.IsValid)
+		if (_view.FrameResources.SkyEnvironment.ViewEnvironment.IsValid)
 		{
-			builder.ReadTexture(_view.FrameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+			builder.ReadTexture(_view.FrameResources.SkyEnvironment.ViewEnvironment, ResourceState.ShaderResource);
 		}
 		if (_view.FrameResources.SkyboxIrradiance.IsValid)
 		{
@@ -2166,27 +2158,27 @@ internal sealed class RenderGraphFrameBuilder
 	}
 
 	/// <summary>
-	/// The bound view's sky handles: the shared external skybox when one is set, otherwise the view's own
-	/// procedural sky, prepared from its sun and settings so it regenerates only when those change.
+	/// The bound view's sky, prepared from its sun, settings and HDRI so it regenerates only when those change:
+	/// where its radiance is read from, and its irradiance and prefilter handles.
 	/// </summary>
-	private (RenderGraphResourceHandle Environment, RenderGraphResourceHandle Irradiance, RenderGraphResourceHandle Prefilter) ImportViewSky(
+	private (SkyEnvironmentSource Environment, RenderGraphResourceHandle Irradiance, RenderGraphResourceHandle Prefilter) ImportViewSky(
 		Vector3 sunDirection,
 		float sunIntensityScale,
-		SkyboxPass.Config skyboxConfig)
+		SkyConfig skyConfig,
+		Texture? skyHdri)
 	{
-		if (_externalSkybox is not null)
-		{
-			return (_externalSkyboxEnvironment, _externalSkyboxIrradiance, _externalSkyboxPrefilter);
-		}
-
 		var sky = _view.Sky;
-		_skyboxPass.PrepareSky(_renderer.GetGfxDevice(), sky, sunDirection, sunIntensityScale, skyboxConfig);
-		var initialState = sky.InitialState;
+		_skyboxPass.PrepareSky(_renderer.GetGfxDevice(), sky, sunDirection, sunIntensityScale, skyConfig, skyHdri);
+
+		var environment = sky.Environment is not null
+			? _resources.ImportTexture(sky.Environment, takeOwnership: false, initialState: sky.EnvironmentInitialState)
+			: default;
+		var lightingState = sky.LightingInitialState;
 
 		return (
-			_resources.ImportTexture(sky.Environment!, takeOwnership: false, initialState: initialState),
-			_resources.ImportTexture(sky.Irradiance!, takeOwnership: false, initialState: initialState),
-			_resources.ImportTexture(sky.Prefilter!, takeOwnership: false, initialState: initialState));
+			SkyboxPass.GetEnvironmentSource(sky, environment),
+			_resources.ImportTexture(sky.Irradiance!, takeOwnership: false, initialState: lightingState),
+			_resources.ImportTexture(sky.Prefilter!, takeOwnership: false, initialState: lightingState));
 	}
 
 	public RenderGraphResourceHandle GetFinalColorHandle() => _sharedResources.FinalColor;
@@ -2599,12 +2591,12 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteSkyboxIrradiance(RenderGraphContext context)
 	{
-		_skyboxPass.RecordIrradiance(context, _view.Sky);
+		_skyboxPass.RecordIrradiance(context, _view.Sky, _view.FrameResources.SkyEnvironment);
 	}
 
 	private void ExecuteSkyboxPrefilter(RenderGraphContext context)
 	{
-		_skyboxPass.RecordPrefilter(context, _view.Sky);
+		_skyboxPass.RecordPrefilter(context, _view.Sky, _view.FrameResources.SkyEnvironment);
 	}
 
 	private void ExecuteSkyboxBrdf(RenderGraphContext context)
@@ -2667,9 +2659,7 @@ internal sealed class RenderGraphFrameBuilder
 			PackedIndexBuffer = _gpuDrawResources.PackedMeshIndexBuffer,
 			PackedVertexStride = _gpuDrawResources.PackedMeshVertexStride,
 			CameraLayout = _gpuDrawResources.GBufferCameraLayout,
-			CameraBuffer = _gpuDrawResources.CameraBuffer,
-			SkyboxEnvironment = DescriptorHandle.Invalid,
-			SkyboxSampler = DescriptorHandle.Invalid
+			CameraBuffer = _gpuDrawResources.CameraBuffer
 		};
 
 		GBufferPass.Record(context, gbufferConfig, context.SceneData);

@@ -56,6 +56,15 @@ float2 DirToEnvUV(float3 dir)
     return float2(1.0f - u, v);
 }
 
+/// Inverse of DirToEnvUV: the world direction a sky texture stores at uv.
+float3 EnvUVToDir(float2 uv)
+{
+    float phi = (1.0f - 2.0f * uv.x) * PI;
+    float theta = uv.y * PI;
+    float sinTheta = sin(theta);
+    return float3(cos(phi) * sinTheta, cos(theta), sin(phi) * sinTheta);
+}
+
 float3 SampleEnvironment(uint environmentHandle, uint samplerHandle, float3 dir)
 {
     float2 envUV = DirToEnvUV(dir);

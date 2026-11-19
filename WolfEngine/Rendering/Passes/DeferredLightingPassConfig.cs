@@ -40,7 +40,7 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle ShadowMapDepth0 { get; init; }
 	public required DescriptorHandle ShadowMapDepth1 { get; init; }
 	public required DescriptorHandle ShadowMapDepth2 { get; init; }
-	public required DescriptorHandle SkyboxEnvironment { get; init; }
+	public required SkyEnvironmentBinding SkyEnvironment { get; init; }
 	public required DescriptorHandle SkyboxIrradiance { get; init; }
 	public required DescriptorHandle SkyboxPrefilter { get; init; }
 	public required DescriptorHandle SkyboxBrdfLut { get; init; }

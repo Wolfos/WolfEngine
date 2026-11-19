@@ -192,9 +192,7 @@ public sealed class DdgiPass
 			ProbeActivityMarksHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeActivityMarks)),
 			ProbeActivityMarksTexture = context.GetTexture(resources.DdgiProbeActivityMarks),
 			ProbeRelocationDecisionHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeRelocationDecision)),
-			EnvironmentHandle = resources.SkyboxEnvironment.IsValid
-				? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.SkyboxEnvironment))
-				: DescriptorHandle.Invalid,
+			SkyEnvironment = resources.SkyEnvironment.Resolve(context, _bindlessRegistry),
 				SamplerHandle = _linearSampler,
 				ErrorTextureHandle = _bindlessRegistry.ErrorTextureHandle,
 				InstanceBuffer = gpuDrawResources.InstanceBuffer ?? throw new InvalidOperationException("GpuDraw instance buffer missing."),
@@ -411,7 +409,7 @@ public sealed class DdgiPass
 		bindlessWriter.SetUInt("probeActivityWriteHandle", config.ProbeActivityWriteHandle.Value);
 		bindlessWriter.SetUInt("probeActivityMarksHandle", config.ProbeActivityMarksHandle.Value);
 		bindlessWriter.SetUInt("probeRelocationDecisionHandle", config.ProbeRelocationDecisionHandle.Value);
-		bindlessWriter.SetUInt("environmentHandle", config.EnvironmentHandle.Value);
+		config.SkyEnvironment.Write(bindlessWriter);
 		bindlessWriter.SetUInt("samplerHandle", config.SamplerHandle.Value);
 		bindlessWriter.SetUInt("errorTextureHandle", config.ErrorTextureHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());

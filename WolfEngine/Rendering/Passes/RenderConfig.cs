@@ -28,7 +28,7 @@ public class RenderConfig: IDataAsset
 	public LightingConfig Lighting { get; set; } = new();
 	public ShadowMapConfig ShadowMaps { get; set; } = new();
 	public VolumetricFogConfig VolumetricFog { get; set; } = new();
-	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
+	public SkyConfig Sky { get; set; } = new();
 	// Keep the serialized key for existing render-config assets while presenting the
 	// renderer that actually owns these settings in the editor.
 	[JsonPropertyName("TemporalAntiAliasing")]

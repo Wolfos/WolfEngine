@@ -69,9 +69,6 @@ public sealed class ReflectionsPass
 		}
 
 		var emissiveFallback = context.GetTexture(resources.GBufferEmissive);
-		var environment = resources.SkyboxEnvironment.IsValid
-			? context.GetTexture(resources.SkyboxEnvironment)
-			: emissiveFallback;
 		var irradiance = resources.SkyboxIrradiance.IsValid
 			? context.GetTexture(resources.SkyboxIrradiance)
 			: emissiveFallback;
@@ -108,7 +105,6 @@ public sealed class ReflectionsPass
 			Normal = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.GBufferNormal)),
 			Material = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.GBufferMaterial)),
 			Velocity = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.GBufferVelocity)),
-			Environment = _bindlessRegistry.GetTextureHandle(environment),
 			Irradiance = _bindlessRegistry.GetTextureHandle(irradiance),
 			PrefilteredEnvironment = _bindlessRegistry.GetTextureHandle(prefiltered),
 			BrdfLut = _bindlessRegistry.GetTextureHandle(brdfLut),
@@ -166,7 +162,6 @@ public sealed class ReflectionsPass
 		bindlessWriter.SetUInt("velocityHandle", config.Velocity.Value);
 		if (config.Mode == ReflectionMode.RayTraced)
 		{
-			bindlessWriter.SetUInt("environmentHandle", config.Environment.Value);
 			bindlessWriter.SetUInt("irradianceHandle", config.Irradiance.Value);
 			bindlessWriter.SetUInt("prefilteredHandle", config.PrefilteredEnvironment.Value);
 			bindlessWriter.SetUInt("brdfLutHandle", config.BrdfLut.Value);

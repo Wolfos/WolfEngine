@@ -2,6 +2,7 @@ import "../Common/common.slang";
 import "../Common/constants.slang";
 import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
+import "../Common/sky_sampling.slang";
 import "../Ddgi/ddgi_sample.slang";
 import "../Common/volumetric_fog.slang";
 
@@ -29,7 +30,7 @@ cbuffer BindlessHandles : register(b0)
     uint ddgiDominantProbeCoordDebugHandle;
     uint ddgiProbeRelocationDebugHandle;
     uint ddgiProbeRelocationDecisionDebugHandle;
-    uint environmentHandle;
+    SkyEnvironment skyEnvironment;
     uint irradianceHandle;
     uint prefilteredHandle;
     uint brdfLutHandle;
@@ -192,7 +193,7 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (IsBackgroundDepth(depth))
     {
         float3 skyDir = ReconstructWorldDirection(dispatchThreadId.xy, uint2(width, height), 1.0f, camera.invViewProjection);
-        float3 skyColor = SampleEnvironment(environmentHandle, samplerHandle, skyDir);
+        float3 skyColor = SampleSky(skyEnvironment, samplerHandle, skyDir, 0.0f);
         if (fogEnabled != 0u)
         {
             float4 fog = SampleIntegratedFog(fogIntegratedHandle, samplerHandle, uv,

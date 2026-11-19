@@ -72,6 +72,12 @@ public sealed class RenderViewSnapshot
 	/// touches the asset database. Null when no table is assigned.
 	/// </summary>
 	public ColorLookupTable? ColorGradingLookupTable { get; private set; }
+
+	/// <summary>
+	/// <see cref="HdriSkyConfig.Texture"/> in HDRI mode, resolved on the game thread so the render thread never
+	/// touches the asset database. Null in other modes or when no texture is assigned.
+	/// </summary>
+	public Texture? SkyHdri { get; private set; }
 	public GpuDrawDatabase GpuDrawDatabase { get; }
 	private bool _hasCameraState;
 	private Matrix4x4[] _boneMatrixArena = new Matrix4x4[512];
@@ -291,7 +297,7 @@ public sealed class RenderViewSnapshot
 		Config.Lighting = config.Lighting;
 		Config.ShadowMaps = config.ShadowMaps;
 		Config.VolumetricFog = config.VolumetricFog;
-		Config.SkyboxConfig = config.SkyboxConfig;
+		Config.Sky = config.Sky;
 		Config.AntiAliasing = config.AntiAliasing;
 		Config.Tonemapping = config.Tonemapping;
 		Config.ColorGrading = config.ColorGrading;
@@ -303,6 +309,11 @@ public sealed class RenderViewSnapshot
 	public void SetColorGradingLookupTable(ColorLookupTable? lookupTable)
 	{
 		ColorGradingLookupTable = lookupTable;
+	}
+
+	public void SetSkyHdri(Texture? hdri)
+	{
+		SkyHdri = hdri;
 	}
 
 	public readonly struct LightPacket

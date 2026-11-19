@@ -38,6 +38,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId ClusteredLighting = Id("clustered-lighting");
 	public static readonly ShaderProgramId ImGui = Id("imgui");
 	public static readonly ShaderProgramId ProceduralSkybox = Id("procedural-skybox");
+	public static readonly ShaderProgramId GradientSky = Id("gradient-sky");
 	public static readonly ShaderProgramId IblBrdfLut = Id("ibl-brdf-lut");
 	public static readonly ShaderProgramId IblIrradiance = Id("ibl-irradiance");
 	public static readonly ShaderProgramId IblPrefilter = Id("ibl-prefilter");
@@ -122,6 +123,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.ClusteredLighting, "Lighting/clustered_lighting.compute.slang"),
 			D(EngineShaderPrograms.ImGui, "Ui/imgui.slang"),
 			D(EngineShaderPrograms.ProceduralSkybox, "Ibl/procedural_skybox.compute.slang"),
+			D(EngineShaderPrograms.GradientSky, "Ibl/gradient_sky.compute.slang"),
 			D(EngineShaderPrograms.IblBrdfLut, "Ibl/ibl_brdf_lut.compute.slang"),
 			D(EngineShaderPrograms.IblIrradiance, "Ibl/ibl_irradiance.compute.slang"),
 			D(EngineShaderPrograms.IblPrefilter, "Ibl/ibl_prefilter.compute.slang"),
@@ -345,6 +347,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.DeferredLighting) return ["DeferredLightingCS"];
 		if (id == EngineShaderPrograms.ClusteredLighting) return ["CSBuildClusters", "CSWriteLightIndices"];
 		if (id == EngineShaderPrograms.ProceduralSkybox) return ["ProceduralSkyboxCSMain"];
+		if (id == EngineShaderPrograms.GradientSky) return ["GradientSkyCSMain"];
 		if (id == EngineShaderPrograms.IblBrdfLut) return ["IblBrdfCSMain"];
 		if (id == EngineShaderPrograms.IblIrradiance) return ["IblIrradianceCSMain"];
 		if (id == EngineShaderPrograms.IblPrefilter) return ["IblPrefilterCSMain"];

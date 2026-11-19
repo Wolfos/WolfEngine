@@ -50,7 +50,6 @@ public struct TransparentForwardPassConfig
 	public required IGfxTexture ShadowMapDepth1 { get; init; }
 	public required IGfxTexture ShadowMapDepth2 { get; init; }
 
-	public required DescriptorHandle SkyboxEnvironment { get; init; }
 	public required DescriptorHandle SkyboxIrradiance { get; init; }
 	public required DescriptorHandle SkyboxPrefilter { get; init; }
 	public required DescriptorHandle SkyboxBrdfLut { get; init; }

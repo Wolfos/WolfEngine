@@ -14,7 +14,7 @@ public readonly struct DdgiFinalGatherPassConfig
 	public required DescriptorHandle Depth { get; init; }
 	public required DescriptorHandle Normal { get; init; }
 	public required DescriptorHandle Output { get; init; }
-	public required DescriptorHandle Environment { get; init; }
+	public required SkyEnvironmentBinding SkyEnvironment { get; init; }
 	public required DescriptorHandle Irradiance { get; init; }
 	public required DescriptorHandle LinearSampler { get; init; }
 	public required DescriptorHandle ErrorTexture { get; init; }

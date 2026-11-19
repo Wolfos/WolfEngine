@@ -2,6 +2,7 @@ import "../Common/common.slang";
 import "../Common/constants.slang";
 import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
+import "../Common/sky_sampling.slang";
 import "../Common/draw_data.slang";
 import "../Common/normal_decode.slang";
 import "../Common/packed_vertex.slang";
@@ -24,7 +25,7 @@ cbuffer BindlessHandles : register(b0)
     uint depthHandle;
     uint normalHandle;
     uint outputHandle;
-    uint environmentHandle;
+    SkyEnvironment skyEnvironment;
     uint irradianceHandle;
     uint samplerHandle;
     uint errorTextureHandle;
@@ -226,7 +227,7 @@ float3 CosineHemisphereDirection(float3 normal, float2 u)
 
 float3 SampleSkyRadiance(float3 direction)
 {
-    return SampleEnvironment(environmentHandle, samplerHandle, direction) * IBL_EXPOSURE;
+    return SampleSky(skyEnvironment, samplerHandle, direction, 0.0f) * IBL_EXPOSURE;
 }
 
 /// Irradiance / PI the sky delivers to a surface with this normal, ignoring everything in between.

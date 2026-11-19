@@ -73,7 +73,7 @@ public sealed class MultiViewRecordingTests
 		{
 			// A preview world lit by its own sun must not show the scene view's sky.
 			Assert.That(primary.Sky, Is.Not.SameAs(second.Sky));
-			Assert.That(primary.FrameResources.SkyboxEnvironment, Is.Not.EqualTo(second.FrameResources.SkyboxEnvironment));
+			Assert.That(primary.FrameResources.SkyEnvironment.ViewEnvironment, Is.Not.EqualTo(second.FrameResources.SkyEnvironment.ViewEnvironment));
 			Assert.That(second.Sky.SunDirection, Is.Not.EqualTo(primary.Sky.SunDirection));
 			Assert.That(graph.Passes.Single(pass => pass.Name == "Skybox Environment").View, Is.EqualTo(RenderViewId.Primary));
 			Assert.That(graph.Passes.Single(pass => pass.Name == "Skybox Environment [view2]").View, Is.EqualTo(Second));

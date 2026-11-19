@@ -8,16 +8,6 @@ static float3 EquirectToDir(float2 uv)
     return float3(cos(phi) * sinTheta, cos(theta), sin(phi) * sinTheta);
 }
 
-static float2 DirToEquirect(float3 dir)
-{
-    dir = normalize(dir);
-    float phi = atan2(dir.z, dir.x);
-    float theta = acos(clamp(dir.y, -1.0f, 1.0f));
-    float u = phi / (2.0f * PI) + 0.5f;
-    float v = theta / PI;
-    return float2(u, v);
-}
-
 // Low-discrepancy sequence
 static float RadicalInverse_VdC(uint bits)
 {

@@ -58,9 +58,6 @@ public sealed class DdgiFinalGatherPass
 		var ddgiConfig = resources.Config.DiffuseGlobalIllumination;
 		var settings = ddgiConfig.FinalGather;
 		var emissiveFallback = context.GetTexture(resources.GBufferEmissive);
-		var environment = resources.SkyboxEnvironment.IsValid
-			? context.GetTexture(resources.SkyboxEnvironment)
-			: emissiveFallback;
 		var irradiance = resources.SkyboxIrradiance.IsValid
 			? context.GetTexture(resources.SkyboxIrradiance)
 			: emissiveFallback;
@@ -73,7 +70,7 @@ public sealed class DdgiFinalGatherPass
 			Depth = _bindlessRegistry.RegisterDepthTexture(context.GetTexture(resources.GBufferDepth)),
 			Normal = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.GBufferNormal)),
 			Output = _bindlessRegistry.RegisterRwTexture(outputTexture),
-			Environment = _bindlessRegistry.GetTextureHandle(environment),
+			SkyEnvironment = resources.SkyEnvironment.Resolve(context, _bindlessRegistry),
 			Irradiance = _bindlessRegistry.GetTextureHandle(irradiance),
 			LinearSampler = _linearSampler,
 			ErrorTexture = _bindlessRegistry.ErrorTextureHandle,
@@ -146,7 +143,7 @@ public sealed class DdgiFinalGatherPass
 		bindlessWriter.SetUInt("depthHandle", config.Depth.Value);
 		bindlessWriter.SetUInt("normalHandle", config.Normal.Value);
 		bindlessWriter.SetUInt("outputHandle", config.Output.Value);
-		bindlessWriter.SetUInt("environmentHandle", config.Environment.Value);
+		config.SkyEnvironment.Write(bindlessWriter);
 		bindlessWriter.SetUInt("irradianceHandle", config.Irradiance.Value);
 		bindlessWriter.SetUInt("samplerHandle", config.LinearSampler.Value);
 		bindlessWriter.SetUInt("errorTextureHandle", config.ErrorTexture.Value);

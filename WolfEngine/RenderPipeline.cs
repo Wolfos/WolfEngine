@@ -254,6 +254,17 @@ public class RenderPipeline : IRenderPipeline
 		}
 
 		snapshot.SetColorGradingLookupTable(lookupTable);
+
+		var hdriRef = config.Sky.Hdri.Texture;
+		var hdri = config.Sky.Mode == SkyConfigMode.Hdri && hdriRef.IsValid
+			? hdriRef.Asset
+			: null;
+		if (hdri is not null)
+		{
+			_renderGraph.EnsureTextureResources(hdri);
+		}
+
+		snapshot.SetSkyHdri(hdri);
 	}
 
 	private void PopulateSnapshot(

@@ -39,6 +39,10 @@ public sealed class AnimationClipPreviewScene : IEditorRenderViewSource, IBoneSp
 		ShadowMaps = new ShadowMapConfig
 		{
 			Enabled = false
+		},
+		Sky = new SkyConfig
+		{
+			Mode = SkyConfigMode.Gradient
 		}
 	};
 	private readonly Entity _camera;
