@@ -37,7 +37,11 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId DeferredLighting = Id("deferred-lighting");
 	public static readonly ShaderProgramId ClusteredLighting = Id("clustered-lighting");
 	public static readonly ShaderProgramId ImGui = Id("imgui");
-	public static readonly ShaderProgramId ProceduralSkybox = Id("procedural-skybox");
+	public static readonly ShaderProgramId AtmosphereTransmittanceLut = Id("atmosphere-transmittance-lut");
+	public static readonly ShaderProgramId AtmosphereMultipleScatteringLut = Id("atmosphere-multiple-scattering-lut");
+	public static readonly ShaderProgramId AtmosphereSkyViewLut = Id("atmosphere-sky-view-lut");
+	public static readonly ShaderProgramId AtmosphereAerialPerspective = Id("atmosphere-aerial-perspective");
+	public static readonly ShaderProgramId AtmosphereEnvironment = Id("atmosphere-environment");
 	public static readonly ShaderProgramId GradientSky = Id("gradient-sky");
 	public static readonly ShaderProgramId IblBrdfLut = Id("ibl-brdf-lut");
 	public static readonly ShaderProgramId IblIrradiance = Id("ibl-irradiance");
@@ -122,7 +126,11 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.DeferredLighting, "Lighting/deferred_lighting.compute.slang"),
 			D(EngineShaderPrograms.ClusteredLighting, "Lighting/clustered_lighting.compute.slang"),
 			D(EngineShaderPrograms.ImGui, "Ui/imgui.slang"),
-			D(EngineShaderPrograms.ProceduralSkybox, "Ibl/procedural_skybox.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereTransmittanceLut, "Atmosphere/atmosphere_transmittance_lut.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereMultipleScatteringLut, "Atmosphere/atmosphere_multiple_scattering_lut.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereSkyViewLut, "Atmosphere/atmosphere_sky_view_lut.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereAerialPerspective, "Atmosphere/atmosphere_aerial_perspective.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereEnvironment, "Atmosphere/atmosphere_environment.compute.slang"),
 			D(EngineShaderPrograms.GradientSky, "Ibl/gradient_sky.compute.slang"),
 			D(EngineShaderPrograms.IblBrdfLut, "Ibl/ibl_brdf_lut.compute.slang"),
 			D(EngineShaderPrograms.IblIrradiance, "Ibl/ibl_irradiance.compute.slang"),
@@ -346,7 +354,11 @@ public sealed class EngineShaderCatalog
 	{
 		if (id == EngineShaderPrograms.DeferredLighting) return ["DeferredLightingCS"];
 		if (id == EngineShaderPrograms.ClusteredLighting) return ["CSBuildClusters", "CSWriteLightIndices"];
-		if (id == EngineShaderPrograms.ProceduralSkybox) return ["ProceduralSkyboxCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereTransmittanceLut) return ["AtmosphereTransmittanceLutCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereMultipleScatteringLut) return ["AtmosphereMultipleScatteringLutCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereSkyViewLut) return ["AtmosphereSkyViewLutCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereAerialPerspective) return ["AtmosphereAerialPerspectiveCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereEnvironment) return ["AtmosphereEnvironmentCSMain"];
 		if (id == EngineShaderPrograms.GradientSky) return ["GradientSkyCSMain"];
 		if (id == EngineShaderPrograms.IblBrdfLut) return ["IblBrdfCSMain"];
 		if (id == EngineShaderPrograms.IblIrradiance) return ["IblIrradianceCSMain"];

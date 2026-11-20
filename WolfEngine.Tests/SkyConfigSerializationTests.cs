@@ -38,7 +38,7 @@ public sealed class SkyConfigSerializationTests
 		Assert.Multiple(() =>
 		{
 			Assert.That(copy.Sky.Mode, Is.EqualTo(SkyConfigMode.Procedural));
-			Assert.That(copy.Sky.Procedural.Intensity, Is.EqualTo(new ProceduralSkyConfig().Intensity));
+			Assert.That(copy.Sky.Procedural.GroundRadiusKm, Is.EqualTo(new ProceduralSkyConfig().GroundRadiusKm));
 			Assert.That(copy.Sky.Hdri.Texture.IsValid, Is.False);
 		});
 	}
@@ -52,7 +52,8 @@ public sealed class SkyConfigSerializationTests
 				Mode = SkyConfigMode.Hdri,
 				Procedural = new ProceduralSkyConfig
 				{
-					Intensity = 12.0f
+					MieAnisotropy = 0.7f,
+					OzoneTipAltitudeKm = 22.0f
 				},
 				Hdri = new HdriSkyConfig
 				{
@@ -76,7 +77,8 @@ public sealed class SkyConfigSerializationTests
 		Assert.Multiple(() =>
 		{
 			Assert.That(sky.Mode, Is.EqualTo(SkyConfigMode.Hdri));
-			Assert.That(sky.Procedural.Intensity, Is.EqualTo(12.0f));
+			Assert.That(sky.Procedural.MieAnisotropy, Is.EqualTo(0.7f));
+			Assert.That(sky.Procedural.OzoneTipAltitudeKm, Is.EqualTo(22.0f));
 			Assert.That(sky.Hdri.Texture.NodeId, Is.EqualTo(HdriNodeId));
 			Assert.That(sky.Hdri.RotationDegrees, Is.EqualTo(135.0f));
 			Assert.That(sky.Hdri.Intensity, Is.EqualTo(0.5f));

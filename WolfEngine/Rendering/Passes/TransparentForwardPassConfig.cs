@@ -1,5 +1,6 @@
 using WolfEngine.Rendering.Abstraction;
 using System.Numerics;
+using WolfEngine.Rendering.Atmosphere;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -51,6 +52,7 @@ public struct TransparentForwardPassConfig
 	public required IGfxTexture ShadowMapDepth2 { get; init; }
 
 	public required DescriptorHandle SkyboxIrradiance { get; init; }
+	public required AtmosphereBinding Atmosphere { get; init; }
 	public required DescriptorHandle SkyboxPrefilter { get; init; }
 	public required DescriptorHandle SkyboxBrdfLut { get; init; }
 	public required DescriptorHandle LinearSampler { get; init; }

@@ -636,7 +636,7 @@ public class WolfEngineEditor
 			config = entry.First.RenderConfigAsset.Asset;
 		}
 
-		return config ?? new RenderConfig();
+		return config ?? _sceneWorkspace.DefaultRenderConfig;
 	}
 
 	private void ValidateSelection()

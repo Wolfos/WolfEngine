@@ -28,7 +28,7 @@ public sealed class RenderViewSnapshot
 		SkinningPackets = new List<SkinningPacket>(8);
 		OutlinePackets = new List<OutlinePacket>(8);
 		SunDirection = DefaultSunDirection;
-		SunIntensityScale = 1.0f;
+		SunIlluminance = Vector3.One;
 		Config = new();
 		GpuDrawDatabase = new GpuDrawDatabase(drawTransformHistory, drawHandles);
 	}
@@ -64,7 +64,8 @@ public sealed class RenderViewSnapshot
 	/// <summary>Packed current and previous bone matrices for this frame.</summary>
 	public ReadOnlySpan<Matrix4x4> BoneMatrices => _boneMatrixArena.AsSpan(0, _boneMatrixArenaUsed);
 	public Vector3 SunDirection { get; private set; }
-	public float SunIntensityScale { get; private set; }
+	/// <summary>The sun light's color times intensity: the illuminance the Procedural sky is lit with.</summary>
+	public Vector3 SunIlluminance { get; private set; }
 	public RenderConfig Config { get; private set; }
 
 	/// <summary>
@@ -156,7 +157,7 @@ public sealed class RenderViewSnapshot
 		ClearRenderFeatureFrames();
 		_boneMatrixArenaUsed = 0;
 		SunDirection = DefaultSunDirection;
-		SunIntensityScale = 1.0f;
+		SunIlluminance = Vector3.One;
 		HasPreviousCameraState = false;
 		GpuDrawDatabase.ResetForSnapshotWrite();
 	}
@@ -275,12 +276,12 @@ public sealed class RenderViewSnapshot
 		FogVolumePackets.Add(new FogVolumePacket(volume, transform));
 	}
 
-	public void SetSun(Vector3 sunDirection, float sunIntensityScale)
+	public void SetSun(Vector3 sunDirection, Vector3 sunIlluminance)
 	{
 		SunDirection = sunDirection == Vector3.Zero
 			? DefaultSunDirection
 			: Vector3.Normalize(sunDirection);
-		SunIntensityScale = Math.Clamp(sunIntensityScale, 0.0f, 1.0f);
+		SunIlluminance = Vector3.Max(sunIlluminance, Vector3.Zero);
 	}
 
 	/// <summary>
@@ -459,7 +460,7 @@ public sealed class FrameSnapshot
 	public List<SkinningPacket> SkinningPackets => Primary.SkinningPackets;
 	public ReadOnlySpan<Matrix4x4> BoneMatrices => Primary.BoneMatrices;
 	public Vector3 SunDirection => Primary.SunDirection;
-	public float SunIntensityScale => Primary.SunIntensityScale;
+	public Vector3 SunIlluminance => Primary.SunIlluminance;
 	public RenderConfig Config => Primary.Config;
 	public ColorLookupTable? ColorGradingLookupTable => Primary.ColorGradingLookupTable;
 	public GpuDrawDatabase GpuDrawDatabase => Primary.GpuDrawDatabase;
@@ -476,7 +477,7 @@ public sealed class FrameSnapshot
 	public void AddOutline(Mesh mesh, Matrix4x4 transform, ColorRGBA color, float thicknessPixels) =>
 		Primary.AddOutline(mesh, transform, color, thicknessPixels);
 	public void AddFogVolume(FogVolume volume, Matrix4x4 transform) => Primary.AddFogVolume(volume, transform);
-	public void SetSun(Vector3 sunDirection, float sunIntensityScale) => Primary.SetSun(sunDirection, sunIntensityScale);
+	public void SetSun(Vector3 sunDirection, Vector3 sunIlluminance) => Primary.SetSun(sunDirection, sunIlluminance);
 	public void SetConfig(RenderConfig config) => Primary.SetConfig(config);
 	public void SetColorGradingLookupTable(ColorLookupTable? lookupTable) =>
 		Primary.SetColorGradingLookupTable(lookupTable);

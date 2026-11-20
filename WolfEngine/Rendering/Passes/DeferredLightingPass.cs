@@ -1,6 +1,7 @@
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
+using WolfEngine.Rendering.Atmosphere;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -192,6 +193,7 @@ public sealed class DeferredLightingPass
 			ShadowMapDepth1 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth1),
 			ShadowMapDepth2 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth2),
 			SkyEnvironment = resources.SkyEnvironment.Resolve(context, _bindlessRegistry),
+			Atmosphere = AtmosphereBinding.Resolve(context, _bindlessRegistry, resources.Atmosphere),
 			SkyboxIrradiance = _bindlessRegistry.GetTextureHandle(irradiance),
 			SkyboxPrefilter = _bindlessRegistry.GetTextureHandle(prefilter),
 			SkyboxBrdfLut = _bindlessRegistry.GetTextureHandle(brdfLut),
@@ -332,11 +334,15 @@ public sealed class DeferredLightingPass
 			}
 
 			var position = packet.Transform.Translation;
-			var intensityScale = DirectionalLightUtility.GetIntensityScale(light, forward);
+			var colorScale = sceneData.SunLightAttenuation.GetColorScale(light, forward);
 
 			lightingWriter.SetColorRGBA(
 				$"directionalLights[{directionalLightCount}].colorIntensity",
-				new ColorRGBA(light.Color.R, light.Color.G, light.Color.B, light.Intensity * intensityScale));
+				new ColorRGBA(
+					light.Color.R * colorScale.X,
+					light.Color.G * colorScale.Y,
+					light.Color.B * colorScale.Z,
+					light.Intensity));
 			lightingWriter.SetVector4($"directionalLights[{directionalLightCount}].directionAndType", new Vector4(forward, 0.0f));
 			directionalLightCount++;
 		}
@@ -402,6 +408,15 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetUInt("fogEnabled", config.FogEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("fogSliceCount", (uint)config.FogSliceCount);
 		lightingWriter.SetFloat("fogMaxDistance", config.FogMaxDistance);
+		var atmosphere = config.Atmosphere;
+		lightingWriter.SetUInt("atmosphereEnabled", atmosphere.Enabled ? 1u : 0u);
+		if (atmosphere.Enabled)
+		{
+			lightingWriter.SetUInt("skyViewLutHandle", atmosphere.SkyViewLut.Value);
+			lightingWriter.SetUInt("atmosphereTransmittanceLutHandle", atmosphere.TransmittanceLut.Value);
+			lightingWriter.SetUInt("aerialPerspectiveHandle", atmosphere.AerialPerspective.Value);
+			AtmosphereConstants.Write(lightingWriter, atmosphere.Frame);
+		}
 		commandList.SetComputeConstants(lightingWriter.RegisterIndex, lightingWriter.AsBytes());
 		commandList.SetComputeBuffer(3, config.PointLightBuffer);
 		commandList.SetComputeBuffer(4, config.ClusterHeaderBuffer);

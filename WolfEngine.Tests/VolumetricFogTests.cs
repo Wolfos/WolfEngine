@@ -389,7 +389,7 @@ public sealed class VolumetricFogTests
 			Reflections = new ReflectionConfig { Enabled = false },
 			Bloom = new BloomConfig { Enabled = false }
 		};
-		builder.BeginFrame(new Int2(64, 64), new Int2(64, 64), default, true, false, Vector3.UnitY, 1.0f, config, Vector3.Zero);
+		builder.BeginFrame(new Int2(64, 64), new Int2(64, 64), default, true, false, Vector3.UnitY, Vector3.One, config, Vector3.Zero);
 	}
 
 	private static RenderViewResources Resources(RenderGraphFrameBuilder builder) => ViewState(builder).FrameResources;

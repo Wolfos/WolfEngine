@@ -4,6 +4,7 @@ import "../Common/draw_data.slang";
 import "../Common/common_lighting.slang";
 import "../Common/normal_decode.slang";
 import "../Common/volumetric_fog.slang";
+import "../Atmosphere/atmosphere_common.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 1048576
 #define WOLF_MAX_MATERIAL_COUNT 1048576
@@ -39,6 +40,9 @@ cbuffer TransparentEnvironmentParams : register(b0)
     uint fogEnabled;
     uint fogSliceCount;
     float fogMaxDistance;
+    /// The Procedural sky's aerial perspective volume, used when aerialPerspectiveEnabled is non-zero.
+    uint aerialPerspectiveHandle;
+    uint aerialPerspectiveEnabled;
 };
 
 cbuffer CameraParams : register(b2)
@@ -253,6 +257,14 @@ TransparentOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFa
         samplerHandle,
         IBL_EXPOSURE);
     color += surface.emissive;
+
+    // Atmosphere between the surface and the camera, then local fog in front of it.
+    if (aerialPerspectiveEnabled != 0u)
+    {
+        float2 screenUv = input.position.xy / float2(frameSizeX, frameSizeY);
+        float4 aerialPerspective = SampleAerialPerspective(aerialPerspectiveHandle, samplerHandle, screenUv, length(input.worldPos));
+        color = ApplyAerialPerspective(color, aerialPerspective);
+    }
 
     if (fogEnabled != 0u)
     {

@@ -173,8 +173,8 @@ public sealed class MultiViewRecordingTests
 		};
 		var framebuffer = new Int2(128, 128);
 		builder.BeginSharedFrame(framebuffer);
-		builder.BeginViewFrame(RenderViewId.Primary, framebuffer, primarySize, default, true, false, config, Vector3.Zero, Vector3.UnitY, 1.0f);
-		builder.BeginViewFrame(Second, framebuffer, secondSize, default, true, false, secondConfig ?? config, Vector3.Zero, secondSunDirection, 1.0f);
+		builder.BeginViewFrame(RenderViewId.Primary, framebuffer, primarySize, default, true, false, config, Vector3.Zero, Vector3.UnitY, Vector3.One);
+		builder.BeginViewFrame(Second, framebuffer, secondSize, default, true, false, secondConfig ?? config, Vector3.Zero, secondSunDirection, Vector3.One);
 		builder.RecordSharedPreparation(graph);
 		builder.BindView(RenderViewId.Primary);
 		builder.RecordBoundView(graph);

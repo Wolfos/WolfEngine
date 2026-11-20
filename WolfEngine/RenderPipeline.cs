@@ -274,7 +274,7 @@ public class RenderPipeline : IRenderPipeline
 		IReadOnlyList<World> worlds)
 	{
 			var sunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
-			var sunIntensityScale = 1.0f;
+			var sunIlluminance = Vector3.One;
 			var hasSunDirection = false;
 			var gpuDrawDatabase = snapshot.GpuDrawDatabase;
 			var cameraOrigin = Vector3.Zero;
@@ -531,12 +531,12 @@ public class RenderPipeline : IRenderPipeline
 							}
 
 							sunDirection = Vector3.Normalize(forward);
-							sunIntensityScale = DirectionalLightUtility.GetIntensityScale(light, forward);
+							sunIlluminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
 							hasSunDirection = true;
 						}
 					}
 
-					snapshot.SetSun(sunDirection, sunIntensityScale);
+					snapshot.SetSun(sunDirection, sunIlluminance);
 				}
 
 				using (FrameProfiler.Instance.Measure("Gather decals"))

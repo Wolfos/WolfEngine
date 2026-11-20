@@ -371,6 +371,11 @@ public sealed class EditorAutomationTools
 		[Description("HDRI rotation about the vertical axis, in degrees.")] float? hdriRotationDegrees = null,
 		[Description("HDRI radiance multiplier.")] float? hdriIntensity = null,
 		[Description("Gradient sky color multiplier.")] float? gradientIntensity = null,
+		[Description("Procedural sky: Mie scattering at sea level, 1/km.")] float? mieScatteringScale = null,
+		[Description("Procedural sky: Mie absorption at sea level, 1/km.")] float? mieAbsorptionScale = null,
+		[Description("Procedural sky: Mie anisotropy, 0 to just under 1.")] float? mieAnisotropy = null,
+		[Description("Procedural sky: Rayleigh scattering of the strongest channel at sea level, 1/km.")] float? rayleighScatteringScale = null,
+		[Description("Procedural sky: grey ground albedo, 0 to 1.")] float? groundAlbedo = null,
 		CancellationToken cancellationToken = default) =>
 		_controller.SetSkyAsync(
 			mode,
@@ -379,7 +384,20 @@ public sealed class EditorAutomationTools
 			hdriRotationDegrees,
 			hdriIntensity,
 			gradientIntensity,
+			new ProceduralSkyOverrides(mieScatteringScale, mieAbsorptionScale, mieAnisotropy, rayleighScatteringScale, groundAlbedo),
 			cancellationToken);
+
+	[McpServerTool(Name = "set_sun"), Description("Point the active scene's first directional light at a sun elevation and azimuth in memory, without saving the scene. Azimuth 0 puts the sun toward +Z and 90 toward +X.")]
+	public Task<string> SetSun(
+		[Description("Sun elevation above the horizon, in degrees. Negative is below the horizon.")] float elevationDegrees,
+		[Description("Sun azimuth in degrees: 0 toward +Z, 90 toward +X.")] float azimuthDegrees = 0.0f,
+		[Description("Light intensity. Left out keeps the light's own.")] float? intensity = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetSunAsync(elevationDegrees, azimuthDegrees, intensity, cancellationToken);
+
+	[McpServerTool(Name = "set_tonemapping_exposure"), Description("Set the active scene's tonemapping exposure in memory without saving its render config.")]
+	public Task<string> SetTonemappingExposure(float exposure, CancellationToken cancellationToken) =>
+		_controller.SetTonemappingExposureAsync(exposure, cancellationToken);
 
 	[McpServerTool(Name = "set_fsr3_settings"), Description("Set the active scene's FSR3 settings in memory without saving its render config: alpha-test reactivity, the transparency and composition mask scale, and RCAS sharpening.")]
 	public Task<string> SetFsr3Settings(

@@ -232,14 +232,14 @@ public sealed class ReflectionsPass
 				{
 					forward = new Vector3(0, -1, 0);
 				}
-				var intensityScale = DirectionalLightUtility.GetIntensityScale(light, forward);
+				var colorScale = sceneData.SunLightAttenuation.GetColorScale(light, forward);
 				settingsWriter.SetColorRGBA(
 					$"directionalLights[{directionalLightCount}].colorIntensity",
 					new ColorRGBA(
-						light.Color.R,
-						light.Color.G,
-						light.Color.B,
-						light.Intensity * intensityScale));
+						light.Color.R * colorScale.X,
+						light.Color.G * colorScale.Y,
+						light.Color.B * colorScale.Z,
+						light.Intensity));
 				settingsWriter.SetVector4(
 					$"directionalLights[{directionalLightCount}].directionAndType",
 					new Vector4(forward, 0.0f));

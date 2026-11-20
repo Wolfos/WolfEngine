@@ -128,7 +128,7 @@ public sealed class ScreenSpaceDecalPassTests
 			sceneEnabled: true,
 			hasActiveDecals: true,
 			Vector3.UnitY,
-			1.0f,
+			Vector3.One,
 			config,
 			Vector3.Zero);
 		frameBuilder.Build(renderGraph);

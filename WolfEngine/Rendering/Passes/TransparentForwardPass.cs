@@ -2,6 +2,7 @@ using System.Numerics;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
+using WolfEngine.Rendering.Atmosphere;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -143,6 +144,7 @@ public sealed class TransparentForwardPass
 			ShadowMapDepth1 = shadowMap1,
 			ShadowMapDepth2 = shadowMap2,
 			SkyboxIrradiance = ResolveSkyboxHandle(context, resources.SkyboxIrradiance),
+			Atmosphere = AtmosphereBinding.Resolve(context, _bindlessRegistry, resources.Atmosphere),
 			SkyboxPrefilter = ResolveSkyboxHandle(context, resources.SkyboxPrefilter),
 			SkyboxBrdfLut = ResolveSkyboxHandle(context, sharedResources.SkyboxBrdfLut),
 			LinearSampler = _linearSampler,
@@ -239,6 +241,8 @@ public sealed class TransparentForwardPass
 		environmentWriter.SetUInt("shadowSamplerHandle", config.ShadowSampler.Value);
 		environmentWriter.SetUInt("fogIntegratedHandle", config.FogIntegrated.Value);
 		environmentWriter.SetUInt("fogEnabled", config.FogEnabled ? 1u : 0u);
+		environmentWriter.SetUInt("aerialPerspectiveEnabled", config.Atmosphere.Enabled ? 1u : 0u);
+		environmentWriter.SetUInt("aerialPerspectiveHandle", config.Atmosphere.AerialPerspective.Value);
 		environmentWriter.SetUInt("fogSliceCount", (uint)config.FogSliceCount);
 		environmentWriter.SetFloat("fogMaxDistance", config.FogMaxDistance);
 
@@ -261,11 +265,15 @@ public sealed class TransparentForwardPass
 				forward = new Vector3(0, -1, 0);
 			}
 
-			var intensityScale = DirectionalLightUtility.GetIntensityScale(light, forward);
+			var colorScale = sceneData.SunLightAttenuation.GetColorScale(light, forward);
 
 			lightingWriter.SetColorRGBA(
 				$"directionalLights[{directionalLightCount}].colorIntensity",
-				new ColorRGBA(light.Color.R, light.Color.G, light.Color.B, light.Intensity * intensityScale));
+				new ColorRGBA(
+					light.Color.R * colorScale.X,
+					light.Color.G * colorScale.Y,
+					light.Color.B * colorScale.Z,
+					light.Intensity));
 			lightingWriter.SetVector4($"directionalLights[{directionalLightCount}].directionAndType", new Vector4(forward, 0.0f));
 			directionalLightCount++;
 		}

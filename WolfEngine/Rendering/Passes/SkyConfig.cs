@@ -31,23 +31,70 @@ public enum SkyConfigMode
 	Gradient
 }
 
+/// <summary>
+/// A physically based planetary atmosphere (Hillaire 2020), lit by the scene's first directional light. Lengths
+/// inside the atmosphere are in kilometres and coefficients in 1/km, matching Unreal's SkyAtmosphere component.
+/// Colors are normalized spectral shapes and each scale sets the coefficient of the strongest channel.
+/// </summary>
 public struct ProceduralSkyConfig
 {
 	public ProceduralSkyConfig()
 	{
 	}
 
-	public float Intensity { get; set; } = 25;
-	public Vector3 SunColor { get; set; } = Vector3.One;
-	public float SunSharpness { get; set; } = 256;
+	/// <summary>Distance from the planet's center to its ground, in kilometres.</summary>
+	public float GroundRadiusKm { get; set; } = 6360.0f;
 
-	/// <summary>Tint toward the zenith. Alpha is the falloff exponent of the tint away from the zenith.</summary>
-	public ColorRGBA TopColor { get; set; } = new(0.2f, 0.45f, 0.85f, 1.4f);
+	/// <summary>Height of the atmosphere above the ground, in kilometres.</summary>
+	public float AtmosphereHeightKm { get; set; } = 100.0f;
 
-	/// <summary>Tint at the horizon. Alpha strengthens the blend into <see cref="GroundColor"/> below the horizon.</summary>
-	public ColorRGBA HorizonColor { get; set; } = new(0.65f, 0.75f, 0.9f, 1.0f);
+	/// <summary>Diffuse reflectance of the planet's ground, seen below the horizon and bounced into the sky.</summary>
+	public ColorRGBA GroundAlbedo { get; set; } = new(0.3f, 0.3f, 0.3f, 1.0f);
 
-	public ColorRGBA GroundColor { get; set; } = new(0.15f, 0.1f, 0.07f, 0.0f);
+	/// <summary>World Y, in metres, of the planet's ground. Camera altitude is measured from it.</summary>
+	public float GroundHeight { get; set; } = 0.0f;
+
+	/// <summary>Spectral shape of Rayleigh (air molecule) scattering.</summary>
+	public ColorRGBA RayleighScattering { get; set; } = new(0.175287f, 0.409607f, 1.0f, 1.0f);
+
+	/// <summary>Rayleigh scattering coefficient of the strongest channel at sea level, in 1/km.</summary>
+	public float RayleighScatteringScale { get; set; } = 0.0331f;
+
+	/// <summary>Altitude, in kilometres, over which Rayleigh density falls by a factor of e.</summary>
+	public float RayleighExponentialDistributionKm { get; set; } = 8.0f;
+
+	/// <summary>Spectral shape of Mie (aerosol) scattering.</summary>
+	public ColorRGBA MieScattering { get; set; } = new(1.0f, 1.0f, 1.0f, 1.0f);
+
+	/// <summary>Mie scattering coefficient of the strongest channel at sea level, in 1/km.</summary>
+	public float MieScatteringScale { get; set; } = 0.003996f;
+
+	/// <summary>Spectral shape of Mie absorption.</summary>
+	public ColorRGBA MieAbsorption { get; set; } = new(1.0f, 1.0f, 1.0f, 1.0f);
+
+	/// <summary>Mie absorption coefficient of the strongest channel at sea level, in 1/km.</summary>
+	public float MieAbsorptionScale { get; set; } = 0.000444f;
+
+	/// <summary>How strongly aerosols scatter forward, 0 to just under 1. Higher values make a tighter glow around the sun.</summary>
+	public float MieAnisotropy { get; set; } = 0.8f;
+
+	/// <summary>Altitude, in kilometres, over which Mie density falls by a factor of e.</summary>
+	public float MieExponentialDistributionKm { get; set; } = 1.2f;
+
+	/// <summary>Spectral shape of ozone absorption.</summary>
+	public ColorRGBA OzoneAbsorption { get; set; } = new(0.345561f, 1.0f, 0.045189f, 1.0f);
+
+	/// <summary>Ozone absorption coefficient of the strongest channel at the layer's tip, in 1/km.</summary>
+	public float OzoneAbsorptionScale { get; set; } = 0.001881f;
+
+	/// <summary>Altitude, in kilometres, of the ozone layer's densest point.</summary>
+	public float OzoneTipAltitudeKm { get; set; } = 25.0f;
+
+	/// <summary>Distance, in kilometres, above and below the tip at which ozone density falls to zero.</summary>
+	public float OzoneTipWidthKm { get; set; } = 15.0f;
+
+	/// <summary>Angular diameter of the sun's disc, in degrees.</summary>
+	public float SunDiscAngularDiameter { get; set; } = 0.545f;
 }
 
 public struct HdriSkyConfig

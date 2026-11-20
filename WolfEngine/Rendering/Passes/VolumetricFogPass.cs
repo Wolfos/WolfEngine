@@ -192,9 +192,13 @@ public sealed class VolumetricFogPass
 			var forward = Vector3.TransformNormal(Vector3.UnitZ, packet.Transform);
 			if (forward == Vector3.Zero) forward = new Vector3(0, -1, 0);
 			forward = Vector3.Normalize(forward);
-			var scale = DirectionalLightUtility.GetIntensityScale(packet.Light, forward);
+			var colorScale = sceneData.SunLightAttenuation.GetColorScale(packet.Light, forward);
 			return (
-				new Vector4(packet.Light.Color.R, packet.Light.Color.G, packet.Light.Color.B, packet.Light.Intensity * scale),
+				new Vector4(
+					packet.Light.Color.R * colorScale.X,
+					packet.Light.Color.G * colorScale.Y,
+					packet.Light.Color.B * colorScale.Z,
+					packet.Light.Intensity),
 				new Vector4(forward, 1.0f));
 		}
 		return (Vector4.Zero, Vector4.Zero);

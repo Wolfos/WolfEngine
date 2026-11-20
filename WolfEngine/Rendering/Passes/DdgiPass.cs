@@ -569,8 +569,8 @@ public sealed class DdgiPass
 			}
 
 			forward = Vector3.Normalize(forward);
-			var intensityScale = DirectionalLightUtility.GetIntensityScale(light, forward);
-			return (forward, new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity * intensityScale);
+			var colorScale = sceneData.SunLightAttenuation.GetColorScale(light, forward);
+			return (forward, new Vector3(light.Color.R, light.Color.G, light.Color.B) * colorScale * light.Intensity);
 		}
 
 		return (new Vector3(0.0f, -1.0f, 0.0f), Vector3.Zero);

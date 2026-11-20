@@ -1,5 +1,6 @@
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Atmosphere;
 using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
@@ -18,7 +19,13 @@ public sealed class SkyboxPass
 	private const int PrefilterSlices = 6;
 	private const int BrdfSize = 256;
 	private const float SunDirectionEpsilonSquared = 1e-6f;
-	private const float SunIntensityScaleEpsilon = 1e-4f;
+	private const float SunIlluminanceEpsilon = 1e-4f;
+
+	/// <summary>The Procedural environment is rebuilt when the camera climbs or descends by more than this, in km...</summary>
+	private const float MinAltitudeChangeKm = 0.01f;
+
+	/// <summary>...or by more than this fraction of its altitude, whichever is larger.</summary>
+	private const float RelativeAltitudeChange = 0.02f;
 
 	private readonly IRenderer _renderer;
 	private readonly IShaderProvider _shaderCompiler;
@@ -27,19 +34,15 @@ public sealed class SkyboxPass
 	private IGfxPipeline? _iblIrradiancePipeline;
 	private IGfxPipeline? _iblPrefilterPipeline;
 	private IGfxPipeline? _iblBrdfLutPipeline;
-	private IGfxPipeline? _proceduralSkyboxPipeline;
 	private IGfxPipeline? _gradientSkyPipeline;
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ComputeThreadGroupSize? _iblIrradianceThreadGroupSize;
 	private ComputeThreadGroupSize? _iblPrefilterThreadGroupSize;
 	private ComputeThreadGroupSize? _iblBrdfThreadGroupSize;
-	private ComputeThreadGroupSize? _proceduralSkyboxThreadGroupSize;
 	private ComputeThreadGroupSize? _gradientSkyThreadGroupSize;
 	private ShaderPropertyWriter? _iblIrradianceWriter;
 	private ShaderPropertyWriter? _iblPrefilterWriter;
 	private ShaderPropertyWriter? _iblBrdfWriter;
-	private ShaderPropertyWriter? _proceduralBindlessWriter;
-	private ShaderPropertyWriter? _proceduralSkyParamsWriter;
 	private ShaderPropertyWriter? _gradientBindlessWriter;
 	private ShaderPropertyWriter? _gradientParamsWriter;
 	// The BRDF LUT depends on nothing about the sky, so every view shares this one.
@@ -52,7 +55,11 @@ public sealed class SkyboxPass
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		Atmosphere = new AtmospherePass(renderer, shaderCompiler, bindlessRegistry);
 	}
+
+	/// <summary>The Procedural sky's atmosphere LUTs and environment.</summary>
+	internal AtmospherePass Atmosphere { get; }
 
 	public bool ShouldRecordBrdfLutUpdate { get; private set; }
 
@@ -83,15 +90,16 @@ public sealed class SkyboxPass
 	}
 
 	/// <summary>
-	/// Creates <paramref name="sky"/>'s textures for its mode and records this frame's sun, settings and HDRI,
-	/// setting <see cref="ViewSky.ShouldRecordLightingUpdate"/> when they differ from what it was last generated
-	/// with.
+	/// Creates <paramref name="sky"/>'s textures for its mode and records this frame's sun, camera, settings and
+	/// HDRI, setting <see cref="ViewSky.ShouldRecordLightingUpdate"/> when they differ from what it was last
+	/// generated with, and <see cref="ViewSky.ShouldRecordAtmosphereLuts"/> when the atmosphere itself changed.
 	/// </summary>
 	internal void PrepareSky(
 		IGfxDevice gfxDevice,
 		ViewSky sky,
 		Vector3 sunDirection,
-		float sunIntensityScale,
+		Vector3 sunIlluminance,
+		Vector3 cameraPosition,
 		SkyConfig config,
 		Texture? hdri)
 	{
@@ -102,13 +110,13 @@ public sealed class SkyboxPass
 		sky.SunDirection = sunDirection == Vector3.Zero
 			? Vector3.UnitY
 			: Vector3.Normalize(sunDirection);
-		sky.SunIntensityScale = Math.Clamp(sunIntensityScale, 0.0f, 1.0f);
 		sky.Hdri = config.Mode == SkyConfigMode.Hdri
 			? GetUploadedHdri(hdri)
 			: null;
 		sky.HdriGpuTexture = sky.Hdri?.Resources?.Texture;
 
 		var createdResources = EnsureSkyTextures(gfxDevice, sky);
+		PrepareAtmosphere(gfxDevice, sky, sunIlluminance, cameraPosition);
 
 		sky.ShouldRecordLightingUpdate = createdResources ||
 			sky.HasGeneratedLighting == false ||
@@ -164,7 +172,7 @@ public sealed class SkyboxPass
 		}
 		else
 		{
-			RecordProceduralEnvironment(context.CommandList, environment, sky);
+			Atmosphere.RecordEnvironment(context.CommandList, sky, environment);
 		}
 
 		sky.HasGeneratedEnvironment = true;
@@ -193,7 +201,8 @@ public sealed class SkyboxPass
 
 		sky.HasGeneratedLighting = true;
 		sky.GeneratedSunDirection = sky.SunDirection;
-		sky.GeneratedSunIntensityScale = sky.SunIntensityScale;
+		sky.GeneratedSunIlluminance = sky.Atmosphere.SunIlluminance;
+		sky.GeneratedCameraAltitudeKm = sky.Atmosphere.CameraAltitudeKm;
 		sky.GeneratedConfig = sky.Config;
 		sky.GeneratedHdriGpuTexture = sky.HdriGpuTexture;
 	}
@@ -206,6 +215,27 @@ public sealed class SkyboxPass
 		RecordBrdfLut(context.CommandList, GetGfxDevice(), brdfLut);
 		_brdfLutValid = true;
 		_hasGeneratedBrdfLut = true;
+	}
+
+	/// <summary>
+	/// In Procedural mode, sets this frame's atmosphere, creates its LUTs and flags them for a rebuild when the
+	/// atmosphere changed. Other modes release the LUTs.
+	/// </summary>
+	private static void PrepareAtmosphere(IGfxDevice gfxDevice, ViewSky sky, Vector3 sunIlluminance, Vector3 cameraPosition)
+	{
+		if (sky.UsesAtmosphere == false)
+		{
+			sky.ReleaseAtmosphere();
+			return;
+		}
+
+		var model = new AtmosphereModel(sky.Config.Procedural);
+		sky.Atmosphere = new AtmosphereFrame(model, cameraPosition.Y, sky.SunDirection, sunIlluminance);
+
+		var created = AtmospherePass.EnsureTextures(gfxDevice, sky);
+		sky.ShouldRecordAtmosphereLuts = created ||
+			sky.HasGeneratedAtmosphereLuts == false ||
+			sky.GeneratedAtmosphereLutHash != model.GetLutHash();
 	}
 
 	/// <summary>
@@ -225,36 +255,6 @@ public sealed class SkyboxPass
 		}
 
 		return hdri;
-	}
-
-	private void RecordProceduralEnvironment(IGfxCommandList commandList, IGfxTexture environment, ViewSky sky)
-	{
-		var config = sky.Config.Procedural;
-		var pipeline = GetProceduralSkyboxPipeline(GetGfxDevice());
-		commandList.BindPipeline(pipeline);
-
-		var bindlessWriter = _proceduralBindlessWriter
-			?? throw new InvalidOperationException("Procedural skybox bindless writer was not initialized.");
-		bindlessWriter.Clear();
-		bindlessWriter.SetUInt("environmentHandle", environment.UnorderedAccessView.Value);
-		bindlessWriter.SetUInt("width", (uint)EnvironmentWidth);
-		bindlessWriter.SetUInt("height", (uint)EnvironmentHeight);
-		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
-
-		var skyParamsWriter = _proceduralSkyParamsWriter
-			?? throw new InvalidOperationException("Procedural skybox parameter writer was not initialized.");
-		skyParamsWriter.Clear();
-		skyParamsWriter.SetVector4("sunDirectionIntensity", new Vector4(sky.SunDirection, config.Intensity * sky.SunIntensityScale));
-		skyParamsWriter.SetVector4("sunColorSharpness", new Vector4(config.SunColor.X, config.SunColor.Y, config.SunColor.Z, config.SunSharpness));
-		skyParamsWriter.SetColorRGBA("skyTop", config.TopColor);
-		skyParamsWriter.SetColorRGBA("skyHorizon", config.HorizonColor);
-		skyParamsWriter.SetColorRGBA("ground", config.GroundColor);
-		commandList.SetComputeConstants(skyParamsWriter.RegisterIndex, skyParamsWriter.AsBytes());
-
-		var threadGroupSize = _proceduralSkyboxThreadGroupSize
-			?? throw new InvalidOperationException("Procedural skybox threadgroup size was not initialized.");
-		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(EnvironmentWidth, EnvironmentHeight);
-		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
 	private void RecordGradientEnvironment(IGfxCommandList commandList, IGfxTexture environment, in GradientSkyConfig config)
@@ -408,11 +408,15 @@ public sealed class SkyboxPass
 		{
 			case SkyConfigMode.Procedural:
 			{
+				var atmosphere = sky.Atmosphere;
 				var sunChanged = Vector3.DistanceSquared(sky.GeneratedSunDirection, sky.SunDirection) > SunDirectionEpsilonSquared ||
-				                 MathF.Abs(sky.GeneratedSunIntensityScale - sky.SunIntensityScale) > SunIntensityScaleEpsilon;
+				                 Vector3.DistanceSquared(sky.GeneratedSunIlluminance, atmosphere.SunIlluminance) > SunIlluminanceEpsilon * SunIlluminanceEpsilon;
+				var altitudeChange = MathF.Abs(atmosphere.CameraAltitudeKm - sky.GeneratedCameraAltitudeKm);
+				var altitudeThreshold = MathF.Max(MinAltitudeChangeKm, RelativeAltitudeChange * sky.GeneratedCameraAltitudeKm);
 
 				return sunChanged ||
-				       ProceduralConfigsDiffer(current.Procedural, generated.Procedural);
+				       altitudeChange > altitudeThreshold ||
+				       atmosphere.Model.GetLutHash() != new AtmosphereModel(generated.Procedural).GetLutHash();
 			}
 
 			case SkyConfigMode.Hdri:
@@ -433,16 +437,6 @@ public sealed class SkyboxPass
 				throw new InvalidOperationException($"Unsupported sky mode '{current.Mode}'.");
 			}
 		}
-	}
-
-	private static bool ProceduralConfigsDiffer(in ProceduralSkyConfig left, in ProceduralSkyConfig right)
-	{
-		return left.Intensity != right.Intensity ||
-		       left.SunColor != right.SunColor ||
-		       left.SunSharpness != right.SunSharpness ||
-		       ColorsDiffer(left.TopColor, right.TopColor) ||
-		       ColorsDiffer(left.HorizonColor, right.HorizonColor) ||
-		       ColorsDiffer(left.GroundColor, right.GroundColor);
 	}
 
 	private static bool GradientConfigsDiffer(in GradientSkyConfig left, in GradientSkyConfig right)
@@ -470,32 +464,6 @@ public sealed class SkyboxPass
 		}
 
 		return _skyboxSamplerHandle;
-	}
-
-	private IGfxPipeline GetProceduralSkyboxPipeline(IGfxDevice gfxDevice)
-	{
-		if (_proceduralSkyboxPipeline is not null)
-		{
-			return _proceduralSkyboxPipeline;
-		}
-
-		var compiled = CompileComputeWithReflection(EngineShaderPrograms.ProceduralSkybox, "ProceduralSkyboxCSMain", gfxDevice.BackendKind);
-		_proceduralSkyboxThreadGroupSize = compiled.ThreadGroupSize;
-		_proceduralBindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		_proceduralSkyParamsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("SkyParams"));
-		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _proceduralSkyboxThreadGroupSize);
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "ProceduralSkyboxCSMain",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			layout: GraphicsLayoutKind.Default);
-		_proceduralSkyboxPipeline = gfxDevice.GetOrCreatePipeline(pipelineKey, shaders);
-		return _proceduralSkyboxPipeline;
 	}
 
 	private IGfxPipeline GetGradientSkyPipeline(IGfxDevice gfxDevice)

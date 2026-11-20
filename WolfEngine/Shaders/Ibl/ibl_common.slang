@@ -1,13 +1,5 @@
 import "../Common/constants.slang";
 
-static float3 EquirectToDir(float2 uv)
-{
-    float phi = (uv.x * 2.0f - 1.0f) * PI;
-    float theta = uv.y * PI;
-    float sinTheta = sin(theta);
-    return float3(cos(phi) * sinTheta, cos(theta), sin(phi) * sinTheta);
-}
-
 // Low-discrepancy sequence
 static float RadicalInverse_VdC(uint bits)
 {

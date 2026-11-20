@@ -5,6 +5,7 @@ import "../Common/common_lighting.slang";
 import "../Common/sky_sampling.slang";
 import "../Ddgi/ddgi_sample.slang";
 import "../Common/volumetric_fog.slang";
+import "../Atmosphere/atmosphere_common.slang";
 
 cbuffer BindlessHandles : register(b0)
 {
@@ -101,6 +102,12 @@ cbuffer LightingParams : register(b2)
     float fogMaxDistance;
     float indirectLightMinimum;
     uint ddgiFinalGatherEnabled;
+    /// The Procedural sky's atmosphere. atmosphereEnabled is zero in the other sky modes, which draw skyEnvironment.
+    uint atmosphereEnabled;
+    uint skyViewLutHandle;
+    uint atmosphereTransmittanceLutHandle;
+    uint aerialPerspectiveHandle;
+    AtmosphereConstants atmosphere;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
@@ -193,7 +200,17 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (IsBackgroundDepth(depth))
     {
         float3 skyDir = ReconstructWorldDirection(dispatchThreadId.xy, uint2(width, height), 1.0f, camera.invViewProjection);
-        float3 skyColor = SampleSky(skyEnvironment, samplerHandle, skyDir, 0.0f);
+        float3 skyColor;
+        if (atmosphereEnabled != 0u)
+        {
+            AtmosphereLuts atmosphereLuts = MakeAtmosphereLuts(atmosphereTransmittanceLutHandle, 0u, samplerHandle);
+            skyColor = SampleSkyViewLut(atmosphere, skyViewLutHandle, samplerHandle, skyDir) +
+                GetSunDiscLuminance(atmosphere, atmosphereLuts, skyDir);
+        }
+        else
+        {
+            skyColor = SampleSky(skyEnvironment, samplerHandle, skyDir, 0.0f);
+        }
         if (fogEnabled != 0u)
         {
             float4 fog = SampleIntegratedFog(fogIntegratedHandle, samplerHandle, uv,
@@ -370,6 +387,13 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             float4(saturate(ddgiDebug.probeRelocationDecision), 1.0f);
     }
     color += surface.emissive;
+
+    // Atmosphere between the surface and the camera, then local fog in front of it.
+    if (atmosphereEnabled != 0u)
+    {
+        float4 aerialPerspective = SampleAerialPerspective(aerialPerspectiveHandle, samplerHandle, uv, length(cameraRelativeWorldPos));
+        color = ApplyAerialPerspective(color, aerialPerspective);
+    }
 
     if (fogEnabled != 0u)
     {
