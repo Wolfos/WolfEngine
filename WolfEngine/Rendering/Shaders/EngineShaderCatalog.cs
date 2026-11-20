@@ -42,6 +42,8 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId AtmosphereSkyViewLut = Id("atmosphere-sky-view-lut");
 	public static readonly ShaderProgramId AtmosphereAerialPerspective = Id("atmosphere-aerial-perspective");
 	public static readonly ShaderProgramId AtmosphereEnvironment = Id("atmosphere-environment");
+	public static readonly ShaderProgramId CloudNoise = Id("cloud-noise");
+	public static readonly ShaderProgramId Clouds = Id("clouds");
 	public static readonly ShaderProgramId GradientSky = Id("gradient-sky");
 	public static readonly ShaderProgramId IblBrdfLut = Id("ibl-brdf-lut");
 	public static readonly ShaderProgramId IblIrradiance = Id("ibl-irradiance");
@@ -131,6 +133,8 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.AtmosphereSkyViewLut, "Atmosphere/atmosphere_sky_view_lut.compute.slang"),
 			D(EngineShaderPrograms.AtmosphereAerialPerspective, "Atmosphere/atmosphere_aerial_perspective.compute.slang"),
 			D(EngineShaderPrograms.AtmosphereEnvironment, "Atmosphere/atmosphere_environment.compute.slang"),
+			D(EngineShaderPrograms.CloudNoise, "Clouds/cloud_noise.compute.slang"),
+			D(EngineShaderPrograms.Clouds, "Clouds/clouds.compute.slang"),
 			D(EngineShaderPrograms.GradientSky, "Ibl/gradient_sky.compute.slang"),
 			D(EngineShaderPrograms.IblBrdfLut, "Ibl/ibl_brdf_lut.compute.slang"),
 			D(EngineShaderPrograms.IblIrradiance, "Ibl/ibl_irradiance.compute.slang"),
@@ -359,6 +363,18 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.AtmosphereSkyViewLut) return ["AtmosphereSkyViewLutCSMain"];
 		if (id == EngineShaderPrograms.AtmosphereAerialPerspective) return ["AtmosphereAerialPerspectiveCSMain"];
 		if (id == EngineShaderPrograms.AtmosphereEnvironment) return ["AtmosphereEnvironmentCSMain"];
+		if (id == EngineShaderPrograms.CloudNoise) return ["CloudNoiseShapeCS", "CloudNoiseDetailCS", "CloudNoiseWeatherCS"];
+		if (id == EngineShaderPrograms.Clouds)
+		{
+			return
+			[
+				"CloudMarchCS",
+				"CloudTemporalCS",
+				"CloudShadowCS",
+				"CloudEnvironmentMarchCS",
+				"CloudEnvironmentCompositeCS"
+			];
+		}
 		if (id == EngineShaderPrograms.GradientSky) return ["GradientSkyCSMain"];
 		if (id == EngineShaderPrograms.IblBrdfLut) return ["IblBrdfCSMain"];
 		if (id == EngineShaderPrograms.IblIrradiance) return ["IblIrradianceCSMain"];

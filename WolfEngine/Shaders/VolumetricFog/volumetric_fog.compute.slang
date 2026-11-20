@@ -2,6 +2,7 @@ import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
 import "../Common/constants.slang";
 import "../Common/volumetric_fog.slang";
+import "../Common/cloud_sampling.slang";
 
 struct FogVolumeData { row_major float4x4 worldToLocal; float4 albedoExtinction; float4 parameters; };
 struct FogCellHeader { uint offset; uint count; };
@@ -41,6 +42,8 @@ cbuffer FogLightingParams : register(b2)
     float4 shadowTexelSizeEnabled;
     float4 shadowDepthBiases;
     float shadowMaxDistance; float _lightingPadding0; float _lightingPadding1; float _lightingPadding2;
+    /// Only the sun shadow is read; the clouds themselves are composited by deferred lighting.
+    CloudComposite cloudComposite;
 };
 
 float Hash13(uint3 p)
@@ -116,7 +119,8 @@ void VolumetricFogInjectCS(uint3 id : SV_DispatchThreadID)
     float phaseCosine = dot(normalize(relativePosition), lightDirection);
     float3 ambient = SampleEnvironment(irradianceHandle, linearSamplerHandle, float3(0.0f, 1.0f, 0.0f)) / PI;
     float3 sun = lightColorIntensity.rgb * lightColorIntensity.a * lightDirectionEnabled.w;
-    float visibility = ShadowVisibility(relativePosition, depth, lightDirection);
+    float visibility = ShadowVisibility(relativePosition, depth, lightDirection) *
+        SampleCloudShadow(cloudComposite, linearSamplerHandle, relativePosition);
     float3 source = 0.0f.xxx;
     float totalExtinction = 0.0f;
     float heightDensity = extinction * exp(-max(worldPosition.y - baseHeight, 0.0f) * max(heightFalloff, 0.0f));

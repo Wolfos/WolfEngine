@@ -10,6 +10,7 @@ using WolfEngine.Vfx;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.Atmosphere;
+using WolfEngine.Rendering.Clouds;
 
 namespace WolfEngine.Rendering;
 
@@ -159,6 +160,9 @@ public readonly struct RenderViewResources
 
 	/// <summary>The Procedural sky's atmosphere LUTs; invalid handles in other sky modes.</summary>
 	internal AtmosphereViewHandles Atmosphere { get; init; }
+
+	/// <summary>The volumetric cloud layer; disabled when clouds are off or the sky is not Procedural.</summary>
+	internal CloudViewResources Clouds { get; init; }
 	public RenderGraphResourceHandle SkyboxIrradiance { get; init; }
 	public RenderGraphResourceHandle SkyboxPrefilter { get; init; }
 	public RenderConfig Config { get; init; }
@@ -211,6 +215,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly SelectionOutlinePass _selectionOutlinePass;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private readonly VolumetricFogPass _volumetricFogPass;
+	private readonly CloudPass _cloudPass;
 	private readonly ReflectionsPass _reflectionsPass;
 	private readonly ReflectionsUpsamplePass _reflectionsUpsamplePass;
 	private readonly DdgiFinalGatherPass _ddgiFinalGatherPass;
@@ -312,6 +317,19 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _shadowMapExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawCameraCullExecute;
 	private readonly Action<RenderGraphContext> _skyboxEnvironmentExecute;
+	private readonly Action<RenderGraphContext> _cloudNoiseExecute;
+	private readonly Action<RenderGraphContext> _cloudShadowMapExecute;
+	private readonly Action<RenderGraphContext> _cloudMarchExecute;
+	private readonly Action<RenderGraphContext> _cloudTemporalExecute;
+	private readonly Action<RenderGraphContext> _cloudEnvironmentMarchExecute;
+	private readonly Action<RenderGraphContext> _cloudEnvironmentCompositeExecute;
+
+	// The cloud noise is shared by every view, so it is imported, and generated, at most once a frame.
+	private bool _cloudNoiseImported;
+	private bool _cloudNoiseRecorded;
+	private RenderGraphResourceHandle _cloudWeather;
+	private RenderGraphResourceHandle _cloudShape;
+	private RenderGraphResourceHandle _cloudDetail;
 	private readonly Action<RenderGraphContext> _skyboxIrradianceExecute;
 	private readonly Action<RenderGraphContext> _skyboxPrefilterExecute;
 	private readonly Action<RenderGraphContext> _skyboxBrdfExecute;
@@ -350,6 +368,7 @@ internal sealed class RenderGraphFrameBuilder
 		_selectionOutlinePass = passSet.SelectionOutlinePass;
 		_deferredLightingPass = passSet.DeferredLightingPass;
 		_volumetricFogPass = passSet.VolumetricFogPass;
+		_cloudPass = passSet.CloudPass;
 		_reflectionsPass = passSet.ReflectionsPass;
 		_reflectionsUpsamplePass = passSet.ReflectionsUpsamplePass;
 		_ddgiFinalGatherPass = passSet.DdgiFinalGatherPass;
@@ -422,6 +441,12 @@ internal sealed class RenderGraphFrameBuilder
 		_shadowMapExecute = ExecuteShadowMap;
 		_gpuDrawCameraCullExecute = ExecuteGpuDrawCullCamera;
 		_skyboxEnvironmentExecute = ExecuteSkyboxEnvironment;
+		_cloudNoiseExecute = context => _cloudPass.RecordNoise(context);
+		_cloudShadowMapExecute = context => _cloudPass.RecordShadowMap(context, _view.FrameResources);
+		_cloudMarchExecute = context => _cloudPass.RecordMarch(context, _view.FrameResources);
+		_cloudTemporalExecute = context => _cloudPass.RecordTemporal(context, _view.FrameResources);
+		_cloudEnvironmentMarchExecute = context => _cloudPass.RecordEnvironmentMarch(context, _view.FrameResources);
+		_cloudEnvironmentCompositeExecute = context => _cloudPass.RecordEnvironmentComposite(context, _view.FrameResources);
 		_skyboxIrradianceExecute = ExecuteSkyboxIrradiance;
 		_skyboxPrefilterExecute = ExecuteSkyboxPrefilter;
 		_skyboxBrdfExecute = ExecuteSkyboxBrdf;
@@ -485,6 +510,8 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		_frameViews.Clear();
 		var device = _renderer.GetGfxDevice();
+		_cloudNoiseImported = false;
+		_cloudNoiseRecorded = false;
 		_gameplayTextureTargets.Clear();
 		for (var i = 0; i < _gameplayUiFrame.TextureSurfaces.Length; i++)
 		{
@@ -573,6 +600,10 @@ internal sealed class RenderGraphFrameBuilder
 		if (!config.VolumetricFog.Enabled || !sceneEnabled)
 		{
 			_view.ReleaseFogHistoryResources();
+		}
+		if (UsesClouds(config) == false || sceneEnabled == false)
+		{
+			_view.ReleaseCloudHistoryResources();
 		}
 		if (DdgiUtilities.IsFinalGatherDenoiseEnabled(config) == false || sceneEnabled == false)
 		{
@@ -1135,11 +1166,15 @@ internal sealed class RenderGraphFrameBuilder
 		var (skyEnvironment, skyboxIrradianceHandle, skyboxPrefilterHandle, atmosphereHandles) = sceneEnabled
 			? ImportViewSky(sunDirection, sunIlluminance, cameraPosition, config.Sky, skyHdri)
 			: default;
+		var cloudResources = sceneEnabled
+			? PrepareViewClouds(device, config, cameraPosition, sceneFramebufferSize, atmosphereHandles, skyEnvironment)
+			: default;
 
 		_view.FrameResources = new()
 		{
 			SkyEnvironment = skyEnvironment,
 			Atmosphere = atmosphereHandles,
+			Clouds = cloudResources,
 			SkyboxIrradiance = skyboxIrradianceHandle,
 			SkyboxPrefilter = skyboxPrefilterHandle,
 			FramebufferSize = framebufferSize,
@@ -1423,6 +1458,7 @@ internal sealed class RenderGraphFrameBuilder
 	private void RecordViewSkyUpdate(RenderGraph graph)
 	{
 		RecordViewAtmosphere(graph);
+		RecordCloudNoise(graph);
 
 		if (_view.Sky.ShouldRecordLightingUpdate == false)
 		{
@@ -1441,6 +1477,8 @@ internal sealed class RenderGraphFrameBuilder
 			environmentBuilder
 				.WriteTexture(environment, ResourceState.UnorderedAccess)
 				.SetExecute(_skyboxEnvironmentExecute);
+
+			RecordCloudEnvironment(graph, environment);
 		}
 
 		var irradianceBuilder = graph.AddPass("Skybox Irradiance", PassKind.Compute);
@@ -1614,9 +1652,13 @@ internal sealed class RenderGraphFrameBuilder
 				}
 			}
 
+			RecordViewClouds(graph);
+
 			if (_view.FrameResources.FogIntegrated.IsValid)
 			{
-				graph.AddPass("Volumetric Fog Inject", PassKind.Compute)
+				var fogInjectBuilder = graph.AddPass("Volumetric Fog Inject", PassKind.Compute);
+				ReadCloudShadow(fogInjectBuilder);
+				fogInjectBuilder
 					.ReadTexture(_view.FrameResources.SkyboxIrradiance, ResourceState.ShaderResource)
 					.ReadTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.ShaderResource)
 					.ReadTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.ShaderResource)
@@ -1856,7 +1898,14 @@ internal sealed class RenderGraphFrameBuilder
 			}
 			
 			ReadSkyboxTextures(deferredLightingBuilder);
-			
+			ReadCloudShadow(deferredLightingBuilder);
+			if (_view.FrameResources.Clouds.Enabled)
+			{
+				deferredLightingBuilder
+					.ReadTexture(_view.FrameResources.Clouds.HistoryColorWrite, ResourceState.ShaderResource)
+					.ReadTexture(_view.FrameResources.Clouds.HistoryDepthWrite, ResourceState.ShaderResource);
+			}
+
 			deferredLightingBuilder
 				.WriteTexture(_view.FrameResources.LightingBuffer, ResourceState.UnorderedAccess)
 				.SetExecute(_deferredLightingExecute);
@@ -1883,6 +1932,7 @@ internal sealed class RenderGraphFrameBuilder
 			}
 			
 			ReadSkyboxTextures(transparentForwardBuilder);
+			ReadCloudShadow(transparentForwardBuilder);
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
 
 			if (VfxPass.HasWork(_view.VfxFrame))
@@ -2226,6 +2276,205 @@ internal sealed class RenderGraphFrameBuilder
 	/// The bound view's sky, prepared from its sun, settings and HDRI so it regenerates only when those change:
 	/// where its radiance is read from, and its irradiance and prefilter handles.
 	/// </summary>
+	/// <summary>Whether a config draws volumetric clouds: they are on and the sky is the Procedural atmosphere.</summary>
+	internal static bool UsesClouds(RenderConfig config)
+	{
+		return config.Clouds.Enabled && config.Sky.Mode == SkyConfigMode.Procedural;
+	}
+
+	/// <summary>
+	/// Advances the bound view's clouds by one frame and sets up their resources: the shared noise, the history at
+	/// trace resolution, the shadow map, and the cloud environment when the sky environment is redrawn. Also
+	/// requests that redraw when the clouds moved or changed, or when clouds were turned off and the environment
+	/// still shows them.
+	/// </summary>
+	private CloudViewResources PrepareViewClouds(
+		IGfxDevice device,
+		RenderConfig config,
+		Vector3 cameraPosition,
+		Int2 sceneFramebufferSize,
+		in AtmosphereViewHandles atmosphere,
+		in SkyEnvironmentSource skyEnvironment)
+	{
+		var viewClouds = _view.Clouds;
+		if (UsesClouds(config) == false || atmosphere.Transmittance.IsValid == false)
+		{
+			_view.ReleaseCloudHistoryResources();
+			if (viewClouds.EnvironmentHasClouds)
+			{
+				_view.Sky.ShouldRecordLightingUpdate = true;
+				viewClouds.MarkEnvironmentCleared();
+			}
+
+			return default;
+		}
+
+		var settings = config.Clouds;
+		viewClouds.Advance(settings, _view.SceneFrameDeltaSeconds);
+		var frame = new CloudFrame(settings, atmosphere.Frame, cameraPosition, viewClouds);
+		var traceDivisor = frame.Quality.TraceDivisor;
+		var traceSize = CloudViewResources.GetTraceSize(sceneFramebufferSize, traceDivisor);
+
+		_view.CloudHistory.Ensure(device, new CloudHistoryShape(traceSize, settings.Quality));
+		_view.CloudHistory.Import(_resources);
+		ImportCloudNoise(device);
+
+		var environment = default(RenderGraphResourceHandle);
+		if (skyEnvironment.ViewEnvironment.IsValid &&
+		    (_view.Sky.ShouldRecordLightingUpdate || viewClouds.EnvironmentChanged(settings, cameraPosition)))
+		{
+			_view.Sky.ShouldRecordLightingUpdate = true;
+			viewClouds.MarkEnvironmentDrawn(settings, cameraPosition);
+			var environmentWidth = _view.Sky.Environment?.Descriptor.Width ?? frame.Quality.EnvironmentWidth;
+			var environmentSize = CloudPass.GetEnvironmentSize(environmentWidth, frame.Quality);
+			environment = _resources.CreateTransientTexture(
+				CloudViewResources.DescribeTraceTexture(environmentSize, TextureFormat.Rgba16Float));
+		}
+
+		var shadowMap = settings.CastShadows
+			? _resources.CreateTransientTexture(CloudViewResources.DescribeTraceTexture(
+				new Int2(CloudViewResources.ShadowMapSize, CloudViewResources.ShadowMapSize),
+				TextureFormat.Rgba16Float))
+			: default;
+
+		return new CloudViewResources
+		{
+			Enabled = true,
+			Frame = frame,
+			TraceSize = traceSize,
+			TraceDivisor = traceDivisor,
+			Weather = _cloudWeather,
+			Shape = _cloudShape,
+			Detail = _cloudDetail,
+			CurrentColor = _resources.CreateTransientTexture(
+				CloudViewResources.DescribeTraceTexture(traceSize, CloudHistorySlot.GetFormat(CloudHistorySlot.Color))),
+			CurrentDepth = _resources.CreateTransientTexture(
+				CloudViewResources.DescribeTraceTexture(traceSize, CloudHistorySlot.GetFormat(CloudHistorySlot.Depth))),
+			HistoryColorRead = _view.CloudHistory.Previous(CloudHistorySlot.Color),
+			HistoryDepthRead = _view.CloudHistory.Previous(CloudHistorySlot.Depth),
+			HistoryColorWrite = _view.CloudHistory.Current(CloudHistorySlot.Color),
+			HistoryDepthWrite = _view.CloudHistory.Current(CloudHistorySlot.Depth),
+			HistoryValid = _view.CloudHistory.IsValid,
+			ShadowMap = shadowMap,
+			ShadowMapCentre = CloudViewResources.GetShadowMapCentre(cameraPosition),
+			Environment = environment
+		};
+	}
+
+	private void ImportCloudNoise(IGfxDevice device)
+	{
+		if (_cloudNoiseImported)
+		{
+			return;
+		}
+
+		_cloudPass.EnsureNoiseTextures(device);
+		var state = _cloudPass.NoiseInitialState;
+		_cloudWeather = _resources.ImportTexture(_cloudPass.Weather, takeOwnership: false, initialState: state);
+		_cloudShape = _resources.ImportTexture(_cloudPass.Shape, takeOwnership: false, initialState: state);
+		_cloudDetail = _resources.ImportTexture(_cloudPass.Detail, takeOwnership: false, initialState: state);
+		_cloudNoiseImported = true;
+	}
+
+	/// <summary>Generates the shared cloud noise once, in the first view that draws clouds.</summary>
+	private void RecordCloudNoise(RenderGraph graph)
+	{
+		if (_view.FrameResources.Clouds.Enabled == false ||
+		    _cloudPass.ShouldRecordNoise == false ||
+		    _cloudNoiseRecorded)
+		{
+			return;
+		}
+
+		graph.AddPass("Cloud Noise", PassKind.Compute)
+			.WriteTexture(_cloudWeather, ResourceState.UnorderedAccess)
+			.WriteTexture(_cloudShape, ResourceState.UnorderedAccess)
+			.WriteTexture(_cloudDetail, ResourceState.UnorderedAccess)
+			.SetExecute(_cloudNoiseExecute);
+		_cloudNoiseRecorded = true;
+	}
+
+	/// <summary>Draws the clouds into the view's sky environment, before image-based lighting is built from it.</summary>
+	private void RecordCloudEnvironment(RenderGraph graph, RenderGraphResourceHandle environment)
+	{
+		var clouds = _view.FrameResources.Clouds;
+		if (clouds.Enabled == false || clouds.RecordsEnvironment == false)
+		{
+			return;
+		}
+
+		var marchBuilder = graph.AddPass("Cloud Environment", PassKind.Compute);
+		ReadCloudInputs(marchBuilder);
+		marchBuilder
+			.WriteTexture(clouds.Environment, ResourceState.UnorderedAccess)
+			.SetExecute(_cloudEnvironmentMarchExecute);
+
+		graph.AddPass("Cloud Environment Composite", PassKind.Compute)
+			.ReadTexture(clouds.Environment, ResourceState.ShaderResource)
+			.WriteTexture(environment, ResourceState.UnorderedAccess)
+			.SetExecute(_cloudEnvironmentCompositeExecute);
+	}
+
+	/// <summary>The bound view's cloud shadow map, march and temporal accumulation, ahead of fog and lighting.</summary>
+	private void RecordViewClouds(RenderGraph graph)
+	{
+		var clouds = _view.FrameResources.Clouds;
+		if (clouds.Enabled == false)
+		{
+			return;
+		}
+
+		if (clouds.CastsShadows)
+		{
+			var shadowBuilder = graph.AddPass("Cloud Shadow Map", PassKind.Compute);
+			ReadCloudInputs(shadowBuilder);
+			shadowBuilder
+				.WriteTexture(clouds.ShadowMap, ResourceState.UnorderedAccess)
+				.SetExecute(_cloudShadowMapExecute);
+		}
+
+		var marchBuilder = graph.AddPass("Cloud March", PassKind.Compute);
+		ReadCloudInputs(marchBuilder);
+		marchBuilder
+			.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.ShaderResource)
+			.WriteTexture(clouds.CurrentColor, ResourceState.UnorderedAccess)
+			.WriteTexture(clouds.CurrentDepth, ResourceState.UnorderedAccess)
+			.SetExecute(_cloudMarchExecute);
+
+		graph.AddPass("Cloud Temporal", PassKind.Compute)
+			.ReadTexture(clouds.CurrentColor, ResourceState.ShaderResource)
+			.ReadTexture(clouds.CurrentDepth, ResourceState.ShaderResource)
+			.ReadTexture(clouds.HistoryColorRead, ResourceState.ShaderResource)
+			.ReadTexture(clouds.HistoryDepthRead, ResourceState.ShaderResource)
+			.WriteTexture(clouds.HistoryColorWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(clouds.HistoryDepthWrite, ResourceState.UnorderedAccess)
+			.SetExecute(_cloudTemporalExecute);
+	}
+
+	/// <summary>What every cloud kernel reads: the noise, the atmosphere's LUTs and the sky's irradiance.</summary>
+	private void ReadCloudInputs(RenderGraphBuilder builder)
+	{
+		var clouds = _view.FrameResources.Clouds;
+		var atmosphere = _view.FrameResources.Atmosphere;
+		builder
+			.ReadTexture(clouds.Weather, ResourceState.ShaderResource)
+			.ReadTexture(clouds.Shape, ResourceState.ShaderResource)
+			.ReadTexture(clouds.Detail, ResourceState.ShaderResource)
+			.ReadTexture(atmosphere.Transmittance, ResourceState.ShaderResource)
+			.ReadTexture(atmosphere.SkyView, ResourceState.ShaderResource)
+			.ReadTexture(atmosphere.AerialPerspective, ResourceState.ShaderResource)
+			.ReadTexture(_view.FrameResources.SkyboxIrradiance, ResourceState.ShaderResource);
+	}
+
+	private void ReadCloudShadow(RenderGraphBuilder builder)
+	{
+		var clouds = _view.FrameResources.Clouds;
+		if (clouds.Enabled && clouds.CastsShadows)
+		{
+			builder.ReadTexture(clouds.ShadowMap, ResourceState.ShaderResource);
+		}
+	}
+
 	private (SkyEnvironmentSource Environment, RenderGraphResourceHandle Irradiance, RenderGraphResourceHandle Prefilter, AtmosphereViewHandles Atmosphere) ImportViewSky(
 		Vector3 sunDirection,
 		Vector3 sunIlluminance,

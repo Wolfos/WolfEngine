@@ -2,6 +2,7 @@ using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.Atmosphere;
+using WolfEngine.Rendering.Clouds;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -194,6 +195,7 @@ public sealed class DeferredLightingPass
 			ShadowMapDepth2 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth2),
 			SkyEnvironment = resources.SkyEnvironment.Resolve(context, _bindlessRegistry),
 			Atmosphere = AtmosphereBinding.Resolve(context, _bindlessRegistry, resources.Atmosphere),
+			Clouds = CloudCompositeBinding.Resolve(context, _bindlessRegistry, resources.Clouds, includeComposite: true),
 			SkyboxIrradiance = _bindlessRegistry.GetTextureHandle(irradiance),
 			SkyboxPrefilter = _bindlessRegistry.GetTextureHandle(prefilter),
 			SkyboxBrdfLut = _bindlessRegistry.GetTextureHandle(brdfLut),
@@ -417,6 +419,7 @@ public sealed class DeferredLightingPass
 			lightingWriter.SetUInt("aerialPerspectiveHandle", atmosphere.AerialPerspective.Value);
 			AtmosphereConstants.Write(lightingWriter, atmosphere.Frame);
 		}
+		config.Clouds.Write(lightingWriter);
 		commandList.SetComputeConstants(lightingWriter.RegisterIndex, lightingWriter.AsBytes());
 		commandList.SetComputeBuffer(3, config.PointLightBuffer);
 		commandList.SetComputeBuffer(4, config.ClusterHeaderBuffer);

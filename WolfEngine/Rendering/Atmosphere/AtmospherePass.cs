@@ -21,11 +21,11 @@ internal sealed class AtmospherePass
 	private readonly IRenderer _renderer;
 	private readonly IShaderProvider _shaderProvider;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly AtmosphereKernel _transmittance = new(EngineShaderPrograms.AtmosphereTransmittanceLut, "AtmosphereTransmittanceLutCSMain");
-	private readonly AtmosphereKernel _multipleScattering = new(EngineShaderPrograms.AtmosphereMultipleScatteringLut, "AtmosphereMultipleScatteringLutCSMain");
-	private readonly AtmosphereKernel _skyView = new(EngineShaderPrograms.AtmosphereSkyViewLut, "AtmosphereSkyViewLutCSMain");
-	private readonly AtmosphereKernel _aerialPerspective = new(EngineShaderPrograms.AtmosphereAerialPerspective, "AtmosphereAerialPerspectiveCSMain");
-	private readonly AtmosphereKernel _environment = new(EngineShaderPrograms.AtmosphereEnvironment, "AtmosphereEnvironmentCSMain");
+	private readonly ComputeKernel _transmittance = new(EngineShaderPrograms.AtmosphereTransmittanceLut, "AtmosphereTransmittanceLutCSMain");
+	private readonly ComputeKernel _multipleScattering = new(EngineShaderPrograms.AtmosphereMultipleScatteringLut, "AtmosphereMultipleScatteringLutCSMain");
+	private readonly ComputeKernel _skyView = new(EngineShaderPrograms.AtmosphereSkyViewLut, "AtmosphereSkyViewLutCSMain");
+	private readonly ComputeKernel _aerialPerspective = new(EngineShaderPrograms.AtmosphereAerialPerspective, "AtmosphereAerialPerspectiveCSMain");
+	private readonly ComputeKernel _environment = new(EngineShaderPrograms.AtmosphereEnvironment, "AtmosphereEnvironmentCSMain");
 	private DescriptorHandle _linearClampSampler = DescriptorHandle.Invalid;
 
 	public AtmospherePass(IRenderer renderer, IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
@@ -158,7 +158,7 @@ internal sealed class AtmospherePass
 		return texture ?? throw new InvalidOperationException("Atmosphere texture was not created.");
 	}
 
-	private static void WriteAtmosphere(IGfxCommandList commandList, AtmosphereKernel kernel, in AtmosphereFrame frame)
+	private static void WriteAtmosphere(IGfxCommandList commandList, ComputeKernel kernel, in AtmosphereFrame frame)
 	{
 		var writer = kernel.Writer("AtmosphereParams");
 		writer.Clear();
@@ -166,13 +166,13 @@ internal sealed class AtmospherePass
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
 	}
 
-	private static void Dispatch(IGfxCommandList commandList, AtmosphereKernel kernel, int width, int height, int depth)
+	private static void Dispatch(IGfxCommandList commandList, ComputeKernel kernel, int width, int height, int depth)
 	{
 		var (x, y, z) = kernel.ThreadGroupSize.GetDispatchGroupCount((uint)width, (uint)height, (uint)depth);
 		commandList.Dispatch(x, y, z);
 	}
 
-	private AtmosphereKernel Bind(IGfxCommandList commandList, AtmosphereKernel kernel)
+	private ComputeKernel Bind(IGfxCommandList commandList, ComputeKernel kernel)
 	{
 		var device = _renderer.GetGfxDevice() ?? throw new InvalidOperationException("Graphics device is not initialized.");
 		kernel.EnsureCreated(device, _shaderProvider);
@@ -192,54 +192,5 @@ internal sealed class AtmospherePass
 		}
 
 		return _linearClampSampler;
-	}
-
-	/// <summary>One atmosphere compute shader: its pipeline, thread group size and constant buffer writers.</summary>
-	private sealed class AtmosphereKernel(ShaderProgramId program, string entryPoint)
-	{
-		private readonly Dictionary<string, ShaderPropertyWriter> _writers = new(StringComparer.Ordinal);
-		private IGfxPipeline? _pipeline;
-		private ComputeThreadGroupSize? _threadGroupSize;
-		private CompiledComputeShaderWithReflection _compiled;
-
-		public IGfxPipeline Pipeline => _pipeline ?? throw new InvalidOperationException($"'{entryPoint}' was not created.");
-
-		public ComputeThreadGroupSize ThreadGroupSize => _threadGroupSize
-			?? throw new InvalidOperationException($"'{entryPoint}' was not created.");
-
-		public void EnsureCreated(IGfxDevice device, IShaderProvider shaderProvider)
-		{
-			if (_pipeline is not null)
-			{
-				return;
-			}
-
-			_compiled = shaderProvider.GetComputeShaderWithReflection(program, entryPoint, device.BackendKind);
-			_threadGroupSize = _compiled.ThreadGroupSize;
-			var shaders = new ShaderBytecodeSet(compute: _compiled.Bytecode, computeThreadGroupSize: _threadGroupSize);
-			var pipelineKey = new PipelineKey(
-				PassKind.Compute,
-				vertexEntryPoint: null,
-				pixelEntryPoint: null,
-				computeEntryPoint: entryPoint,
-				renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-				depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-				renderState: default,
-				layout: GraphicsLayoutKind.Default);
-			_pipeline = device.GetOrCreatePipeline(pipelineKey, shaders);
-		}
-
-		public ShaderPropertyWriter Writer(string constantBuffer)
-		{
-			if (_writers.TryGetValue(constantBuffer, out var writer))
-			{
-				return writer;
-			}
-
-			writer = new ShaderPropertyWriter(_compiled.ReflectionLayout.GetConstantBuffer(constantBuffer));
-			_writers[constantBuffer] = writer;
-
-			return writer;
-		}
 	}
 }

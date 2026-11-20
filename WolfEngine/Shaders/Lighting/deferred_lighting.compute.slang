@@ -6,6 +6,7 @@ import "../Common/sky_sampling.slang";
 import "../Ddgi/ddgi_sample.slang";
 import "../Common/volumetric_fog.slang";
 import "../Atmosphere/atmosphere_common.slang";
+import "../Common/cloud_sampling.slang";
 
 cbuffer BindlessHandles : register(b0)
 {
@@ -108,6 +109,8 @@ cbuffer LightingParams : register(b2)
     uint atmosphereTransmittanceLutHandle;
     uint aerialPerspectiveHandle;
     AtmosphereConstants atmosphere;
+    /// The volumetric cloud layer and its sun shadow; disabled outside the Procedural sky.
+    CloudComposite cloudComposite;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
@@ -211,6 +214,11 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             skyColor = SampleSky(skyEnvironment, samplerHandle, skyDir, 0.0f);
         }
+        if (CloudCompositeEnabled(cloudComposite))
+        {
+            float4 cloud = SampleCloudsUpsampled(cloudComposite, uv, CLOUD_BACKGROUND_DISTANCE_KM);
+            skyColor = skyColor * cloud.a + cloud.rgb;
+        }
         if (fogEnabled != 0u)
         {
             float4 fog = SampleIntegratedFog(fogIntegratedHandle, samplerHandle, uv,
@@ -248,11 +256,19 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     surface.occlusion = occlusion;
     surface.emissive = emissive;
 
+    // The sun is the first directional light; the clouds shadow it.
+    DirectionalLightData shadedDirectionalLights[MAX_DIRECTIONAL_LIGHTS] = directionalLights;
+    if (directionalLightCount > 0u)
+    {
+        float cloudShadow = SampleCloudShadow(cloudComposite, samplerHandle, cameraRelativeWorldPos);
+        shadedDirectionalLights[0].colorIntensity.rgb *= cloudShadow;
+    }
+
     float3 color = EvaluateDirectionalLights(
         surface,
         viewDir,
         directionalLightCount,
-        directionalLights,
+        shadedDirectionalLights,
         shadowViewProjection0,
         shadowViewProjection1,
         shadowViewProjection2,
@@ -393,6 +409,13 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         float4 aerialPerspective = SampleAerialPerspective(aerialPerspectiveHandle, samplerHandle, uv, length(cameraRelativeWorldPos));
         color = ApplyAerialPerspective(color, aerialPerspective);
+    }
+
+    // Clouds in front of the surface, already carrying the atmosphere between them and the camera.
+    if (CloudCompositeEnabled(cloudComposite))
+    {
+        float4 cloud = SampleCloudsUpsampled(cloudComposite, uv, length(cameraRelativeWorldPos) * 0.001f);
+        color = color * cloud.a + cloud.rgb;
     }
 
     if (fogEnabled != 0u)

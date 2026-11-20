@@ -3,6 +3,7 @@ using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.Atmosphere;
+using WolfEngine.Rendering.Clouds;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -145,6 +146,7 @@ public sealed class TransparentForwardPass
 			ShadowMapDepth2 = shadowMap2,
 			SkyboxIrradiance = ResolveSkyboxHandle(context, resources.SkyboxIrradiance),
 			Atmosphere = AtmosphereBinding.Resolve(context, _bindlessRegistry, resources.Atmosphere),
+			Clouds = CloudCompositeBinding.Resolve(context, _bindlessRegistry, resources.Clouds, includeComposite: false),
 			SkyboxPrefilter = ResolveSkyboxHandle(context, resources.SkyboxPrefilter),
 			SkyboxBrdfLut = ResolveSkyboxHandle(context, sharedResources.SkyboxBrdfLut),
 			LinearSampler = _linearSampler,
@@ -245,6 +247,7 @@ public sealed class TransparentForwardPass
 		environmentWriter.SetUInt("aerialPerspectiveHandle", config.Atmosphere.AerialPerspective.Value);
 		environmentWriter.SetUInt("fogSliceCount", (uint)config.FogSliceCount);
 		environmentWriter.SetFloat("fogMaxDistance", config.FogMaxDistance);
+		config.Clouds.Write(environmentWriter);
 
 		var lightingWriter = _lightingWriter
 			?? throw new InvalidOperationException("Transparent lighting writer was not initialized.");

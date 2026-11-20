@@ -1,3 +1,4 @@
+using WolfEngine.Rendering.Clouds;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Shaders;
 
@@ -36,6 +37,7 @@ internal sealed class RenderGraphPassSet
 		SelectionOutlinePass = new(shaderCompiler, bindlessResourceRegistry);
 		DeferredLightingPass = new(shaderCompiler, bindlessResourceRegistry);
 		VolumetricFogPass = new(shaderCompiler, bindlessResourceRegistry);
+		CloudPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
 		ReflectionsPass = new(shaderCompiler, bindlessResourceRegistry);
 		ReflectionsUpsamplePass = new(shaderCompiler, bindlessResourceRegistry);
 		DdgiFinalGatherPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -88,6 +90,7 @@ internal sealed class RenderGraphPassSet
 	public SelectionOutlinePass SelectionOutlinePass { get; }
 	public DeferredLightingPass DeferredLightingPass { get; }
 	public VolumetricFogPass VolumetricFogPass { get; }
+	public CloudPass CloudPass { get; }
 	public ReflectionsPass ReflectionsPass { get; }
 	public ReflectionsUpsamplePass ReflectionsUpsamplePass { get; }
 	public DdgiFinalGatherPass DdgiFinalGatherPass { get; }
