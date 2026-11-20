@@ -376,6 +376,7 @@ public sealed class EditorAutomationTools
 		[Description("Procedural sky: Mie anisotropy, 0 to just under 1.")] float? mieAnisotropy = null,
 		[Description("Procedural sky: Rayleigh scattering of the strongest channel at sea level, 1/km.")] float? rayleighScatteringScale = null,
 		[Description("Procedural sky: grey ground albedo, 0 to 1.")] float? groundAlbedo = null,
+		[Description("Sky lighting quality, High or Low. Left out keeps the current one.")] string? lightingQuality = null,
 		CancellationToken cancellationToken = default) =>
 		_controller.SetSkyAsync(
 			mode,
@@ -385,6 +386,7 @@ public sealed class EditorAutomationTools
 			hdriIntensity,
 			gradientIntensity,
 			new ProceduralSkyOverrides(mieScatteringScale, mieAbsorptionScale, mieAnisotropy, rayleighScatteringScale, groundAlbedo),
+			lightingQuality,
 			cancellationToken);
 
 	[McpServerTool(Name = "set_sun"), Description("Point the active scene's first directional light at a sun elevation and azimuth in memory, without saving the scene. Azimuth 0 puts the sun toward +Z and 90 toward +X.")]

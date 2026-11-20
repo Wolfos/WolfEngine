@@ -358,6 +358,7 @@ public sealed class EditorProcessController : IAsyncDisposable
 		float? hdriIntensity,
 		float? gradientIntensity,
 		ProceduralSkyOverrides procedural,
+		string? lightingQuality,
 		CancellationToken cancellationToken) =>
 		GetRunningEditor().SetSkyAsync(
 			mode,
@@ -367,6 +368,7 @@ public sealed class EditorProcessController : IAsyncDisposable
 			hdriIntensity,
 			gradientIntensity,
 			procedural,
+			lightingQuality,
 			cancellationToken);
 
 	public Task<string> SetSunAsync(float elevationDegrees, float azimuthDegrees, float? intensity, CancellationToken cancellationToken) =>

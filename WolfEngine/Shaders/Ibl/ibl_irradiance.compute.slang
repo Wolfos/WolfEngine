@@ -11,13 +11,13 @@ cbuffer BindlessHandles : register(b0)
     uint samplerHandle;
     uint width;
     uint height;
+    /// Hemisphere samples per texel, set by the sky's lighting quality.
+    uint sampleCount;
 };
 
-static const uint SAMPLE_COUNT = 1024;
-
-static float3 ImportanceSampleHemisphere(uint i, uint sampleCount, float3 n)
+static float3 ImportanceSampleHemisphere(uint i, uint count, float3 n)
 {
-    float2 xi = Hammersley(i, sampleCount);
+    float2 xi = Hammersley(i, count);
     float phi = xi.y * 2.0f * PI;
     float cosTheta = 1.0f - xi.x;
     float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
@@ -46,14 +46,14 @@ void IblIrradianceCSMain(uint3 id : SV_DispatchThreadID)
     float3 sum = 0.0f;
     float weight = 0.0f;
     [loop]
-    for (uint i = 0; i < SAMPLE_COUNT; ++i)
+    for (uint i = 0; i < sampleCount; ++i)
     {
-        float3 l = ImportanceSampleHemisphere(i, SAMPLE_COUNT, n);
+        float3 l = ImportanceSampleHemisphere(i, sampleCount, n);
         float NdotL = saturate(dot(n, l));
         if (NdotL > 0.0f)
         {
             // The hemisphere is sampled uniformly in cos(theta), a density of 1 / (2 * PI).
-            float lod = SkyFilteredLod(skyEnvironment, l, 1.0f / (2.0f * PI), SAMPLE_COUNT);
+            float lod = SkyFilteredLod(skyEnvironment, l, 1.0f / (2.0f * PI), sampleCount);
             float3 c = SampleSky(skyEnvironment, samplerHandle, l, lod);
             sum += c * NdotL;
             weight += NdotL;

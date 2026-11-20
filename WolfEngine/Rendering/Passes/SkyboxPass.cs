@@ -13,6 +13,25 @@ public sealed class SkyboxPass
 {
 	private const int EnvironmentWidth = 2048;
 	private const int EnvironmentHeight = 1024;
+
+	/// <summary>
+	/// The Procedural environment at Low quality. Only image-based lighting and DDGI read it, and the atmosphere is
+	/// low-frequency, so it does not need the size of an environment the visible sky is drawn from.
+	/// </summary>
+	private const int LowQualityEnvironmentWidth = 256;
+	private const int LowQualityEnvironmentHeight = 128;
+
+	/// <summary>
+	/// The prefilter atlas at Low quality in Procedural mode: half the size, since its low-resolution environment
+	/// has no detail for a larger atlas to keep. Consumers address the atlas by UV, so any size works.
+	/// </summary>
+	private const int LowQualityPrefilterWidth = 128;
+	private const int LowQualityPrefilterSliceHeight = 32;
+
+	private const uint HighQualityIrradianceSamples = 1024;
+	private const uint LowQualityIrradianceSamples = 128;
+	private const uint HighQualityPrefilterSamples = 128;
+	private const uint LowQualityPrefilterSamples = 64;
 	private const int IrradianceSize = 64;
 	private const int PrefilterWidth = 256;
 	private const int PrefilterSliceHeight = 64;
@@ -135,7 +154,7 @@ public sealed class SkyboxPass
 				ViewEnvironment = environment,
 				IsCube = false,
 				MipCount = 1,
-				BaseSize = EnvironmentWidth,
+				BaseSize = sky.Environment?.Descriptor.Width ?? EnvironmentWidth,
 				RotationRadians = 0.0f,
 				Intensity = 1.0f
 			};
@@ -186,7 +205,10 @@ public sealed class SkyboxPass
 		var irradiance = sky.Irradiance ?? throw new InvalidOperationException("Sky irradiance texture was not created.");
 		var gfxDevice = GetGfxDevice();
 		var binding = source.Resolve(context, _bindlessRegistry);
-		RecordIrradiance(context.CommandList, gfxDevice, binding, irradiance, GetSkyboxSamplerHandle(gfxDevice));
+		var sampleCount = sky.Config.LightingQuality == SkyLightingQuality.Low
+			? LowQualityIrradianceSamples
+			: HighQualityIrradianceSamples;
+		RecordIrradiance(context.CommandList, gfxDevice, binding, irradiance, GetSkyboxSamplerHandle(gfxDevice), sampleCount);
 	}
 
 	internal void RecordPrefilter(RenderGraphContext context, ViewSky sky, in SkyEnvironmentSource source)
@@ -197,7 +219,10 @@ public sealed class SkyboxPass
 		var prefilter = sky.Prefilter ?? throw new InvalidOperationException("Sky prefilter texture was not created.");
 		var gfxDevice = GetGfxDevice();
 		var binding = source.Resolve(context, _bindlessRegistry);
-		RecordPrefilter(context.CommandList, gfxDevice, binding, prefilter, GetSkyboxSamplerHandle(gfxDevice));
+		var sampleCount = sky.Config.LightingQuality == SkyLightingQuality.Low
+			? LowQualityPrefilterSamples
+			: HighQualityPrefilterSamples;
+		RecordPrefilter(context.CommandList, gfxDevice, binding, prefilter, GetSkyboxSamplerHandle(gfxDevice), sampleCount);
 
 		sky.HasGeneratedLighting = true;
 		sky.GeneratedSunDirection = sky.SunDirection;
@@ -266,8 +291,8 @@ public sealed class SkyboxPass
 			?? throw new InvalidOperationException("Gradient sky bindless writer was not initialized.");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("environmentHandle", environment.UnorderedAccessView.Value);
-		bindlessWriter.SetUInt("width", (uint)EnvironmentWidth);
-		bindlessWriter.SetUInt("height", (uint)EnvironmentHeight);
+		bindlessWriter.SetUInt("width", (uint)environment.Descriptor.Width);
+		bindlessWriter.SetUInt("height", (uint)environment.Descriptor.Height);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var paramsWriter = _gradientParamsWriter
@@ -281,7 +306,9 @@ public sealed class SkyboxPass
 
 		var threadGroupSize = _gradientSkyThreadGroupSize
 			?? throw new InvalidOperationException("Gradient sky threadgroup size was not initialized.");
-		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(EnvironmentWidth, EnvironmentHeight);
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
+			(uint)environment.Descriptor.Width,
+			(uint)environment.Descriptor.Height);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
@@ -290,7 +317,8 @@ public sealed class SkyboxPass
 		IGfxDevice gfxDevice,
 		in SkyEnvironmentBinding source,
 		IGfxTexture irradianceTex,
-		DescriptorHandle samplerHandle)
+		DescriptorHandle samplerHandle,
+		uint sampleCount)
 	{
 		var pipeline = GetIblIrradiancePipeline(gfxDevice);
 		commandList.BindPipeline(pipeline);
@@ -302,6 +330,7 @@ public sealed class SkyboxPass
 		writer.SetUInt("samplerHandle", samplerHandle.Value);
 		writer.SetUInt("width", IrradianceSize);
 		writer.SetUInt("height", IrradianceSize);
+		writer.SetUInt("sampleCount", sampleCount);
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
 		var threadGroupSize = _iblIrradianceThreadGroupSize
 			?? throw new InvalidOperationException("IBL irradiance threadgroup size was not initialized.");
@@ -314,7 +343,8 @@ public sealed class SkyboxPass
 		IGfxDevice gfxDevice,
 		in SkyEnvironmentBinding source,
 		IGfxTexture prefilterTex,
-		DescriptorHandle samplerHandle)
+		DescriptorHandle samplerHandle,
+		uint sampleCount)
 	{
 		var pipeline = GetIblPrefilterPipeline(gfxDevice);
 		commandList.BindPipeline(pipeline);
@@ -324,16 +354,19 @@ public sealed class SkyboxPass
 		source.Write(writer);
 		writer.SetUInt("prefilterHandle", prefilterTex.UnorderedAccessView.Value);
 		writer.SetUInt("samplerHandle", samplerHandle.Value);
-		writer.SetUInt("width", PrefilterWidth);
-		writer.SetUInt("height", PrefilterSliceHeight * PrefilterSlices);
+		var prefilterWidth = prefilterTex.Descriptor.Width;
+		var prefilterHeight = prefilterTex.Descriptor.Height;
+		writer.SetUInt("width", (uint)prefilterWidth);
+		writer.SetUInt("height", (uint)prefilterHeight);
 		writer.SetUInt("sliceCount", PrefilterSlices);
-		writer.SetUInt("sliceHeight", PrefilterSliceHeight);
+		writer.SetUInt("sliceHeight", (uint)(prefilterHeight / PrefilterSlices));
+		writer.SetUInt("sampleCount", sampleCount);
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
 		var threadGroupSize = _iblPrefilterThreadGroupSize
 			?? throw new InvalidOperationException("IBL prefilter threadgroup size was not initialized.");
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
-			PrefilterWidth,
-			PrefilterSliceHeight * PrefilterSlices);
+			(uint)prefilterWidth,
+			(uint)prefilterHeight);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
@@ -359,7 +392,11 @@ public sealed class SkyboxPass
 	private static bool EnsureSkyTextures(IGfxDevice gfxDevice, ViewSky sky)
 	{
 		var created = false;
-		if (sky.HasLightingTextures == false)
+		var (prefilterWidth, prefilterSliceHeight) = GetPrefilterSize(sky.Config);
+		var prefilterSizeChanged = sky.Prefilter is not null &&
+		                           (sky.Prefilter.Descriptor.Width != prefilterWidth ||
+		                            sky.Prefilter.Descriptor.Height != prefilterSliceHeight * PrefilterSlices);
+		if (sky.HasLightingTextures == false || prefilterSizeChanged)
 		{
 			// A partly created sky is released whole, so its textures always come from one device.
 			sky.Release();
@@ -370,28 +407,58 @@ public sealed class SkyboxPass
 				TextureFormat.Rgba16Float,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
 			sky.Prefilter = gfxDevice.CreateTexture(new TextureDescriptor(
-				PrefilterWidth,
-				PrefilterSliceHeight * PrefilterSlices,
+				prefilterWidth,
+				prefilterSliceHeight * PrefilterSlices,
 				TextureFormat.Rgba16Float,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
 			created = true;
+		}
+
+		var (environmentWidth, environmentHeight) = GetEnvironmentSize(sky.Config);
+		if (sky.Environment is not null &&
+		    (sky.DrawsEnvironment == false ||
+		     sky.Environment.Descriptor.Width != environmentWidth ||
+		     sky.Environment.Descriptor.Height != environmentHeight))
+		{
+			sky.ReleaseEnvironment();
 		}
 
 		if (sky.DrawsEnvironment && sky.Environment is null)
 		{
 			sky.Environment = gfxDevice.CreateTexture(new TextureDescriptor(
-				EnvironmentWidth,
-				EnvironmentHeight,
+				environmentWidth,
+				environmentHeight,
 				TextureFormat.Rgba16Float,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
 			created = true;
 		}
-		else if (sky.DrawsEnvironment == false && sky.Environment is not null)
-		{
-			sky.ReleaseEnvironment();
-		}
 
 		return created;
+	}
+
+	/// <summary>
+	/// The environment a sky mode draws into. Gradient draws its visible sky from it, so it keeps full size at every
+	/// quality; the Procedural sky's visible sky comes from its Sky View LUT, so its environment only feeds lighting.
+	/// </summary>
+	private static (int Width, int Height) GetEnvironmentSize(in SkyConfig config)
+	{
+		if (config.Mode == SkyConfigMode.Procedural && config.LightingQuality == SkyLightingQuality.Low)
+		{
+			return (LowQualityEnvironmentWidth, LowQualityEnvironmentHeight);
+		}
+
+		return (EnvironmentWidth, EnvironmentHeight);
+	}
+
+	/// <summary>The prefilter atlas's width and slice height, smaller where the environment is small.</summary>
+	private static (int Width, int SliceHeight) GetPrefilterSize(in SkyConfig config)
+	{
+		if (config.Mode == SkyConfigMode.Procedural && config.LightingQuality == SkyLightingQuality.Low)
+		{
+			return (LowQualityPrefilterWidth, LowQualityPrefilterSliceHeight);
+		}
+
+		return (PrefilterWidth, PrefilterSliceHeight);
 	}
 
 	/// <summary>Whether what the sky would be generated from now differs from what it was last generated from.</summary>
@@ -399,7 +466,7 @@ public sealed class SkyboxPass
 	{
 		var current = sky.Config;
 		var generated = sky.GeneratedConfig;
-		if (current.Mode != generated.Mode)
+		if (current.Mode != generated.Mode || current.LightingQuality != generated.LightingQuality)
 		{
 			return true;
 		}

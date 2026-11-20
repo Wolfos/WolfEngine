@@ -13,6 +13,8 @@ cbuffer BindlessHandles : register(b0)
     uint height;
     uint sliceCount;
     uint sliceHeight;
+    /// GGX samples per texel, set by the sky's lighting quality.
+    uint sampleCount;
 };
 
 float3 ImportanceSampleGGX(float2 xi, float roughness, float3 n)
@@ -47,14 +49,13 @@ void IblPrefilterCSMain(uint3 id : SV_DispatchThreadID)
     float3 R = EnvUVToDir(baseUV);
     float roughness = sliceCount > 1 ? float(slice) / float(sliceCount - 1) : 0.0f;
 
-    const uint SAMPLE_COUNT = 128;
     float3 prefiltered = 0.0f;
     float totalWeight = 0.0f;
 
     [loop]
-    for (uint i = 0; i < SAMPLE_COUNT; ++i)
+    for (uint i = 0; i < sampleCount; ++i)
     {
-        float2 xi = Hammersley(i, SAMPLE_COUNT);
+        float2 xi = Hammersley(i, sampleCount);
         float3 H = ImportanceSampleGGX(xi, roughness, R);
         float3 L = normalize(reflect(-R, H));
 
@@ -66,7 +67,7 @@ void IblPrefilterCSMain(uint3 id : SV_DispatchThreadID)
             float NdotH = saturate(dot(R, H));
             float alpha = max(roughness * roughness, 1e-3f);
             float pdf = DistributionGGX(NdotH, alpha) * 0.25f;
-            float lod = SkyFilteredLod(skyEnvironment, L, pdf, SAMPLE_COUNT);
+            float lod = SkyFilteredLod(skyEnvironment, L, pdf, sampleCount);
             float3 sampleCol = SampleSky(skyEnvironment, samplerHandle, L, lod);
             prefiltered += sampleCol * NdotL;
             totalWeight += NdotL;

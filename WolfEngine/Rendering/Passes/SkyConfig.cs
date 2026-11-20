@@ -14,9 +14,29 @@ public struct SkyConfig
 	}
 
 	public SkyConfigMode Mode { get; set; } = SkyConfigMode.Procedural;
+
+	/// <summary>
+	/// How much work rebuilding the sky's image-based lighting takes, which happens whenever the sky changes, for
+	/// example every frame while the sun moves. Low is the default: for the Procedural sky it lights the scene
+	/// indistinguishably at about a tenth of the cost. High is worth it for a detailed HDRI seen in mirror-like
+	/// reflections.
+	/// </summary>
+	public SkyLightingQuality LightingQuality { get; set; } = SkyLightingQuality.Low;
 	public ProceduralSkyConfig Procedural { get; set; } = new();
 	public HdriSkyConfig Hdri { get; set; } = new();
 	public GradientSkyConfig Gradient { get; set; } = new();
+}
+
+public enum SkyLightingQuality
+{
+	/// <summary>Full-resolution sky environment and sample counts.</summary>
+	High,
+
+	/// <summary>
+	/// A low-resolution Procedural environment, which only lighting reads, and fewer irradiance and prefilter
+	/// samples. The Procedural sky is smooth enough that the difference is hard to see.
+	/// </summary>
+	Low
 }
 
 public enum SkyConfigMode

@@ -19,6 +19,7 @@ public sealed partial class EditorRemoteAutomationController
 		float? hdriIntensity,
 		float? gradientIntensity,
 		ProceduralSkyOverrides procedural,
+		string? lightingQuality,
 		CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
@@ -31,6 +32,16 @@ public sealed partial class EditorRemoteAutomationController
 			var config = GetActiveRenderConfig();
 			var sky = config.Sky;
 			sky.Mode = selectedMode;
+			if (string.IsNullOrWhiteSpace(lightingQuality) == false)
+			{
+				if (Enum.TryParse<SkyLightingQuality>(lightingQuality, true, out var quality) == false ||
+				    Enum.IsDefined(quality) == false)
+				{
+					throw new ArgumentException("Sky lighting quality must be High or Low.", nameof(lightingQuality));
+				}
+
+				sky.LightingQuality = quality;
+			}
 
 			var hdri = sky.Hdri;
 			if (clearHdri)
@@ -64,7 +75,7 @@ public sealed partial class EditorRemoteAutomationController
 			sky.Procedural = procedural.ApplyTo(sky.Procedural);
 			config.Sky = sky;
 
-			return $"Sky: {sky.Mode}, HDRI: {(sky.Hdri.Texture.IsValid ? sky.Hdri.Texture.NodeId.ToString("D") : "none")}, " +
+			return $"Sky: {sky.Mode}, lighting quality: {sky.LightingQuality}, HDRI: {(sky.Hdri.Texture.IsValid ? sky.Hdri.Texture.NodeId.ToString("D") : "none")}, " +
 			       $"rotation: {sky.Hdri.RotationDegrees}, HDRI intensity: {sky.Hdri.Intensity}, " +
 			       $"gradient intensity: {sky.Gradient.Intensity}. Changed in memory only.";
 		}, cancellationToken);

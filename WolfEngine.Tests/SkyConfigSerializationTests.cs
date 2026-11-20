@@ -50,6 +50,7 @@ public sealed class SkyConfigSerializationTests
 			Sky = new SkyConfig
 			{
 				Mode = SkyConfigMode.Hdri,
+				LightingQuality = SkyLightingQuality.High,
 				Procedural = new ProceduralSkyConfig
 				{
 					MieAnisotropy = 0.7f,
@@ -77,6 +78,7 @@ public sealed class SkyConfigSerializationTests
 		Assert.Multiple(() =>
 		{
 			Assert.That(sky.Mode, Is.EqualTo(SkyConfigMode.Hdri));
+			Assert.That(sky.LightingQuality, Is.EqualTo(SkyLightingQuality.High));
 			Assert.That(sky.Procedural.MieAnisotropy, Is.EqualTo(0.7f));
 			Assert.That(sky.Procedural.OzoneTipAltitudeKm, Is.EqualTo(22.0f));
 			Assert.That(sky.Hdri.Texture.NodeId, Is.EqualTo(HdriNodeId));
