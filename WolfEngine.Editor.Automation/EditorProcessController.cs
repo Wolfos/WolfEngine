@@ -371,6 +371,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 			lightingQuality,
 			cancellationToken);
 
+	public Task<string> SetCloudsAsync(CloudOverrides overrides, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetCloudsAsync(overrides, cancellationToken);
+
 	public Task<string> SetSunAsync(float elevationDegrees, float azimuthDegrees, float? intensity, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetSunAsync(elevationDegrees, azimuthDegrees, intensity, cancellationToken);
 

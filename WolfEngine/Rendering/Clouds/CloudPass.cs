@@ -321,6 +321,7 @@ internal sealed class CloudPass
 		writer.SetMatrix4x4("previousViewProjection", scene.PreviousViewProjection);
 		writer.SetVector4("cameraDelta", new Vector4(scene.CameraOrigin - scene.PreviousCameraOrigin, CloudViewResources.HistoryWeight));
 		writer.SetVector4("windDelta", new Vector4(clouds.Frame.WindDelta, clouds.Frame.JitterOffset, 0.0f));
+		writer.SetVector4("subpixelJitter", new Vector4(clouds.Frame.SubpixelJitter, 0.0f, 0.0f));
 		writer.SetUInt("traceSizeX", (uint)Math.Max(clouds.TraceSize.X, 1));
 		writer.SetUInt("traceSizeY", (uint)Math.Max(clouds.TraceSize.Y, 1));
 		writer.SetUInt("renderSizeX", (uint)Math.Max(resources.SceneFramebufferSize.X, 1));

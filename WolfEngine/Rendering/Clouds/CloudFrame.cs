@@ -45,6 +45,7 @@ internal readonly struct CloudFrame
 		WindDirection = GetWindDirection(settings.WindDirection);
 		WindDelta = view.LastWindDelta;
 		JitterOffset = (view.FrameIndex * 0.618034f) % 1.0f;
+		SubpixelJitter = GetSubpixelJitter(view.FrameIndex);
 
 		var scale = settings.ShapeScale;
 		WeatherTile = WeatherTileMetres * scale;
@@ -78,6 +79,9 @@ internal readonly struct CloudFrame
 	/// <summary>Offset of this frame's ray-march jitter, in 0..1.</summary>
 	public float JitterOffset { get; }
 
+	/// <summary>This frame's ray offset within a trace pixel, in pixels, each axis in -0.5..0.5.</summary>
+	public Vector2 SubpixelJitter { get; }
+
 	public float WeatherTile { get; }
 	public float ShapeTile { get; }
 	public float DetailTile { get; }
@@ -92,6 +96,17 @@ internal readonly struct CloudFrame
 
 	/// <summary>Height of the cloud base relative to the camera, in metres. Ignores curvature.</summary>
 	public float BaseHeightAboveCamera => Settings.CloudBaseAltitude - CameraAltitudeMetres;
+
+	/// <summary>
+	/// The R2 low-discrepancy sequence (Roberts 2018), which covers a pixel evenly in any run of consecutive frames.
+	/// </summary>
+	public static Vector2 GetSubpixelJitter(uint frameIndex)
+	{
+		var x = (0.5 + frameIndex * 0.7548776662466927) % 1.0;
+		var y = (0.5 + frameIndex * 0.5698402909980532) % 1.0;
+
+		return new Vector2((float)x - 0.5f, (float)y - 0.5f);
+	}
 
 	public static Vector2 GetWindDirection(float degrees)
 	{

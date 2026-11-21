@@ -120,6 +120,24 @@ public sealed partial class EditorRemoteAutomationController
 			throw new InvalidOperationException("The active scene has no directional light.");
 		}, cancellationToken);
 
+	/// <summary>
+	/// Changes the active scene's volumetric clouds in memory, without saving its render config. Settings left null
+	/// keep their current values.
+	/// </summary>
+	public Task<string> SetCloudsAsync(CloudOverrides overrides, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var config = GetActiveRenderConfig();
+			var clouds = overrides.ApplyTo(config.Clouds);
+			config.Clouds = clouds;
+
+			return $"Clouds: enabled {clouds.Enabled}, coverage {clouds.Coverage}, density {clouds.Density}, " +
+			       $"base {clouds.CloudBaseAltitude} m, thickness {clouds.CloudThickness} m, shape scale {clouds.ShapeScale}, " +
+			       $"detail {clouds.DetailStrength}, wind {clouds.WindSpeed} m/s toward {clouds.WindDirection}, " +
+			       $"ambient {clouds.AmbientStrength}, multiple scattering {clouds.MultipleScattering}, " +
+			       $"quality {clouds.Quality}, shadows {clouds.CastShadows}. Changed in memory only.";
+		}, cancellationToken);
+
 	/// <summary>Sets the active scene's tonemapping exposure in memory, without saving its render config.</summary>
 	public Task<string> SetTonemappingExposureAsync(float exposure, CancellationToken cancellationToken) =>
 		Enqueue(() =>
@@ -142,6 +160,99 @@ public sealed partial class EditorRemoteAutomationController
 		}
 
 		return config ?? _sceneWorkspace.DefaultRenderConfig;
+	}
+}
+
+/// <summary>Cloud settings an automation call changes; null leaves a setting as it is.</summary>
+public readonly record struct CloudOverrides(
+	bool? Enabled,
+	float? Coverage,
+	float? Density,
+	float? CloudBaseAltitude,
+	float? CloudThickness,
+	float? ShapeScale,
+	float? DetailStrength,
+	float? WindDirection,
+	float? WindSpeed,
+	float? AmbientStrength,
+	float? MultipleScattering,
+	string? Quality,
+	bool? CastShadows)
+{
+	public CloudConfig ApplyTo(CloudConfig clouds)
+	{
+		if (Enabled.HasValue)
+		{
+			clouds.Enabled = Enabled.Value;
+		}
+
+		if (Coverage.HasValue)
+		{
+			clouds.Coverage = Coverage.Value;
+		}
+
+		if (Density.HasValue)
+		{
+			clouds.Density = Density.Value;
+		}
+
+		if (CloudBaseAltitude.HasValue)
+		{
+			clouds.CloudBaseAltitude = CloudBaseAltitude.Value;
+		}
+
+		if (CloudThickness.HasValue)
+		{
+			clouds.CloudThickness = CloudThickness.Value;
+		}
+
+		if (ShapeScale.HasValue)
+		{
+			clouds.ShapeScale = ShapeScale.Value;
+		}
+
+		if (DetailStrength.HasValue)
+		{
+			clouds.DetailStrength = DetailStrength.Value;
+		}
+
+		if (WindDirection.HasValue)
+		{
+			clouds.WindDirection = WindDirection.Value;
+		}
+
+		if (WindSpeed.HasValue)
+		{
+			clouds.WindSpeed = WindSpeed.Value;
+		}
+
+		if (AmbientStrength.HasValue)
+		{
+			clouds.AmbientStrength = AmbientStrength.Value;
+		}
+
+		if (MultipleScattering.HasValue)
+		{
+			clouds.MultipleScattering = MultipleScattering.Value;
+		}
+
+		if (string.IsNullOrWhiteSpace(Quality) == false)
+		{
+			if (Enum.TryParse<CloudQuality>(Quality, true, out var quality) == false ||
+			    Enum.IsDefined(quality) == false)
+			{
+				throw new ArgumentException("Cloud quality must be Low, Medium or High.", nameof(Quality));
+			}
+
+			clouds.Quality = quality;
+		}
+
+		if (CastShadows.HasValue)
+		{
+			clouds.CastShadows = CastShadows.Value;
+		}
+
+		return clouds;
 	}
 }
 

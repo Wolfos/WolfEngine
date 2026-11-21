@@ -49,7 +49,10 @@ cbuffer CloudViewParams : register(b11)
     /// xyz: this frame's camera origin minus the previous one (m). w: history weight for a still camera.
     float4 cameraDelta;
     /// xy: how far the wind moved the clouds since the previous frame (m, world XZ). z: jitter offset (0..1).
+    /// w: unused.
     float4 windDelta;
+    /// xy: this frame's ray offset within a trace pixel, in pixels (-0.5..0.5). zw: unused.
+    float4 subpixelJitter;
     /// xy: shadow map centre (camera-relative XZ, m). z: shadow map extent (m). w: unused.
     float4 shadowMap;
     uint traceSizeX;
@@ -103,9 +106,19 @@ float CloudJitter(uint2 pixel)
     return frac(noise + windDelta.z);
 }
 
+/// The direction through a trace pixel, offset within it by <paramref name="offset"/> pixels.
+float3 TraceDirection(uint2 tracePixel, float2 offset)
+{
+    float2 uv = (float2(tracePixel) + 0.5f + offset) / float2(TraceSize());
+    float2 ndc = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
+    float4 position = mul(float4(ndc, 1.0f, 1.0f), invViewProjection);
+
+    return normalize(position.xyz / position.w);
+}
+
 float3 TraceDirection(uint2 tracePixel)
 {
-    return ReconstructWorldDirection(tracePixel, TraceSize(), 1.0f, invViewProjection);
+    return TraceDirection(tracePixel, 0.0f);
 }
 
 /// The full-resolution pixel a trace pixel stands for. Fixed rather than jittered, so the scene depth it was
@@ -151,7 +164,9 @@ void CloudMarchCS(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    float3 direction = TraceDirection(id.xy);
+    // A different point of the trace pixel every frame: the accumulation then covers its whole area, which
+    // anti-aliases thin, bright cloud edges that a fixed ray through the centre would alias.
+    float3 direction = TraceDirection(id.xy, subpixelJitter.xy);
     float sceneDistance = SceneDistance(RepresentativePixel(id.xy));
     float maxDistance = min(sceneDistance, clouds.sampling.z);
     float2 range = CloudLayerIntersect(clouds, direction, maxDistance);
@@ -259,7 +274,7 @@ void CloudTemporalCS(uint3 id : SV_DispatchThreadID)
     }
 
     float4 mean = moment1 / 9.0f;
-    float4 deviation = sqrt(max(moment2 / 9.0f - mean * mean, 0.0f)) * 1.5f;
+    float4 deviation = sqrt(max(moment2 / 9.0f - mean * mean, 0.0f)) * 2.0f;
 
     SamplerState linearSampler = GetSampler(linearSamplerHandle);
     float4 history = GetTexture(historyColorHandle).SampleLevel(linearSampler, previousUv, 0.0f);

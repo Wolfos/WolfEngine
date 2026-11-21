@@ -242,7 +242,7 @@ float SampleCloudDensity(CloudConstants c, CloudTextures textures, CloudSamplePo
 
         // Wispy at the base, billowing above it.
         float modifier = lerp(highFrequencyFbm, 1.0f - highFrequencyFbm, saturate(samplePoint.heightFraction * 8.0f));
-        cloud = saturate(CloudRemap(cloud, modifier * c.shape.z * 0.5f, 1.0f, 0.0f, 1.0f));
+        cloud = saturate(CloudRemap(cloud, modifier * c.shape.z * 0.75f, 1.0f, 0.0f, 1.0f));
     }
 
     // Weather blue varies density between clouds, and clouds thicken with height as their droplets grow.
@@ -342,6 +342,20 @@ float3 CloudScatteredRadiance(
     return CLOUD_SCATTERING_ALBEDO * (sun + ambient);
 }
 
+/// Shortest primary step, in metres: below it the noise has no more detail to resolve.
+static const float CLOUD_MIN_STEP = 30.0f;
+
+/// Distance beyond which primary samples skip the detail noise, in metres.
+static const float CLOUD_DETAIL_DISTANCE = 20000.0f;
+
+/// How much a primary step lengthens per metre of distance from the camera.
+static const float CLOUD_STEP_GROWTH = 0.01f;
+
+float CloudStepLength(float distance, float nearestStep, float budgetStep)
+{
+    return max(max(nearestStep, distance * CLOUD_STEP_GROWTH), budgetStep);
+}
+
 /// Front-to-back integration of one ray through the layer.
 struct CloudMarchResult
 {
@@ -379,18 +393,20 @@ CloudMarchResult MarchClouds(
 
     float rayLength = range.y - range.x;
     float layerThickness = CloudTopAltitude(c) - CloudBaseAltitude(c);
+    float sampleCount = float(max(primarySamples, 1u));
 
-    // Short rays through the layer's depth take every sample; long grazing rays spread them out.
-    float stepLength = max(rayLength / float(max(primarySamples, 1u)), layerThickness / float(max(primarySamples, 1u)) * 0.5f);
-    float coarseStep = stepLength * 2.0f;
+    // A ray through the layer's depth takes every sample at the finest step. Steps then grow with distance, where
+    // a cloud covers fewer pixels, and never so short that a long grazing ray runs out of samples before its end.
+    float nearestStep = max(layerThickness / sampleCount, CLOUD_MIN_STEP);
+    float budgetStep = rayLength / (sampleCount * 2.0f);
     float phaseCosine = dot(direction, c.sunDirection.xyz);
 
-    float t = range.x + coarseStep * jitter;
+    float t = range.x + CloudStepLength(range.x, nearestStep, budgetStep) * jitter;
     bool fine = false;
     uint emptyRun = 0u;
     float depthWeight = 0.0f;
     float weightedDepth = 0.0f;
-    uint maxIterations = primarySamples * 2u + 8u;
+    uint maxIterations = primarySamples * 3u + 8u;
     for (uint iteration = 0u; iteration < maxIterations; iteration++)
     {
         if (t >= range.y)
@@ -400,6 +416,8 @@ CloudMarchResult MarchClouds(
 
         float3 position = direction * t;
         CloudSamplePoint samplePoint = MakeCloudSamplePoint(c, position);
+        float stepLength = CloudStepLength(t, nearestStep, budgetStep);
+        float coarseStep = stepLength * 2.0f;
         if (fine == false)
         {
             float probe = SampleCloudDensity(c, textures, samplePoint, true);
@@ -416,7 +434,11 @@ CloudMarchResult MarchClouds(
             continue;
         }
 
-        float extinction = SampleCloudDensity(c, textures, samplePoint, false);
+        // Far clouds fade into the haze rather than ending at the trace distance, and lose their detail noise,
+        // which there is finer than a pixel and would only alias.
+        float distanceFade = 1.0f - smoothstep(c.sampling.z * 0.5f, c.sampling.z, t);
+        bool farAway = t > CLOUD_DETAIL_DISTANCE;
+        float extinction = SampleCloudDensity(c, textures, samplePoint, farAway) * distanceFade;
         float dt = min(stepLength, range.y - t);
         if (extinction > 0.0f)
         {

@@ -389,6 +389,39 @@ public sealed class EditorAutomationTools
 			lightingQuality,
 			cancellationToken);
 
+	[McpServerTool(Name = "set_clouds"), Description("Change the active scene's volumetric clouds in memory without saving its render config asset. Clouds only render with the Procedural sky. Settings left out keep their current values.")]
+	public Task<string> SetClouds(
+		[Description("Draw the cloud layer.")] bool? enabled = null,
+		[Description("Fraction of the sky covered, 0 to 1.")] float? coverage = null,
+		[Description("Density multiplier, 0 to 4.")] float? density = null,
+		[Description("Cloud base altitude above the ground, in metres.")] float? cloudBaseAltitude = null,
+		[Description("Layer thickness, in metres.")] float? cloudThickness = null,
+		[Description("Cloud size multiplier, 0.1 to 10.")] float? shapeScale = null,
+		[Description("Edge erosion strength, 0 to 1.")] float? detailStrength = null,
+		[Description("Compass direction the wind blows toward, in degrees: 0 toward +Z, 90 toward +X.")] float? windDirection = null,
+		[Description("Wind speed, in metres per second.")] float? windSpeed = null,
+		[Description("Skylight multiplier, 0 to 4.")] float? ambientStrength = null,
+		[Description("Multiple-scattering strength, 0 to 1.")] float? multipleScattering = null,
+		[Description("Low, Medium or High.")] string? quality = null,
+		[Description("Whether clouds shadow the sun.")] bool? castShadows = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetCloudsAsync(
+			new CloudOverrides(
+				enabled,
+				coverage,
+				density,
+				cloudBaseAltitude,
+				cloudThickness,
+				shapeScale,
+				detailStrength,
+				windDirection,
+				windSpeed,
+				ambientStrength,
+				multipleScattering,
+				quality,
+				castShadows),
+			cancellationToken);
+
 	[McpServerTool(Name = "set_sun"), Description("Point the active scene's first directional light at a sun elevation and azimuth in memory, without saving the scene. Azimuth 0 puts the sun toward +Z and 90 toward +X.")]
 	public Task<string> SetSun(
 		[Description("Sun elevation above the horizon, in degrees. Negative is below the horizon.")] float elevationDegrees,
