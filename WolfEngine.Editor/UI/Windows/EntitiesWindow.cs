@@ -89,7 +89,11 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		BeginRevealRequest(world, isSearchActive);
 
 		// The tree scrolls in its own child so the search bar stays in place above it.
-		ImGui.BeginChild("##EntityTree", Vector2.Zero, ImGuiChildFlags.None);
+		ImGui.BeginChild(
+			"##EntityTree",
+			Vector2.Zero,
+			ImGuiChildFlags.None,
+			ImGuiWindowFlags.NoBackground);
 
 		var style = ImGui.GetStyle();
 		ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(style.ItemSpacing.X, 0.0f));
