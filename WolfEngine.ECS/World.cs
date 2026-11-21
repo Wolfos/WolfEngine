@@ -11,6 +11,9 @@ public class World
     private readonly Dictionary<Type, IComponentPool> _pools = new();
 	private readonly List<WorldTransformRemoval> _worldTransformRemovals = new();
 	private bool _worldTransformRemovalsOverflowed;
+	private const int MaxTransformChanges = 1 << 16;
+	private List<Entity>? _transformChanges;
+	private bool _transformChangesOverflowed;
 
     public WorldTag Tag { get; }
 
@@ -230,6 +233,7 @@ public class World
 
 		ref var worldTransform = ref GetComponent<WorldTransform>(entity);
 		worldTransform.Version = unchecked(worldTransform.Version + 1);
+		RecordTransformChange(entity);
 
 		var pool = Pool<DirtyWorldTransform>();
 		if (pool.Has(entity))
@@ -526,7 +530,54 @@ public class World
     {
         GetComponent<LocalTransform>(entity).IsDirty = true;
         AddComponent<DirtyTransformRoot>(entity);
+        RecordTransformChange(entity);
     }
+
+	/// <summary>
+	/// Starts recording which entities' transforms change, for one consumer that keeps its own copy of positions,
+	/// such as physics, so it can bring that copy up to date without visiting every entity. Each local edit
+	/// (<see cref="MarkDirty"/>) and each resolved world change (<see cref="MarkWorldTransformChanged"/>) records the
+	/// entity. Recording stays on once started.
+	/// </summary>
+	public void TrackTransformChanges() => _transformChanges ??= new List<Entity>();
+
+	/// <summary>
+	/// Moves the entities recorded since the last drain into <paramref name="entities"/>, clearing the record. An
+	/// entity can appear more than once. Returns false when the record is incomplete, because tracking is off or more
+	/// changes piled up than it keeps; the consumer then has to check every entity itself.
+	/// </summary>
+	public bool DrainTransformChanges(List<Entity> entities)
+	{
+		ArgumentNullException.ThrowIfNull(entities);
+		entities.Clear();
+		if (_transformChanges is null)
+		{
+			return false;
+		}
+
+		var complete = _transformChangesOverflowed == false;
+		entities.AddRange(_transformChanges);
+		_transformChanges.Clear();
+		_transformChangesOverflowed = false;
+		return complete;
+	}
+
+	private void RecordTransformChange(Entity entity)
+	{
+		if (_transformChanges is null || _transformChangesOverflowed)
+		{
+			return;
+		}
+
+		if (_transformChanges.Count >= MaxTransformChanges)
+		{
+			_transformChanges.Clear();
+			_transformChangesOverflowed = true;
+			return;
+		}
+
+		_transformChanges.Add(entity);
+	}
 
     public void Translate(Entity e, Vector3 translation, bool isLocal = false)
     {

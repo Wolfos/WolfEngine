@@ -355,6 +355,60 @@ public class WorldTests
 		Assert.That(world.HasComponent<DirtyWorldTransform>(entity), Is.True);
 	}
 
+	[Test]
+	public void DrainTransformChanges_IsIncompleteUntilTrackingStarts()
+	{
+		var world = new World(WorldTag.All);
+		var entity = world.CreateEntity("Mover", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		world.SetLocalPosition(entity, Vector3.One);
+		var changes = new List<Entity>();
+
+		Assert.That(world.DrainTransformChanges(changes), Is.False);
+		Assert.That(changes, Is.Empty);
+	}
+
+	[Test]
+	public void DrainTransformChanges_ReturnsLocalAndWorldChangesOnce()
+	{
+		var world = new World(WorldTag.All);
+		var moved = world.CreateEntity("Moved", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		var resolved = world.CreateEntity("Resolved", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		var still = world.CreateEntity("Still", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		world.TrackTransformChanges();
+		var changes = new List<Entity>();
+
+		world.SetLocalPosition(moved, Vector3.One);
+		world.MarkWorldTransformChanged(resolved);
+
+		Assert.That(world.DrainTransformChanges(changes), Is.True);
+		Assert.That(changes, Does.Contain(moved));
+		Assert.That(changes, Does.Contain(resolved));
+		Assert.That(changes, Does.Not.Contain(still));
+
+		Assert.That(world.DrainTransformChanges(changes), Is.True);
+		Assert.That(changes, Is.Empty);
+	}
+
+	[Test]
+	public void DrainTransformChanges_ReportsOverflowAsIncompleteThenRecovers()
+	{
+		var world = new World(WorldTag.All);
+		var entity = world.CreateEntity("Busy", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		world.TrackTransformChanges();
+		var changes = new List<Entity>();
+
+		for (var i = 0; i <= 1 << 16; i++)
+		{
+			world.MarkWorldTransformChanged(entity);
+		}
+
+		Assert.That(world.DrainTransformChanges(changes), Is.False);
+
+		world.MarkWorldTransformChanged(entity);
+		Assert.That(world.DrainTransformChanges(changes), Is.True);
+		Assert.That(changes, Is.EqualTo(new[] { entity }));
+	}
+
     [Test]
     public void View_WithTwoComponents_ReturnsIntersection()
     {

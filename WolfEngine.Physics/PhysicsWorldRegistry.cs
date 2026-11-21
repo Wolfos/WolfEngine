@@ -201,6 +201,10 @@ internal sealed class PhysicsWorldState : IDisposable
 	public int LastMeshColliderCount { get; set; } = -1;
 	public int LastTerrainColliderCount { get; set; } = -1;
 
+	/// <summary>Reused by each sync for the entities the world recorded as moved, and which of them it has seen.</summary>
+	public List<Entity> MovedEntitiesScratch { get; } = new();
+	public HashSet<Entity> MovedEntitiesVisitedScratch { get; } = new();
+
 	public void Dispose()
 	{
 		foreach (var vehicleState in VehiclesByEntity.Values)

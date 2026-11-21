@@ -1185,6 +1185,75 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	public void TryRaycast_SeesStaticColliderMovedSinceTheLastStep()
+	{
+		var world = new World(WorldTag.Game);
+		var box = world.CreateEntity("Box", Matrix4x4.Identity);
+		world.AddComponent(box, BoxCollider.CreateDefault());
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		// Gameplay moves it, then queries before the next physics step.
+		world.SetLocalPosition(box, new Vector3(4.0f, 0.0f, 0.0f));
+
+		Assert.That(
+			system.TryRaycast(world, new Vector3(4.0f, 5.0f, 0.0f), new Vector3(0.0f, -10.0f, 0.0f), out var hit),
+			Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(box));
+		Assert.That(
+			system.TryRaycast(world, new Vector3(0.0f, 5.0f, 0.0f), new Vector3(0.0f, -10.0f, 0.0f), out _),
+			Is.False);
+	}
+
+	[Test]
+	public void TryCastCapsule_CostDoesNotGrowWithUnmovedStaticBodies()
+	{
+		// A query only has to bring moved bodies up to date. Before, it re-checked every body: about 22 times slower
+		// with 1300 static boxes than with 50. The bound is loose so timing noise cannot fail it.
+		var few = MeasureCastMicroseconds(staticBoxes: 50);
+		var many = MeasureCastMicroseconds(staticBoxes: 1300);
+
+		Assert.That(many, Is.LessThan(few * 4.0),
+			$"A capsule cast took {many:F1} us with 1300 static boxes against {few:F1} us with 50.");
+	}
+
+	private static double MeasureCastMicroseconds(int staticBoxes)
+	{
+		var world = new World(WorldTag.Game);
+		for (var i = 0; i < staticBoxes; i++)
+		{
+			var position = new Vector3(i % 40 * 4.0f, 0.0f, i / 40 * 4.0f + 10.0f);
+			var box = world.CreateEntity($"Box {i}", Matrix4x4.CreateTranslation(position));
+			world.AddComponent(box, BoxCollider.CreateDefault());
+		}
+
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+		var capsule = CapsuleCollider.CreateDefault();
+		for (var i = 0; i < 20; i++)
+		{
+			system.TryCastCapsule(world, Vector3.Zero, Quaternion.Identity, capsule, Vector3.UnitX, out _);
+		}
+
+		// The fastest of several batches, so a stall in one batch does not count.
+		const int batches = 5;
+		const int castsPerBatch = 40;
+		var best = double.MaxValue;
+		for (var batch = 0; batch < batches; batch++)
+		{
+			var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+			for (var i = 0; i < castsPerBatch; i++)
+			{
+				system.TryCastCapsule(world, Vector3.Zero, Quaternion.Identity, capsule, Vector3.UnitX, out _);
+			}
+
+			best = Math.Min(best, stopwatch.Elapsed.TotalMilliseconds * 1000.0 / castsPerBatch);
+		}
+
+		return best;
+	}
+
+	[Test]
 	[Explicit("Exercises native Jolt terrain heightfield integration.")]
 	public void TryRaycast_ReturnsClosestHitWhenBoxIsAboveTerrain()
 	{

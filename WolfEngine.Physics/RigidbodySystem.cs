@@ -542,7 +542,15 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 		return false;
 	}
 
-	private static void SynchronizeBodies(World world, PhysicsWorldState state, float fixedDeltaTime)
+	/// <summary>
+	/// Brings the physics bodies up to date with their entities: creates bodies for new colliders, removes stale
+	/// ones, and applies changes to the rest. Checking a body for changes means comparing its collider, rigidbody
+	/// and filter against what was last applied, which adds up across a scene. With
+	/// <paramref name="movedBodiesOnly"/>, only bodies the world recorded as moved are checked, so the cost follows
+	/// what changed rather than the size of the scene. Queries use that: they see anything moved or removed since
+	/// the last step, while other edits, such as a collider's size, reach them on the next physics step.
+	/// </summary>
+	private static void SynchronizeBodies(World world, PhysicsWorldState state, float fixedDeltaTime, bool movedBodiesOnly = false)
 	{
 		using (FrameProfiler.Instance.Measure("Physics.SyncBodies"))
 		{
@@ -556,31 +564,34 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 
 			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.ApplyChanges"))
 			{
-				foreach (var entry in state.BodiesByEntity)
+				// Always drained, so a full sync also clears what it has just covered.
+				world.TrackTransformChanges();
+				var movedEntities = state.MovedEntitiesScratch;
+				var movedEntitiesComplete = world.DrainTransformChanges(movedEntities);
+
+				// More bodies than colliders means some collider went away, and only checking every body finds which.
+				var checkEveryBody = movedBodiesOnly == false ||
+				                     movedEntitiesComplete == false ||
+				                     state.BodiesByEntity.Count > totalColliderCount;
+				if (checkEveryBody)
 				{
-					var entity = entry.Key;
-					var bodyState = entry.Value;
-					if (bodyState.Owner != PhysicsBodyOwner.Rigidbody)
+					foreach (var entry in state.BodiesByEntity)
 					{
-						continue;
+						SyncBody(world, state, entry.Key, entry.Value, fixedDeltaTime, movedBodiesOnly, bodiesToRemove);
 					}
-
-					var transformMoved = HasTransformMoved(world, entity, bodyState);
-					var currentDefinition = CreateDefinition(world, entity, bodyState.Definition, transformMoved);
-					if (currentDefinition is null)
+				}
+				else
+				{
+					var visited = state.MovedEntitiesVisitedScratch;
+					visited.Clear();
+					for (var i = 0; i < movedEntities.Count; i++)
 					{
-						bodiesToRemove.Add(entity);
-						continue;
+						var entity = movedEntities[i];
+						if (visited.Add(entity) && state.BodiesByEntity.TryGetValue(entity, out var bodyState))
+						{
+							SyncBody(world, state, entity, bodyState, fixedDeltaTime, movedBodiesOnly, bodiesToRemove);
+						}
 					}
-
-					if (RequiresBodyRecreation(bodyState.Definition, currentDefinition.Value))
-					{
-						bodiesToRemove.Add(entity);
-						continue;
-					}
-
-					ApplyBodyChanges(state, bodyState, currentDefinition.Value, fixedDeltaTime);
-					bodyState.SyncedTransformVersion = GetTransformVersion(world, entity);
 				}
 			}
 
@@ -656,6 +667,37 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 				}
 			}
 		}
+	}
+
+	private static void SyncBody(
+		World world,
+		PhysicsWorldState state,
+		Entity entity,
+		PhysicsBodyState bodyState,
+		float fixedDeltaTime,
+		bool movedBodiesOnly,
+		List<Entity> bodiesToRemove)
+	{
+		if (bodyState.Owner != PhysicsBodyOwner.Rigidbody)
+		{
+			return;
+		}
+
+		var transformMoved = HasTransformMoved(world, entity, bodyState);
+		if (movedBodiesOnly && transformMoved == false && IsLocalTransformDirty(world, entity) == false)
+		{
+			return;
+		}
+
+		var currentDefinition = CreateDefinition(world, entity, bodyState.Definition, transformMoved);
+		if (currentDefinition is null || RequiresBodyRecreation(bodyState.Definition, currentDefinition.Value))
+		{
+			bodiesToRemove.Add(entity);
+			return;
+		}
+
+		ApplyBodyChanges(state, bodyState, currentDefinition.Value, fixedDeltaTime);
+		bodyState.SyncedTransformVersion = GetTransformVersion(world, entity);
 	}
 
 	private static void CreateBodiesForView<TCollider>(
@@ -1175,6 +1217,12 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 		return GetTransformVersion(world, entity) != bodyState.SyncedTransformVersion;
 	}
 
+	/// <summary>Whether its local transform was set since the transform pass last resolved it.</summary>
+	private static bool IsLocalTransformDirty(World world, Entity entity)
+	{
+		return world.HasComponent<LocalTransform>(entity) && world.GetComponent<LocalTransform>(entity).IsDirty;
+	}
+
 	private static uint GetTransformVersion(World world, Entity entity)
 	{
 		return world.HasComponent<WorldTransform>(entity)
@@ -1474,7 +1522,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 	private static PhysicsWorldState EnsureWorldStateForQueries(World world)
 	{
 		var state = PhysicsWorldRegistry.GetOrCreateWorldState(world);
-		SynchronizeBodies(world, state, 0.0f);
+		SynchronizeBodies(world, state, 0.0f, movedBodiesOnly: true);
 		return state;
 	}
 
