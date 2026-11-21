@@ -141,5 +141,9 @@ public sealed class ColliderGizmoDrawerTests
 		{
 			LineCount++;
 		}
+
+		public void DrawIcon(Vector3 positionWorld, nint textureId, float sizePixels, ColorRGBA tint)
+		{
+		}
 	}
 }

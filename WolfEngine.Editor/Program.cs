@@ -152,6 +152,9 @@ public static class Program
 		services.AddSingleton<BoxColliderGizmoDrawer>();
 		services.AddSingleton<SphereColliderGizmoDrawer>();
 		services.AddSingleton<CapsuleColliderGizmoDrawer>();
+		services.AddSingleton<LightGizmoDrawer>();
+		services.AddSingleton<CameraGizmoDrawer>();
+		services.AddSingleton<EntityIconGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();
 		services.AddSingleton<SceneSelectionController>();
 		services.AddSingleton<SelectionOutlineController>();

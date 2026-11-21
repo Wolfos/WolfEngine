@@ -5,6 +5,7 @@ using WolfEngine.Mathematics;
 
 namespace WolfEngine;
 
+[DefaultIcon("camera")]
 public struct Camera: IEntityComponent, IJsonOnDeserialized
 {
 	public const float DefaultNearPlane = 0.03f;

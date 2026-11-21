@@ -18,6 +18,7 @@ public class SceneWindow: EditorWindow
     private readonly IWorldManager _worldManager;
     private readonly IEditorPlaySession _playSession;
     private readonly IGizmoLineRenderer _gizmoLineRenderer;
+    private readonly EntityIconGizmoDrawer _entityIconGizmoDrawer;
     private readonly IIconManager _icons;
     private readonly TerrainToolSettingsOverlay _terrainToolSettingsOverlay;
     private readonly TerrainToolController _terrainToolController;
@@ -39,6 +40,7 @@ public class SceneWindow: EditorWindow
         IWorldManager worldManager,
         IEditorPlaySession playSession,
         IGizmoLineRenderer gizmoLineRenderer,
+        EntityIconGizmoDrawer entityIconGizmoDrawer,
         IIconManager icons,
         TerrainToolSettingsOverlay terrainToolSettingsOverlay,
         TerrainToolController terrainToolController,
@@ -50,6 +52,7 @@ public class SceneWindow: EditorWindow
         _worldManager = worldManager;
         _playSession = playSession;
         _gizmoLineRenderer = gizmoLineRenderer;
+        _entityIconGizmoDrawer = entityIconGizmoDrawer;
         _icons = icons;
         _terrainToolSettingsOverlay = terrainToolSettingsOverlay;
         _terrainToolController = terrainToolController;
@@ -110,6 +113,9 @@ public class SceneWindow: EditorWindow
 
             ImGui.EndCombo();
         }
+
+        ImGui.SameLine();
+        DrawGizmosMenu();
 
         ImGui.SameLine();
         var renderState = _viewportStateBus.GetRenderState(RenderViewId.Primary);
@@ -266,6 +272,7 @@ public class SceneWindow: EditorWindow
         if (ShouldDrawGizmos(_playSession.State))
         {
             _worldManager.OnDrawGizmos(WorldTag.Authoring);
+            _entityIconGizmoDrawer.Draw(scene);
 
             switch (_sceneToolMode)
             {
@@ -293,6 +300,23 @@ public class SceneWindow: EditorWindow
         }
 
         ImGui.End();
+    }
+
+    private static void DrawGizmosMenu()
+    {
+        ImGui.SetNextItemWidth(80.0f);
+        if (ImGui.BeginCombo("##Gizmos", "Gizmos") == false)
+        {
+            return;
+        }
+
+        var showEntityIcons = EditorPreferences.GetShowEntityIconGizmos();
+        if (ImGui.Checkbox("Entity icons", ref showEntityIcons))
+        {
+            EditorPreferences.SetShowEntityIconGizmos(showEntityIcons);
+        }
+
+        ImGui.EndCombo();
     }
 
     internal static bool ShouldDrawGizmos(EditorPlayState playState)

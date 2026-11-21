@@ -54,6 +54,8 @@ public class WolfEngineEditor
 	private readonly BoxColliderGizmoDrawer _boxColliderGizmoDrawer;
 	private readonly SphereColliderGizmoDrawer _sphereColliderGizmoDrawer;
 	private readonly CapsuleColliderGizmoDrawer _capsuleColliderGizmoDrawer;
+	private readonly LightGizmoDrawer _lightGizmoDrawer;
+	private readonly CameraGizmoDrawer _cameraGizmoDrawer;
 	private readonly IProjectTypeCatalog _typeCatalog;
 	private readonly List<ISystem> _registeredGameplaySystems = new();
 	private readonly FixedStepAccumulator _physicsAccumulator = new(PhysicsFixedDeltaTime, PhysicsMaxStepsPerFrame);
@@ -104,6 +106,8 @@ public class WolfEngineEditor
 		BoxColliderGizmoDrawer boxColliderGizmoDrawer,
 		SphereColliderGizmoDrawer sphereColliderGizmoDrawer,
 		CapsuleColliderGizmoDrawer capsuleColliderGizmoDrawer,
+		LightGizmoDrawer lightGizmoDrawer,
+		CameraGizmoDrawer cameraGizmoDrawer,
 		IAudioRuntime audioRuntime,
 		ILogService logService,
 		IServiceProvider serviceProvider)
@@ -137,6 +141,8 @@ public class WolfEngineEditor
 		_boxColliderGizmoDrawer = boxColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(boxColliderGizmoDrawer));
 		_sphereColliderGizmoDrawer = sphereColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(sphereColliderGizmoDrawer));
 		_capsuleColliderGizmoDrawer = capsuleColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(capsuleColliderGizmoDrawer));
+		_lightGizmoDrawer = lightGizmoDrawer ?? throw new ArgumentNullException(nameof(lightGizmoDrawer));
+		_cameraGizmoDrawer = cameraGizmoDrawer ?? throw new ArgumentNullException(nameof(cameraGizmoDrawer));
 		_audioRuntime = audioRuntime ?? throw new ArgumentNullException(nameof(audioRuntime));
 		_gameplayExceptionReporter = new GameplayExceptionReporter(logService);
 		_worldManager.SetExceptionHandler(SystemExecutionGroup.Gameplay, _gameplayExceptionReporter.ReportSystem);
@@ -200,6 +206,8 @@ public class WolfEngineEditor
 		_worldManager.AddSystem(_boxColliderGizmoDrawer);
 		_worldManager.AddSystem(_sphereColliderGizmoDrawer);
 		_worldManager.AddSystem(_capsuleColliderGizmoDrawer);
+		_worldManager.AddSystem(_lightGizmoDrawer);
+		_worldManager.AddSystem(_cameraGizmoDrawer);
 		
 		var sun = authoringWorld.CreateEntity("Sun");
 		var light = new Light
