@@ -993,6 +993,17 @@ public sealed partial class EditorRemoteAutomationController
 				subAssetSearch);
 		}, cancellationToken);
 
+	public Task<EntitiesWindowState> GetEntitiesWindowStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => ((EntitiesWindow)_windows.Get(EditorWindowIds.Entities).Window).GetState(), cancellationToken);
+
+	public Task SetEntitiesSearchAsync(string search, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			_workspaces.Activate(EditorWorkspaceService.SceneWorkspaceId);
+			_workspaces.OpenWindow(EditorWindowIds.Entities);
+			((EntitiesWindow)_windows.Get(EditorWindowIds.Entities).Window).SetSearch(search);
+		}, cancellationToken);
+
 	public Task SetEditorKeyAsync(string key, bool pressed, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{

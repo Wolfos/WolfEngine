@@ -273,6 +273,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 			subAssetSearch,
 			cancellationToken);
 
+	public Task<UI.EntitiesWindowState> GetEntitiesWindowStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetEntitiesWindowStateAsync(cancellationToken);
+
+	public Task SetEntitiesSearchAsync(string search, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEntitiesSearchAsync(search, cancellationToken);
+
 	public Task SetEditorKeyAsync(string key, bool pressed, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetEditorKeyAsync(key, pressed, cancellationToken);
 

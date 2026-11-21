@@ -247,6 +247,18 @@ public sealed class EditorAutomationTools
 		return $"Asset browser: {folderPath}.";
 	}
 
+	[McpServerTool(Name = "get_entities_window_state"), Description("Read the Entities window's search text and the rows it drew in the last frame, in tree order, with whether each row matches the search. Ancestors shown only to place a match report false.")]
+	public Task<UI.EntitiesWindowState> GetEntitiesWindowState(CancellationToken cancellationToken) =>
+		_controller.GetEntitiesWindowStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "set_entities_search"), Description("Set the Entities window's search text, as typing into its search bar does. An empty string clears the search. Changes UI state only.")]
+	public async Task<string> SetEntitiesSearch(string search, CancellationToken cancellationToken)
+	{
+		await _controller.SetEntitiesSearchAsync(search, cancellationToken).ConfigureAwait(false);
+
+		return $"Entities search: '{search}'.";
+	}
+
 	[McpServerTool(Name = "set_editor_key"), Description("Press or release an ImGui editor key such as LeftShift, Space, Escape or Delete. Does not inject gameplay input.")]
 	public async Task<string> SetEditorKey(string key, bool pressed, CancellationToken cancellationToken)
 	{
