@@ -6,6 +6,7 @@ using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using ImGuiNET;
 using WolfEngine.Audio;
+using WolfEngine.Dialogue;
 
 namespace WolfEngine.Runtime;
 
@@ -105,6 +106,8 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 		var value = entry.Kind switch
 		{
 			nameof(AssetType.Texture2D) when expectedType == typeof(Texture) => CreateTexture(id, stream),
+			nameof(AssetType.YarnProject) when expectedType == typeof(YarnProject) =>
+				YarnProjectArtifact.Read(stream, id.ToString("D")),
 			nameof(AssetType.ColorLookupTable) when expectedType == typeof(ColorLookupTable) =>
 				ColorLookupTable.Create($"lut:{id:D}", ColorLookupTableArtifactSerializer.Read(stream), _textures),
 			nameof(AssetType.ComputeShader) when expectedType == typeof(global::WolfEngine.Rendering.ComputeShader) =>

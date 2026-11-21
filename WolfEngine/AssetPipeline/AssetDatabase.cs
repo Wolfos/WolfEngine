@@ -27,7 +27,9 @@ public enum AssetType
 	AnimationSequence, // Reserved for legacy source migration; sequences are no longer runtime assets.
 	BoneMask,
 	Font,
-	ComputeShader
+	ComputeShader,
+	YarnProject,
+	YarnScript
 }
 
 public enum MaterialAssetType

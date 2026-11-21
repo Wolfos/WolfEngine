@@ -10,6 +10,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
+    <ProjectReference Include="..\WolfEngine.Dialogue\WolfEngine.Dialogue.csproj" />
     <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
     <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
     <ProjectReference Include="..\WolfEngine.Physics\WolfEngine.Physics.csproj" />

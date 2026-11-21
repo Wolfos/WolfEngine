@@ -11,6 +11,7 @@
 		<ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
 		<ProjectReference Include="..\WolfEngine.Physics\WolfEngine.Physics.csproj" />
 		<ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
+		<ProjectReference Include="..\WolfEngine.Dialogue\WolfEngine.Dialogue.csproj" />
 	</ItemGroup>
 
 </Project>

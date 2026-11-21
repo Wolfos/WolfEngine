@@ -7,6 +7,7 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Audio;
+using WolfEngine.Dialogue;
 using WolfEngine.Editor.Tooling;
 using WolfEngine.Editor.Tooling.Splash;
 using WolfEngine.Rendering.Splash;
@@ -254,6 +255,11 @@ public static class GameBuilder
 			path = asset.Artifacts.FirstOrDefault(item => item.Kind == AudioAssetConstants.RuntimeArtifactKind)?.RelativePath
 			       ?? throw new InvalidOperationException($"Audio clip '{asset.Id}' has no runtime artifact.");
 		}
+		else if (asset.Type == AssetType.YarnProject)
+		{
+			path = asset.Artifacts.FirstOrDefault(item => item.Kind == YarnProjectConstants.RuntimeArtifactKind)?.RelativePath
+			       ?? throw new InvalidOperationException($"Yarn project '{asset.Name}' has no runtime artifact. Reimport it.");
+		}
 		else if (asset.Type == AssetType.ColorLookupTable)
 		{
 			path = asset.Artifacts.FirstOrDefault(item => item.Kind == ColorLookupTableArtifactSerializer.ArtifactKind)?.RelativePath
@@ -372,6 +378,7 @@ public static class GameBuilder
 		AssetType.AudioClip => "audio",
 		AssetType.Font => "fonts",
 		AssetType.ComputeShader => "shaders",
+		AssetType.YarnProject => "dialogue",
 		_ => throw new InvalidOperationException($"Asset type '{type}' has no cooked pack class.")
 	};
 

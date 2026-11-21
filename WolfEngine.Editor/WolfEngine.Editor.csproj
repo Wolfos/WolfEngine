@@ -23,6 +23,12 @@
 	  <ProjectReference Include="..\WolfEngine.Editor.Tooling\WolfEngine.Editor.Tooling.csproj" />
       <ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
       <ProjectReference Include="..\WolfEngine.UI\WolfEngine.UI.csproj" />
+      <ProjectReference Include="..\WolfEngine.Dialogue\WolfEngine.Dialogue.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <!-- Compiles .yarnproject sources at import. Games get only the runtime, through WolfEngine.Dialogue. -->
+      <PackageReference Include="YarnSpinner.Compiler" Version="3.3.1" />
     </ItemGroup>
 
     <ItemGroup>

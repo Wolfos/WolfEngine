@@ -1,6 +1,7 @@
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Audio;
+using WolfEngine.Dialogue;
 using ImGuiNET;
 
 namespace WolfEngine.Editor.UI;
@@ -377,4 +378,80 @@ public sealed class AudioEditorAssetHandler : IEditorAssetHandler
 		: "Audio";
 	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
 	public void DrawEditor(AssetDatabaseEntry asset) => _editor.Draw(asset);
+}
+
+public sealed class YarnProjectEditorAssetHandler : IEditorAssetHandler
+{
+	public AssetType AssetType => AssetType.YarnProject;
+	public string DisplayName => "Yarn Project";
+	public string ThumbnailLabel => "YARN";
+
+	public string GetSubtitle(AssetDatabaseEntry asset) => asset.TryGetSummary<YarnProjectSummary>(out var summary)
+		? $"Dialogue | {summary.NodeNames.Length} node{(summary.NodeNames.Length == 1 ? "" : "s")} | {summary.LineCount} line{(summary.LineCount == 1 ? "" : "s")}"
+		: "Dialogue";
+
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
+
+	public void DrawEditor(AssetDatabaseEntry asset)
+	{
+		ImGui.TextUnformatted(GetSubtitle(asset));
+		if (!asset.TryGetSummary<YarnProjectSummary>(out var summary)) return;
+
+		ImGui.SeparatorText("Nodes");
+		foreach (var node in summary.NodeNames) ImGui.BulletText(node);
+
+		ImGui.SeparatorText("Sources");
+		foreach (var source in summary.SourceFiles) ImGui.BulletText(source);
+
+		ImGui.TextDisabled("Edit the .yarn files in VS Code with the Yarn Spinner extension; compile errors show in the log.");
+	}
+}
+
+public sealed class YarnScriptEditorAssetHandler : IEditorAssetHandler
+{
+	private readonly IEditorProjectService _project;
+
+	public YarnScriptEditorAssetHandler(IEditorProjectService project) => _project = project;
+
+	public AssetType AssetType => AssetType.YarnScript;
+	public string DisplayName => "Yarn Script";
+	public string ThumbnailLabel => "YARN";
+
+	public string GetSubtitle(AssetDatabaseEntry asset) => asset.TryGetSummary<YarnScriptSummary>(out var summary)
+		? $"Yarn script | {summary.NodeNames.Length} node{(summary.NodeNames.Length == 1 ? "" : "s")}"
+		: "Yarn script";
+
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
+
+	public void DrawEditor(AssetDatabaseEntry asset)
+	{
+		ImGui.TextUnformatted(GetSubtitle(asset));
+		if (asset.TryGetSummary<YarnScriptSummary>(out var summary))
+		{
+			ImGui.SeparatorText("Nodes");
+			foreach (var node in summary.NodeNames) ImGui.BulletText(node);
+		}
+
+		ImGui.TextDisabled("Compiled by its .yarnproject. Double-click to open it in your default editor.");
+	}
+
+	/// <summary>Opens the script in the app the system associates with .yarn files, such as VS Code.</summary>
+	public bool TryOpen(AssetDatabaseEntry asset)
+	{
+		if (_project.ProjectRootPath is not { } root || string.IsNullOrWhiteSpace(asset.RelativeSourcePath)) return false;
+
+		var path = Path.Combine(root, asset.RelativeSourcePath.Replace('/', Path.DirectorySeparatorChar));
+		if (!File.Exists(path)) return false;
+
+		try
+		{
+			System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+			return true;
+		}
+		catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
+		{
+			Console.Error.WriteLine($"Could not open '{asset.RelativeSourcePath}': {exception.Message}");
+			return false;
+		}
+	}
 }

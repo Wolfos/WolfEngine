@@ -33,6 +33,8 @@ public static class AssetImporterIds
 	public const string SceneCell = "scene-cell";
 	public const string EditorPrefab = "editor-prefab";
 	public const string AnimationClip = "animation-clip";
+	public const string YarnProject = "yarn-project";
+	public const string YarnScript = "yarn-script";
 }
 
 public sealed class AssetSourceMetaFile

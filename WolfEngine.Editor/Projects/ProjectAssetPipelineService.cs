@@ -10,6 +10,7 @@ using WolfEngine.Editor.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Audio;
+using WolfEngine.Dialogue;
 using ImportImageLoader = WolfEngine.Importing.IImageLoader;
 
 namespace WolfEngine.Editor.Projects;
@@ -657,7 +658,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		metadata.ImporterVersion = importer.Version;
 
-		var sourceContentHash = AssetHashing.ComputeFileHash(absoluteSourcePath);
+		var sourceContentHash = importer.ComputeSourceContentHash(absoluteSourcePath);
 		var sourceInfo = new FileInfo(absoluteSourcePath);
 
 		var sourceRecord = new AssetSourceRecord
@@ -874,6 +875,98 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					MetadataJson = AssetPipelineSerialization.Serialize(result.Header)
 				}
 			],
+			Dependencies = []
+		};
+	}
+
+	private ImportGraph ImportYarnProjectSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var name = Path.GetFileNameWithoutExtension(relativeSourcePath);
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.YarnProject, name);
+		var relativeArtifactPath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ArtifactsFolderName,
+			nodeId.ToString("D"),
+			YarnProjectConstants.RuntimeArtifactFileName));
+		var absoluteArtifactPath = GetAbsolutePath(projectRootPath, relativeArtifactPath);
+		LogLibraryBuildStage($"Compiling Yarn project '{relativeSourcePath}'.");
+		var summary = YarnProjectCompiler.Compile(projectRootPath, absoluteSourcePath, absoluteArtifactPath);
+		var info = new FileInfo(absoluteArtifactPath);
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.YarnProject,
+					NodeKey = "main",
+					Name = name,
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(summary)
+				}
+			],
+			Artifacts =
+			[
+				new AssetArtifactRecord
+				{
+					NodeId = nodeId,
+					ArtifactKey = "runtime-yarn-project",
+					Kind = YarnProjectConstants.RuntimeArtifactKind,
+					Target = YarnProjectConstants.RuntimeArtifactTarget,
+					RelativePath = relativeArtifactPath,
+					ContentHash = AssetHashing.ComputeFileHash(absoluteArtifactPath),
+					ByteSize = info.Length,
+					ChunkIndex = 0,
+					ChunkCount = 1
+				}
+			],
+			Dependencies = []
+		};
+	}
+
+	/// <summary>
+	/// Lists a <c>.yarn</c> file in Assets. It has no artifact of its own: its <c>.yarnproject</c> compiles it together with
+	/// the project's other scripts.
+	/// </summary>
+	private ImportGraph ImportYarnScriptSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var name = Path.GetFileNameWithoutExtension(relativeSourcePath);
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.YarnScript, name);
+		var summary = YarnScriptSummary.Parse(File.ReadAllText(absoluteSourcePath));
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.YarnScript,
+					NodeKey = "main",
+					Name = name,
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(summary)
+				}
+			],
+			Artifacts = [],
 			Dependencies = []
 		};
 	}
@@ -1985,12 +2078,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return false;
 		}
 
-		if (fileSizeChanged == false && lastWriteChanged == false)
+		if (fileSizeChanged == false && lastWriteChanged == false && importer.HasExternalInputs == false)
 		{
 			return true;
 		}
 
-		var sourceContentHash = AssetHashing.ComputeFileHash(absoluteSourcePath);
+		var sourceContentHash = importer.ComputeSourceContentHash(absoluteSourcePath);
 		if (string.Equals(sourceContentHash, existingSource.SourceContentHash, StringComparison.Ordinal) == false)
 		{
 			return false;
@@ -2428,6 +2521,19 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				AudioAssetConstants.IsSupportedSource,
 				() => AssetPipelineSerialization.Serialize(new AudioImportSettings()),
 				ImportAudioSource),
+			new AssetImporterDescriptor(
+				AssetImporterIds.YarnProject,
+				1,
+				YarnProjectConstants.IsSupportedSource,
+				() => "{}",
+				ImportYarnProjectSource,
+				YarnProjectCompiler.ComputeInputsHash),
+			new AssetImporterDescriptor(
+				AssetImporterIds.YarnScript,
+				1,
+				YarnProjectConstants.IsScriptSource,
+				() => "{}",
+				ImportYarnScriptSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ColorLookupTable,
 				1,
@@ -3176,13 +3282,20 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		private readonly Func<string, bool> _canImport;
 		private readonly Func<string> _createDefaultSettingsJson;
 		private readonly ImportSourceDelegate _import;
+		private readonly Func<string, string>? _computeInputsHash;
 
+		/// <param name="computeInputsHash">
+		/// For a source that compiles other files with it, such as a Yarn project and its <c>.yarn</c> files: hashes the
+		/// source together with everything it reads, from its absolute path. The source is then rechecked on every
+		/// refresh, because its own size and write time don't change when only an input does.
+		/// </param>
 		public AssetImporterDescriptor(
 			string id,
 			int version,
 			Func<string, bool> canImport,
 			Func<string> createDefaultSettingsJson,
-			ImportSourceDelegate import)
+			ImportSourceDelegate import,
+			Func<string, string>? computeInputsHash = null)
 		{
 			Id = id;
 			Version = version;
@@ -3190,13 +3303,21 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			_createDefaultSettingsJson = createDefaultSettingsJson ??
 			                             throw new ArgumentNullException(nameof(createDefaultSettingsJson));
 			_import = import ?? throw new ArgumentNullException(nameof(import));
+			_computeInputsHash = computeInputsHash;
 		}
 
 		public string Id { get; }
 		public int Version { get; }
 
+		/// <summary>Whether the source reads other files, so only <see cref="ComputeSourceContentHash"/> can tell it changed.</summary>
+		public bool HasExternalInputs => _computeInputsHash is not null;
+
 		public bool CanImport(string relativePath) => _canImport(relativePath);
 		public string CreateDefaultSettingsJson() => _createDefaultSettingsJson();
+
+		/// <summary>The hash a source's staleness is judged by: its own content, plus its inputs' when it has any.</summary>
+		public string ComputeSourceContentHash(string absoluteSourcePath) =>
+			_computeInputsHash?.Invoke(absoluteSourcePath) ?? AssetHashing.ComputeFileHash(absoluteSourcePath);
 
 		public ImportGraph Import(
 			string projectRootPath,

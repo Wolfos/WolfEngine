@@ -44,6 +44,8 @@ internal static class AssetBrowserAppearance
 			AssetType.ColorLookupTable => new("Color lookup", "asset_gradient", new(0.95f, 0.65f, 0.73f, 1.0f)),
 			AssetType.Font => new("Font", "asset_text_fields", new(0.83f, 0.65f, 0.91f, 1.0f)),
 			AssetType.ComputeShader => new("Compute shader", "asset_code", new(0.48f, 0.78f, 0.91f, 1.0f)),
+			AssetType.YarnProject => new("Dialogue", "asset_description", new(0.95f, 0.75f, 0.46f, 1.0f)),
+			AssetType.YarnScript => new("Yarn script", "asset_text_fields", new(0.95f, 0.75f, 0.46f, 1.0f)),
 			_ => new("Data asset", "asset_description", new(0.93f, 0.77f, 0.49f, 1.0f))
 		};
 	}

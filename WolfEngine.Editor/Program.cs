@@ -6,6 +6,7 @@ using WolfEngine.Editor.UI;
 using WolfEngine.Physics;
 using WolfEngine.Editor.Automation;
 using WolfEngine.Audio;
+using WolfEngine.Dialogue;
 using WolfEngine.Logging;
 
 namespace WolfEngine.Editor;
@@ -94,6 +95,7 @@ public static class Program
 		services.AddSingleton<IAudioService>(provider => provider.GetRequiredService<AudioService>());
 		services.AddSingleton<IAudioRuntime>(provider => provider.GetRequiredService<AudioService>());
 		services.AddSingleton<IAudioClipRuntimeResolver, AudioClipRuntimeResolver>();
+		services.AddSingleton<IYarnProjectRuntimeResolver, YarnProjectRuntimeResolver>();
 		services.AddSingleton<IMaterialImporter, MaterialImporter>();
 		services.AddSingleton<IDataAssetRuntimeResolver, DataAssetRuntimeResolver>();
 		services.AddSingleton<ITerrainAssetRuntimeResolver, TerrainAssetRuntimeResolver>();
@@ -127,6 +129,8 @@ public static class Program
                 provider.GetRequiredService<AnimationWindow>(), provider.GetRequiredService<IEditorProjectService>(), provider.GetRequiredService<IProjectAssetPipelineService>()));
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, AudioEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, YarnProjectEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, YarnScriptEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, ColorLookupTableEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, ComputeShaderEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, FontEditorAssetHandler>();
