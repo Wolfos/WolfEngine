@@ -1,5 +1,6 @@
 import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
+import "../Common/sky_sampling.slang";
 import "../Common/draw_data.slang";
 import "ddgi_visibility.slang";
 import "ddgi_sample.slang";
@@ -36,7 +37,7 @@ cbuffer BindlessHandles : register(b0)
     uint probeActivityWriteHandle;
     uint probeActivityMarksHandle;
     uint probeRelocationDecisionHandle;
-    uint environmentHandle;
+    SkyEnvironment skyEnvironment;
     uint samplerHandle;
     uint errorTextureHandle;
 };
@@ -546,5 +547,5 @@ float3 DdgiRelocationRayDirection(uint rayIndex)
 
 float3 DdgiSampleSky(float3 direction)
 {
-    return SampleEnvironment(environmentHandle, samplerHandle, direction) * IBL_EXPOSURE;
+    return SampleSky(skyEnvironment, samplerHandle, direction, 0.0f) * IBL_EXPOSURE;
 }

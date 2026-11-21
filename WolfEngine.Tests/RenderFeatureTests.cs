@@ -197,7 +197,7 @@ public sealed class RenderFeatureTests
 			Bloom = new BloomConfig { Enabled = false }
 		};
 		builder.BeginRenderFeatures(registry);
-		builder.BeginFrame(new Int2(16, 16), new Int2(16, 16), default, true, false, Vector3.UnitY, 1.0f, config, Vector3.Zero);
+		builder.BeginFrame(new Int2(16, 16), new Int2(16, 16), default, true, false, Vector3.UnitY, Vector3.One, config, Vector3.Zero);
 		builder.SetViewRenderFeatures([new RenderFeatureFrame(feature, feature.CreateFrame())]);
 	}
 

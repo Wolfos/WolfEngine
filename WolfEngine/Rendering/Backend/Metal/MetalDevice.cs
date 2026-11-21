@@ -391,12 +391,19 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		var textureDescriptor = new MTLTextureDescriptor();
 		textureDescriptor.Width = (ulong)descriptor.Width;
 		textureDescriptor.Height = (ulong)descriptor.Height;
-		textureDescriptor.Depth = (ulong)descriptor.Depth;
+		// A Metal cube is one texture of depth one whose six faces are slices; the descriptor's depth of six
+		// only counts those faces.
+		textureDescriptor.Depth = descriptor.Dimension == TextureDimension.Cube
+			? 1UL
+			: (ulong)descriptor.Depth;
 		textureDescriptor.MipmapLevelCount = (ulong)descriptor.MipLevels;
 		textureDescriptor.PixelFormat = ToPixelFormat(descriptor.Format, descriptor.IsSrgb);
-		textureDescriptor.TextureType = descriptor.Dimension == TextureDimension.Texture3D
-			? MTLTextureType.Type3D
-			: MTLTextureType.Type2D;
+		textureDescriptor.TextureType = descriptor.Dimension switch
+		{
+			TextureDimension.Texture3D => MTLTextureType.Type3D,
+			TextureDimension.Cube => MTLTextureType.Cube,
+			_ => MTLTextureType.Type2D
+		};
 		textureDescriptor.StorageMode = MTLStorageMode.Shared;
 		textureDescriptor.Usage = ToUsage(descriptor.Usage);
 
@@ -935,6 +942,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		TextureFormat.Bc3Unorm => isSrgb ? MTLPixelFormat.BC3RGBAsRGB : MTLPixelFormat.BC3RGBA,
 		TextureFormat.Bc4Unorm => MTLPixelFormat.BC4RUnorm,
 		TextureFormat.Bc5Unorm => MTLPixelFormat.BC5RGUnorm,
+		TextureFormat.Bc6hUfloat => MTLPixelFormat.BC6HRGBUfloat,
 		TextureFormat.Astc4x4Unorm => isSrgb ? MTLPixelFormat.ASTC4x4sRGB : MTLPixelFormat.ASTC4x4LDR,
 		TextureFormat.Unknown => MTLPixelFormat.Invalid,
 		_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported texture format.")

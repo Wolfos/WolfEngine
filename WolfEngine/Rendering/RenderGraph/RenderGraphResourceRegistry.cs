@@ -829,9 +829,7 @@ public sealed class RenderGraphResourceRegistry
 		{
 			var width = Math.Max(descriptor.Width >> mip, 1);
 			var height = Math.Max(descriptor.Height >> mip, 1);
-			var depth = descriptor.Dimension == TextureDimension.Texture3D
-				? Math.Max(descriptor.Depth >> mip, 1)
-				: 1;
+			var depth = TextureFormatUtilities.GetMipSliceCount(descriptor.Dimension, descriptor.Depth, mip);
 			total += TextureFormatUtilities.GetMipDataSize(descriptor.Format, width, height, depth);
 		}
 

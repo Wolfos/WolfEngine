@@ -2,6 +2,7 @@ using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Clouds;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 
@@ -59,6 +60,7 @@ internal sealed class RenderViewState
 	{
 		ReleaseTemporalHistoryResources();
 		ReleaseFogHistoryResources();
+		ReleaseCloudHistoryResources();
 		ReleaseColorPyramidResources();
 		ReleaseDdgiHistoryResources();
 		ReleaseFinalGatherHistoryResources();
@@ -133,7 +135,7 @@ internal sealed class RenderViewState
 	public RenderViewResources FrameResources;
 
 	/// <summary>This view's procedural sky, built from its own sun and sky settings.</summary>
-	public readonly ProceduralSky Sky = new();
+	public readonly ViewSky Sky = new();
 	public readonly List<RenderGraphFrameBuilder.SceneDebugViewRegistration> SceneDebugViews = [];
 	public SceneDebugViewOption[] SceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
 	public string RequestedSceneDebugViewId = SceneDebugViewIds.FinalColor;
@@ -206,6 +208,13 @@ internal sealed class RenderViewState
 	// Volumetric fog froxel history. The grid is camera-frustum aligned, so it is per view by construction.
 	public readonly ViewHistory<FogHistoryShape> FogHistory = new("Volumetric fog", 1, DescribeFogHistory);
 
+	/// <summary>
+	/// Accumulated volumetric clouds at their trace resolution, one slot per <see cref="CloudHistorySlot"/>, and the
+	/// wind and environment state the view's clouds carry between frames.
+	/// </summary>
+	public readonly ViewHistory<CloudHistoryShape> CloudHistory = new("Volumetric clouds", CloudHistorySlot.Count, DescribeCloudHistory);
+	public readonly ViewClouds Clouds = new();
+
 	// Colour pyramid.
 	public IGfxDevice? ColorPyramidDevice;
 	public GraphicsBackendKind? ColorPyramidBackendKind;
@@ -246,6 +255,7 @@ internal sealed class RenderViewState
 		TemporalHistory.Complete(resources);
 		Fsr3History.Complete(resources);
 		FogHistory.Complete(resources);
+		CloudHistory.Complete(resources);
 		DdgiHistory.Complete(resources);
 		FinalGatherHistory.Complete(resources);
 	}
@@ -259,6 +269,7 @@ internal sealed class RenderViewState
 		TemporalHistory.Invalidate();
 		Fsr3History.Invalidate();
 		FogHistory.Invalidate();
+		CloudHistory.Invalidate();
 		FinalGatherHistory.Invalidate();
 	}
 
@@ -275,6 +286,7 @@ internal sealed class RenderViewState
 	{
 		ReleaseTemporalHistoryResources();
 		ReleaseFogHistoryResources();
+		ReleaseCloudHistoryResources();
 		ReleaseColorPyramidResources();
 		ReleaseDdgiHistoryResources();
 		ReleaseFinalGatherHistoryResources();
@@ -293,6 +305,11 @@ internal sealed class RenderViewState
 	public void ReleaseFogHistoryResources()
 	{
 		FogHistory.Release();
+	}
+
+	public void ReleaseCloudHistoryResources()
+	{
+		CloudHistory.Release();
 	}
 
 	public void ReleaseColorPyramidResources()
@@ -398,6 +415,11 @@ internal sealed class RenderViewState
 		return RenderGraphFrameBuilder.CreateFogTextureDescriptor(shape.Grid);
 	}
 
+	private static TextureDescriptor DescribeCloudHistory(CloudHistoryShape shape, int slot)
+	{
+		return CloudViewResources.DescribeTraceTexture(shape.TraceSize, CloudHistorySlot.GetFormat(slot));
+	}
+
 	private static TextureDescriptor DescribeFinalGatherHistory(Int2 traceSize, int slot)
 	{
 		return new TextureDescriptor(
@@ -457,6 +479,31 @@ internal readonly record struct Fsr3HistoryShape(Int2 RenderSize, Int2 UpscaleSi
 /// rescales the slices, so last frame's froxels no longer line up.
 /// </summary>
 internal readonly record struct FogHistoryShape(Int3 Grid, float MaxDistance);
+
+/// <summary>
+/// What volumetric cloud history is only valid against. Quality changes the trace resolution, and with it which
+/// scene pixel each trace pixel stands for.
+/// </summary>
+internal readonly record struct CloudHistoryShape(Int2 TraceSize, CloudQuality Quality);
+
+/// <summary>The slots of <see cref="RenderViewState.CloudHistory"/>.</summary>
+internal static class CloudHistorySlot
+{
+	/// <summary>rgb: radiance with aerial perspective folded in. a: transmittance.</summary>
+	public const int Color = 0;
+
+	/// <summary>x: cloud distance (km). y: the scene distance the trace pixel was clipped to (km).</summary>
+	public const int Depth = 1;
+
+	public const int Count = 2;
+
+	public static TextureFormat GetFormat(int slot)
+	{
+		return slot == Depth
+			? TextureFormat.Rg16Float
+			: TextureFormat.Rgba16Float;
+	}
+}
 
 /// <summary>
 /// What the DDGI probe volume is only valid against. The anchor and spacing do not change the textures, but they

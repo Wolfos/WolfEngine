@@ -19,10 +19,12 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 	private static readonly ShaderProgramId Bc4Shader = EngineShaderPrograms.Bc4Compress;
 	private static readonly ShaderProgramId Bc3StitchShader = EngineShaderPrograms.Bc3Stitch;
 	private static readonly ShaderProgramId Bc5StitchShader = EngineShaderPrograms.Bc5Stitch;
+	private static readonly ShaderProgramId Bc6hShader = EngineShaderPrograms.Bc6hCompress;
 	private const string Bc1EntryPoint = "CompressBc1";
 	private const string Bc4EntryPoint = "CompressBc4";
 	private const string Bc3StitchEntryPoint = "StitchBc3";
 	private const string Bc5StitchEntryPoint = "StitchBc5";
+	private const string Bc6hEntryPoint = "CompressBc6h";
 	private const uint Bc1RefinementPasses = 2;
 
 	private readonly IRenderer _renderer;
@@ -36,10 +38,12 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 	private IGfxPipeline? _bc4Pipeline;
 	private IGfxPipeline? _bc3StitchPipeline;
 	private IGfxPipeline? _bc5StitchPipeline;
+	private IGfxPipeline? _bc6hPipeline;
 	private ComputeThreadGroupSize _bc1ThreadGroupSize;
 	private ComputeThreadGroupSize _bc4ThreadGroupSize;
 	private ComputeThreadGroupSize _bc3StitchThreadGroupSize;
 	private ComputeThreadGroupSize _bc5StitchThreadGroupSize;
+	private ComputeThreadGroupSize _bc6hThreadGroupSize;
 	private IGfxBuffer? _bc1Match5Buffer;
 	private IGfxBuffer? _bc1Match6Buffer;
 
@@ -56,17 +60,27 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 	public Texture CompileBcTexture(ImportedTexture importedTexture)
 	{
 		ArgumentNullException.ThrowIfNull(importedTexture.MipLevels);
-		if (TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture.Semantic, out var format) == false)
+		if (TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture, out var format) == false)
 		{
 			throw new InvalidOperationException(
 				$"GPU BC compression does not support texture semantic '{importedTexture.Semantic}' for '{importedTexture.NameOrPath}'.");
 		}
 
-		var rawMips = TextureMipGenerator.GenerateRgba32MipChain(importedTexture.MipLevels[0]);
+		var rawMips = TextureMipGenerator.GenerateMipChain(importedTexture.MipLevels[0], importedTexture.Format);
 		var compressedMips = new TextureMipData[rawMips.Length];
 		for (var i = 0; i < rawMips.Length; i++)
 		{
-			compressedMips[i] = CompressMip(rawMips[i], format);
+			compressedMips[i] = CompressSlices(rawMips[i], importedTexture.Format, format);
+		}
+
+		if (importedTexture.Dimension == TextureDimension.Cube)
+		{
+			return Texture.CreateCube(
+				importedTexture.NameOrPath,
+				importedTexture.Width,
+				importedTexture.IsSrgb,
+				format,
+				compressedMips);
 		}
 
 		return new Texture(
@@ -76,6 +90,30 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 			importedTexture.IsSrgb,
 			format,
 			compressedMips);
+	}
+
+	/// <summary>
+	/// Compresses each slice of a mip on its own, since a block never spans two cube faces, and stores the
+	/// compressed slices back to back in the same order.
+	/// </summary>
+	private TextureMipData CompressSlices(TextureMipData mip, TextureFormat sourceFormat, TextureFormat format)
+	{
+		if (mip.Depth == 1)
+		{
+			return CompressMip(mip, format);
+		}
+
+		var sourceSliceLength = TextureFormatUtilities.GetMipDataSize(sourceFormat, mip.Width, mip.Height);
+		var compressedSliceLength = TextureFormatUtilities.GetMipDataSize(format, mip.Width, mip.Height);
+		var result = new byte[compressedSliceLength * mip.Depth];
+		for (var slice = 0; slice < mip.Depth; slice++)
+		{
+			var sliceData = mip.Data.AsSpan(slice * sourceSliceLength, sourceSliceLength).ToArray();
+			var compressed = CompressMip(new TextureMipData(mip.Width, mip.Height, sliceData), format);
+			compressed.Data.CopyTo(result, slice * compressedSliceLength);
+		}
+
+		return new TextureMipData(mip.Width, mip.Height, result, mip.Depth);
 	}
 
 	private TextureMipData CompressMip(TextureMipData mip, TextureFormat format)
@@ -110,6 +148,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 				TextureFormat.Bc4Unorm => ExecuteSinglePassCompression(device, mip, inputBuffer, format, 0),
 				TextureFormat.Bc5Unorm => ExecuteBc5Compression(device, mip, inputBuffer),
 				TextureFormat.Bc3Unorm => ExecuteBc3Compression(device, mip, inputBuffer),
+				TextureFormat.Bc6hUfloat => ExecuteBc6hCompression(device, mip, inputBuffer),
 				_ => throw new InvalidOperationException($"Unsupported GPU BC format '{format}'.")
 			};
 		}
@@ -223,6 +262,45 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 		}
 	}
 
+	/// <summary>Compresses half-float RGBA texels, two uints per pixel, to BC6H in a single dispatch.</summary>
+	private TextureMipData ExecuteBc6hCompression(IGfxDevice device, TextureMipData mip, IGfxBuffer inputBuffer)
+	{
+		var blockWidth = GetBlockCount(mip.Width);
+		var blockHeight = GetBlockCount(mip.Height);
+		var outputSizeInBytes = TextureFormatUtilities.GetMipDataSize(TextureFormat.Bc6hUfloat, mip.Width, mip.Height);
+		var outputBuffer = device.CreateBuffer(new BufferDescriptor((ulong)outputSizeInBytes, BufferUsage.Structured, BufferFlags.AllowUnorderedAccess));
+		var readbackBuffer = device.CreateBuffer(new BufferDescriptor((ulong)outputSizeInBytes, BufferUsage.Staging));
+
+		try
+		{
+			var commandList = device.BeginCompute();
+			try
+			{
+				var constants = new PrimitiveCompressionConstants((uint)mip.Width, (uint)mip.Height, (uint)blockWidth, 0u);
+				commandList.BindPipeline(_bc6hPipeline!);
+				commandList.SetComputeConstants(11, StructAsBytes(ref constants));
+				commandList.SetComputeBuffer(0, inputBuffer);
+				commandList.SetComputeBuffer(1, outputBuffer);
+				commandList.Dispatch(
+					(uint)DivideRoundUp(blockWidth, (int)_bc6hThreadGroupSize.X),
+					(uint)DivideRoundUp(blockHeight, (int)_bc6hThreadGroupSize.Y),
+					1);
+				commandList.CopyBuffer(outputBuffer, 0, readbackBuffer, 0, (ulong)outputSizeInBytes);
+			}
+			finally
+			{
+				device.Submit(commandList);
+			}
+
+			return ReadBackMip(device, readbackBuffer, mip.Width, mip.Height, outputSizeInBytes, TextureFormat.Bc6hUfloat);
+		}
+		finally
+		{
+			DisposeIfNeeded(outputBuffer);
+			DisposeIfNeeded(readbackBuffer);
+		}
+	}
+
 	private TextureMipData ReadBackMip(IGfxDevice device, IGfxBuffer readbackBuffer, int width, int height, int outputSizeInBytes, TextureFormat format)
 	{
 		device.WaitForIdle();
@@ -310,6 +388,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 				_bc4Pipeline = null;
 				_bc3StitchPipeline = null;
 				_bc5StitchPipeline = null;
+				_bc6hPipeline = null;
 				_cachedBackend = null;
 			}
 
@@ -318,6 +397,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 			    _bc4Pipeline is not null &&
 			    _bc3StitchPipeline is not null &&
 			    _bc5StitchPipeline is not null &&
+			    _bc6hPipeline is not null &&
 			    _bc1Match5Buffer is not null &&
 			    _bc1Match6Buffer is not null)
 			{
@@ -328,6 +408,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 			(_bc4Pipeline, _bc4ThreadGroupSize) = CreatePipeline(device, Bc4Shader, Bc4EntryPoint, "texture-import-bc4");
 			(_bc3StitchPipeline, _bc3StitchThreadGroupSize) = CreatePipeline(device, Bc3StitchShader, Bc3StitchEntryPoint, "texture-import-bc3-stitch");
 			(_bc5StitchPipeline, _bc5StitchThreadGroupSize) = CreatePipeline(device, Bc5StitchShader, Bc5StitchEntryPoint, "texture-import-bc5-stitch");
+			(_bc6hPipeline, _bc6hThreadGroupSize) = CreatePipeline(device, Bc6hShader, Bc6hEntryPoint, "texture-import-bc6h");
 
 			_bc1Match5Buffer = CreateLookupBuffer(device, Match5TableBytes);
 			_bc1Match6Buffer = CreateLookupBuffer(device, Match6TableBytes);

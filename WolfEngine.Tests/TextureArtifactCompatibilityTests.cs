@@ -20,17 +20,22 @@ public sealed class TextureArtifactCompatibilityTests
 			Assert.That((int)TextureFormat.Bc1Unorm, Is.EqualTo(13));
 			Assert.That((int)TextureFormat.Bc4Unorm, Is.EqualTo(14));
 			Assert.That((int)TextureFormat.R32Uint, Is.EqualTo(15));
+			Assert.That((int)TextureFormat.Rg32Float, Is.EqualTo(16));
+			Assert.That((int)TextureFormat.Bc6hUfloat, Is.EqualTo(17));
+			Assert.That((int)TextureDimension.Texture2D, Is.EqualTo(0));
+			Assert.That((int)TextureDimension.Texture3D, Is.EqualTo(1));
+			Assert.That((int)TextureDimension.Cube, Is.EqualTo(2));
 		});
 	}
 
 	[Test]
-	public void Read_ExistingBc1Artifact_DoesNotBecomeAstc()
+	public void Read_ExistingVersion2Bc1Artifact_DoesNotBecomeAstc()
 	{
 		using var stream = new MemoryStream();
 		using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
 		{
 			writer.Write("WETX"u8);
-			writer.Write(TextureArtifactSerializer.CurrentVersion);
+			writer.Write(2); // Version 2 has no dimension; libraries and packs written before cubes still load.
 			writer.Write(4);
 			writer.Write(4);
 			writer.Write((byte)1);
@@ -48,5 +53,6 @@ public sealed class TextureArtifactCompatibilityTests
 		var texture = TextureArtifactSerializer.Read(stream, "legacy-bc1");
 
 		Assert.That(texture.Format, Is.EqualTo(TextureFormat.Bc1Unorm));
+		Assert.That(texture.Dimension, Is.EqualTo(TextureDimension.Texture2D));
 	}
 }

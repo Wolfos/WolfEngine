@@ -56,6 +56,13 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken = default) =>
 		_controller.InstantiateModelAsync(assetName, x, y, z, uniformScale, cancellationToken);
 
+	[McpServerTool(Name = "save_entity_as_prefab"), Description("Save an authoring-scene entity and its children as a prefab asset, through the same path as the hierarchy's Save as Prefab. The prefab is written to disk immediately; the authoring scene itself is not saved.")]
+	public Task<SavedPrefabResult> SaveEntityAsPrefab(
+		[Description("Persistent entity GUID, such as the rootEntityId from instantiate_model.")] string entityId,
+		[Description("Project-relative folder for the prefab, such as 'Assets/Prefabs'. The file is named after the entity.")] string folderPath,
+		CancellationToken cancellationToken = default) =>
+		_controller.SaveEntityAsPrefabAsync(entityId, folderPath, cancellationToken);
+
 	[McpServerTool(Name = "play_vfx"), Description("Play a VFX asset in the running Play-mode scene, at a world position or attached to an entity with that position as its offset. Effects advance with the gameplay world, so enter Play mode first.")]
 	public Task<VfxPlayResult> PlayVfx(
 		[Description("Project-relative path of the VFX data asset, such as 'Assets/VFX/SwordImpact.data.json'.")] string assetPath,
@@ -65,6 +72,15 @@ public sealed class EditorAutomationTools
 		[Description("Optional persistent entity GUID to attach the effect to.")] string? attachToEntityId = null,
 		CancellationToken cancellationToken = default) =>
 		_controller.PlayVfxAsync(assetPath, new System.Numerics.Vector3(x, y, z), attachToEntityId, cancellationToken);
+
+	[McpServerTool(Name = "sample_texture"), Description("Load an imported texture's runtime artifact for the running backend onto the GPU and sample it in a compute shader through the bindless GetTexture or GetTextureCube accessor. Returns RGBA per coordinate as the GPU decodes it, which checks block compression, cube face layout and the bindless view for the texture's dimension. Reports the texture's dimension, format and size.")]
+	public Task<TextureSampleResult> SampleTexture(
+		[Description("Project-relative path of the texture's source file, such as 'Assets/Skies/Sunset.hdr'.")] string assetPath,
+		[Description("Coordinates to sample: a direction [x, y, z] for a cube texture, or a UV [u, v] for a 2D texture. At most 4096.")] float[][] coordinates,
+		[Description("Mip level to sample.")] float mipLevel = 0.0f,
+		[Description("Sample with bilinear filtering instead of point sampling.")] bool linearFilter = false,
+		CancellationToken cancellationToken = default) =>
+		_controller.SampleTextureAsync(assetPath, coordinates, mipLevel, linearFilter, cancellationToken);
 
 	[McpServerTool(Name = "get_vfx_state"), Description("Report the Play-mode world's playing effects and how much of its particle pool they reserve.")]
 	public Task<VfxStateResult> GetVfxState(CancellationToken cancellationToken) =>
@@ -231,6 +247,18 @@ public sealed class EditorAutomationTools
 		return $"Asset browser: {folderPath}.";
 	}
 
+	[McpServerTool(Name = "get_entities_window_state"), Description("Read the Entities window's search text and the rows it drew in the last frame, in tree order, with whether each row matches the search. Ancestors shown only to place a match report false.")]
+	public Task<UI.EntitiesWindowState> GetEntitiesWindowState(CancellationToken cancellationToken) =>
+		_controller.GetEntitiesWindowStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "set_entities_search"), Description("Set the Entities window's search text, as typing into its search bar does. An empty string clears the search. Changes UI state only.")]
+	public async Task<string> SetEntitiesSearch(string search, CancellationToken cancellationToken)
+	{
+		await _controller.SetEntitiesSearchAsync(search, cancellationToken).ConfigureAwait(false);
+
+		return $"Entities search: '{search}'.";
+	}
+
 	[McpServerTool(Name = "set_editor_key"), Description("Press or release an ImGui editor key such as LeftShift, Space, Escape or Delete. Does not inject gameplay input.")]
 	public async Task<string> SetEditorKey(string key, bool pressed, CancellationToken cancellationToken)
 	{
@@ -346,6 +374,77 @@ public sealed class EditorAutomationTools
 		[Description("Whether to sharpen TAA with CAS after tonemapping. Does not affect FSR3 RCAS.")] bool casSharpening = true,
 		CancellationToken cancellationToken = default) =>
 		_controller.SetAntiAliasingAsync(mode, enabled, casSharpening, cancellationToken);
+
+	[McpServerTool(Name = "set_sky"), Description("Switch the active scene's sky mode and its settings in memory without saving its render config asset. Settings left out keep their current values.")]
+	public Task<string> SetSky(
+		[Description("Procedural, Hdri or Gradient.")] string mode,
+		[Description("Project-relative source path of an imported HDR texture to use in HDRI mode, such as 'Assets/Skies/Sunset.hdr'.")] string? hdriAssetPath = null,
+		[Description("Clear the HDRI texture, which draws a black sky in HDRI mode.")] bool clearHdri = false,
+		[Description("HDRI rotation about the vertical axis, in degrees.")] float? hdriRotationDegrees = null,
+		[Description("HDRI radiance multiplier.")] float? hdriIntensity = null,
+		[Description("Gradient sky color multiplier.")] float? gradientIntensity = null,
+		[Description("Procedural sky: Mie scattering at sea level, 1/km.")] float? mieScatteringScale = null,
+		[Description("Procedural sky: Mie absorption at sea level, 1/km.")] float? mieAbsorptionScale = null,
+		[Description("Procedural sky: Mie anisotropy, 0 to just under 1.")] float? mieAnisotropy = null,
+		[Description("Procedural sky: Rayleigh scattering of the strongest channel at sea level, 1/km.")] float? rayleighScatteringScale = null,
+		[Description("Procedural sky: grey ground albedo, 0 to 1.")] float? groundAlbedo = null,
+		[Description("Sky lighting quality, High or Low. Left out keeps the current one.")] string? lightingQuality = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetSkyAsync(
+			mode,
+			hdriAssetPath,
+			clearHdri,
+			hdriRotationDegrees,
+			hdriIntensity,
+			gradientIntensity,
+			new ProceduralSkyOverrides(mieScatteringScale, mieAbsorptionScale, mieAnisotropy, rayleighScatteringScale, groundAlbedo),
+			lightingQuality,
+			cancellationToken);
+
+	[McpServerTool(Name = "set_clouds"), Description("Change the active scene's volumetric clouds in memory without saving its render config asset. Clouds only render with the Procedural sky. Settings left out keep their current values.")]
+	public Task<string> SetClouds(
+		[Description("Draw the cloud layer.")] bool? enabled = null,
+		[Description("Fraction of the sky covered, 0 to 1.")] float? coverage = null,
+		[Description("Density multiplier, 0 to 4.")] float? density = null,
+		[Description("Cloud base altitude above the ground, in metres.")] float? cloudBaseAltitude = null,
+		[Description("Layer thickness, in metres.")] float? cloudThickness = null,
+		[Description("Cloud size multiplier, 0.1 to 10.")] float? shapeScale = null,
+		[Description("Edge erosion strength, 0 to 1.")] float? detailStrength = null,
+		[Description("Compass direction the wind blows toward, in degrees: 0 toward +Z, 90 toward +X.")] float? windDirection = null,
+		[Description("Wind speed, in metres per second.")] float? windSpeed = null,
+		[Description("Skylight multiplier, 0 to 4.")] float? ambientStrength = null,
+		[Description("Multiple-scattering strength, 0 to 1.")] float? multipleScattering = null,
+		[Description("Low, Medium or High.")] string? quality = null,
+		[Description("Whether clouds shadow the sun.")] bool? castShadows = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetCloudsAsync(
+			new CloudOverrides(
+				enabled,
+				coverage,
+				density,
+				cloudBaseAltitude,
+				cloudThickness,
+				shapeScale,
+				detailStrength,
+				windDirection,
+				windSpeed,
+				ambientStrength,
+				multipleScattering,
+				quality,
+				castShadows),
+			cancellationToken);
+
+	[McpServerTool(Name = "set_sun"), Description("Point the active scene's first directional light at a sun elevation and azimuth in memory, without saving the scene. Azimuth 0 puts the sun toward +Z and 90 toward +X.")]
+	public Task<string> SetSun(
+		[Description("Sun elevation above the horizon, in degrees. Negative is below the horizon.")] float elevationDegrees,
+		[Description("Sun azimuth in degrees: 0 toward +Z, 90 toward +X.")] float azimuthDegrees = 0.0f,
+		[Description("Light intensity. Left out keeps the light's own.")] float? intensity = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetSunAsync(elevationDegrees, azimuthDegrees, intensity, cancellationToken);
+
+	[McpServerTool(Name = "set_tonemapping_exposure"), Description("Set the active scene's tonemapping exposure in memory without saving its render config.")]
+	public Task<string> SetTonemappingExposure(float exposure, CancellationToken cancellationToken) =>
+		_controller.SetTonemappingExposureAsync(exposure, cancellationToken);
 
 	[McpServerTool(Name = "set_fsr3_settings"), Description("Set the active scene's FSR3 settings in memory without saving its render config: alpha-test reactivity, the transparency and composition mask scale, and RCAS sharpening.")]
 	public Task<string> SetFsr3Settings(

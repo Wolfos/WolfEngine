@@ -94,6 +94,9 @@ public sealed class SceneDrawData
 	/// </summary>
 	public float MaterialMipBias { get; init; }
 
+	/// <summary>How this view's sky dims and tints its directional lights.</summary>
+	public SunLightAttenuation SunLightAttenuation { get; init; }
+
 	public IReadOnlyList<LightPacket> Lights { get; }
 
 	public IReadOnlyList<DecalProjectorPacket> Decals { get; }

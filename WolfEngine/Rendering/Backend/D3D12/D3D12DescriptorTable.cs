@@ -34,12 +34,14 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 	private BindlessFallbackHandles _fallbackHandles;
 	private uint _fallbackVolumeTextureIndex;
 	private uint _fallbackRwVolumeTextureIndex;
+	private uint _fallbackCubeTextureIndex;
 
 	private ComPtr<ID3D12Resource> _countsBuffer;
 	private uint* _countsMapped;
 
 	private ComPtr<ID3D12Resource> _fallbackTexture;
 	private ComPtr<ID3D12Resource> _fallbackVolumeTexture;
+	private ComPtr<ID3D12Resource> _fallbackCubeTexture;
 	private ComPtr<ID3D12Resource> _fallbackConstantBuffer;
 	private ComPtr<ID3D12Resource> _fallbackUpload;
 
@@ -299,6 +301,12 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 			_fallbackVolumeTexture = default;
 		}
 
+		if (_fallbackCubeTexture.Handle is not null)
+		{
+			_fallbackCubeTexture.Dispose();
+			_fallbackCubeTexture = default;
+		}
+
 		if (_fallbackConstantBuffer.Handle is not null)
 		{
 			_fallbackConstantBuffer.Dispose();
@@ -396,6 +404,24 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 		var volumeUav = AllocateUnorderedAccessView(fallbackVolume);
 		_fallbackVolumeTextureIndex = (uint)volumeSrv.Index;
 		_fallbackRwVolumeTextureIndex = (uint)volumeUav.Index;
+
+		// GetTextureCube cannot fall back to SRV 0 either: a 2D view read through the TextureCube alias
+		// is undefined. A six-layer 1x1 texture viewed as a cube backs it instead.
+		var cubeDesc = textureDesc with
+		{
+			DepthOrArraySize = TextureDescriptor.CubeFaceCount,
+			Flags = ResourceFlags.None
+		};
+		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
+			&heapProps,
+			HeapFlags.None,
+			in cubeDesc,
+			ResourceStates.Common,
+			null,
+			out _fallbackCubeTexture));
+		var fallbackCube = new FallbackTextureResource(_fallbackCubeTexture.Handle, TextureDimension.Cube);
+		var cubeSrv = AllocateShaderResourceView(fallbackCube);
+		_fallbackCubeTextureIndex = (uint)cubeSrv.Index;
 	}
 
 	private void CreateFallbackConstantBuffer()
@@ -493,6 +519,7 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 		_countsMapped[2] = (uint)_samplerCount;
 		_countsMapped[3] = _fallbackVolumeTextureIndex;
 		_countsMapped[4] = _fallbackRwVolumeTextureIndex;
+		_countsMapped[5] = _fallbackCubeTextureIndex;
 	}
 
 	private static int AllocateIndex(Stack<int> freeList, ref int count, int maxCount, string kind)
@@ -551,6 +578,23 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 				ResourceMinLODClamp = 0.0f
 			};
 			return volumeDesc;
+		}
+
+		if (texture.Descriptor.Dimension == TextureDimension.Cube)
+		{
+			var cubeDesc = new ShaderResourceViewDesc
+			{
+				Shader4ComponentMapping = defaultMapping,
+				ViewDimension = SrvDimension.Texturecube,
+				Format = format
+			};
+			cubeDesc.Anonymous.TextureCube = new TexcubeSrv
+			{
+				MostDetailedMip = 0,
+				MipLevels = (uint)texture.Descriptor.MipLevels,
+				ResourceMinLODClamp = 0.0f
+			};
+			return cubeDesc;
 		}
 
 		var desc = new ShaderResourceViewDesc
@@ -655,11 +699,27 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 
 		public string? Name => "__BindlessFallbackTexture";
 
-		public TextureDescriptor Descriptor => _dimension == TextureDimension.Texture3D
-			? new TextureDescriptor(1, 1, TextureFormat.Rgba8Unorm, TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				dimension: TextureDimension.Texture3D)
-			: new TextureDescriptor(1, 1, TextureFormat.Rgba8Unorm,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess);
+		public TextureDescriptor Descriptor => _dimension switch
+		{
+			TextureDimension.Texture3D => new TextureDescriptor(
+				1,
+				1,
+				TextureFormat.Rgba8Unorm,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				dimension: TextureDimension.Texture3D),
+			TextureDimension.Cube => new TextureDescriptor(
+				1,
+				1,
+				TextureFormat.Rgba8Unorm,
+				TextureUsage.ShaderResource,
+				dimension: TextureDimension.Cube,
+				depth: TextureDescriptor.CubeFaceCount),
+			_ => new TextureDescriptor(
+				1,
+				1,
+				TextureFormat.Rgba8Unorm,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess)
+		};
 
 		public DescriptorHandle ShaderResourceView => DescriptorHandle.Invalid;
 		public DescriptorHandle DepthShaderResourceView => DescriptorHandle.Invalid;

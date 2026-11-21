@@ -1,16 +1,20 @@
 import "ibl_common.slang";
 import "../Common/constants.slang";
 import "../Common/common_bindless.slang";
+import "../Common/common_lighting.slang";
+import "../Common/sky_sampling.slang";
 
 cbuffer BindlessHandles : register(b0)
 {
-    uint environmentHandle;
+    SkyEnvironment skyEnvironment;
     uint prefilterHandle;
     uint samplerHandle;
     uint width;
     uint height;
     uint sliceCount;
     uint sliceHeight;
+    /// GGX samples per texel, set by the sky's lighting quality.
+    uint sampleCount;
 };
 
 float3 ImportanceSampleGGX(float2 xi, float roughness, float3 n)
@@ -34,34 +38,37 @@ void IblPrefilterCSMain(uint3 id : SV_DispatchThreadID)
     if (id.x >= width || id.y >= height)
         return;
 
-    Texture2D<float4> environmentTex = GetTexture(environmentHandle);
     RWTexture2D<float4> prefilterOut = GetRWTexture(prefilterHandle);
-    SamplerState linearClamp = GetSampler(samplerHandle);
 
     uint slice = sliceHeight == 0 ? 0 : id.y / sliceHeight;
     slice = min(slice, sliceCount - 1);
     float localV = sliceHeight == 0 ? 0.0f : (float(id.y % sliceHeight) + 0.5f) / float(sliceHeight);
 
     float2 baseUV = float2((float(id.x) + 0.5f) / float(width), localV);
-    float3 R = EquirectToDir(baseUV);
+    // Stored the way consumers read it, at DirToEnvUV of the reflection direction.
+    float3 R = EnvUVToDir(baseUV);
     float roughness = sliceCount > 1 ? float(slice) / float(sliceCount - 1) : 0.0f;
 
-    const uint SAMPLE_COUNT = 128;
     float3 prefiltered = 0.0f;
     float totalWeight = 0.0f;
 
     [loop]
-    for (uint i = 0; i < SAMPLE_COUNT; ++i)
+    for (uint i = 0; i < sampleCount; ++i)
     {
-        float2 xi = Hammersley(i, SAMPLE_COUNT);
+        float2 xi = Hammersley(i, sampleCount);
         float3 H = ImportanceSampleGGX(xi, roughness, R);
         float3 L = normalize(reflect(-R, H));
 
         float NdotL = saturate(dot(R, L));
         if (NdotL > 0.0f)
         {
-            float2 envUV = DirToEquirect(L);
-            float3 sampleCol = environmentTex.SampleLevel(linearClamp, envUV, 0.0f).rgb;
+            // With N = V = R, the density of L is D(NdotH) / 4. Alpha is kept above zero so the mirror slice
+            // gets a large density, and with it the top mip, instead of D's zero.
+            float NdotH = saturate(dot(R, H));
+            float alpha = max(roughness * roughness, 1e-3f);
+            float pdf = DistributionGGX(NdotH, alpha) * 0.25f;
+            float lod = SkyFilteredLod(skyEnvironment, L, pdf, sampleCount);
+            float3 sampleCol = SampleSky(skyEnvironment, samplerHandle, L, lod);
             prefiltered += sampleCol * NdotL;
             totalWeight += NdotL;
         }

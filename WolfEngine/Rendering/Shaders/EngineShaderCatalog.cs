@@ -37,7 +37,14 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId DeferredLighting = Id("deferred-lighting");
 	public static readonly ShaderProgramId ClusteredLighting = Id("clustered-lighting");
 	public static readonly ShaderProgramId ImGui = Id("imgui");
-	public static readonly ShaderProgramId ProceduralSkybox = Id("procedural-skybox");
+	public static readonly ShaderProgramId AtmosphereTransmittanceLut = Id("atmosphere-transmittance-lut");
+	public static readonly ShaderProgramId AtmosphereMultipleScatteringLut = Id("atmosphere-multiple-scattering-lut");
+	public static readonly ShaderProgramId AtmosphereSkyViewLut = Id("atmosphere-sky-view-lut");
+	public static readonly ShaderProgramId AtmosphereAerialPerspective = Id("atmosphere-aerial-perspective");
+	public static readonly ShaderProgramId AtmosphereEnvironment = Id("atmosphere-environment");
+	public static readonly ShaderProgramId CloudNoise = Id("cloud-noise");
+	public static readonly ShaderProgramId Clouds = Id("clouds");
+	public static readonly ShaderProgramId GradientSky = Id("gradient-sky");
 	public static readonly ShaderProgramId IblBrdfLut = Id("ibl-brdf-lut");
 	public static readonly ShaderProgramId IblIrradiance = Id("ibl-irradiance");
 	public static readonly ShaderProgramId IblPrefilter = Id("ibl-prefilter");
@@ -81,6 +88,8 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId Bc4Compress = Id("bc4-compress");
 	public static readonly ShaderProgramId Bc3Stitch = Id("bc3-stitch");
 	public static readonly ShaderProgramId Bc5Stitch = Id("bc5-stitch");
+	public static readonly ShaderProgramId Bc6hCompress = Id("bc6h-compress");
+	public static readonly ShaderProgramId TextureSampleProbe = Id("texture-sample-probe");
 	public static readonly ShaderProgramId TerrainSharedGBuffer = Id("terrain-shared-gbuffer");
 	public static readonly ShaderProgramId DebugPrimitiveForward = Id("debug-primitive-forward");
 	public static readonly ShaderProgramId DebugPrimitiveGBuffer = Id("debug-primitive-gbuffer");
@@ -119,7 +128,14 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.DeferredLighting, "Lighting/deferred_lighting.compute.slang"),
 			D(EngineShaderPrograms.ClusteredLighting, "Lighting/clustered_lighting.compute.slang"),
 			D(EngineShaderPrograms.ImGui, "Ui/imgui.slang"),
-			D(EngineShaderPrograms.ProceduralSkybox, "Ibl/procedural_skybox.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereTransmittanceLut, "Atmosphere/atmosphere_transmittance_lut.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereMultipleScatteringLut, "Atmosphere/atmosphere_multiple_scattering_lut.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereSkyViewLut, "Atmosphere/atmosphere_sky_view_lut.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereAerialPerspective, "Atmosphere/atmosphere_aerial_perspective.compute.slang"),
+			D(EngineShaderPrograms.AtmosphereEnvironment, "Atmosphere/atmosphere_environment.compute.slang"),
+			D(EngineShaderPrograms.CloudNoise, "Clouds/cloud_noise.compute.slang"),
+			D(EngineShaderPrograms.Clouds, "Clouds/clouds.compute.slang"),
+			D(EngineShaderPrograms.GradientSky, "Ibl/gradient_sky.compute.slang"),
 			D(EngineShaderPrograms.IblBrdfLut, "Ibl/ibl_brdf_lut.compute.slang"),
 			D(EngineShaderPrograms.IblIrradiance, "Ibl/ibl_irradiance.compute.slang"),
 			D(EngineShaderPrograms.IblPrefilter, "Ibl/ibl_prefilter.compute.slang"),
@@ -163,6 +179,8 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.Bc4Compress, "ThirdParty/Betsy/bc4_compress.compute.slang"),
 			D(EngineShaderPrograms.Bc3Stitch, "ThirdParty/Betsy/bc3_stitch.compute.slang"),
 			D(EngineShaderPrograms.Bc5Stitch, "ThirdParty/Betsy/bc5_stitch.compute.slang"),
+			D(EngineShaderPrograms.Bc6hCompress, "ThirdParty/Betsy/bc6h_compress.compute.slang"),
+			D(EngineShaderPrograms.TextureSampleProbe, "Tools/texture_sample_probe.compute.slang"),
 			D(EngineShaderPrograms.TerrainSharedGBuffer, "Terrain/terrain_shared_gbuffer.slang"),
 			D(EngineShaderPrograms.DebugPrimitiveForward, "Geometry/debug_primitive_forward.slang"),
 			D(EngineShaderPrograms.DebugPrimitiveGBuffer, "Geometry/debug_primitive_gbuffer.slang"),
@@ -254,7 +272,9 @@ public sealed class EngineShaderCatalog
 		{
 			if (descriptor.Id == EngineShaderPrograms.Bc1Compress ||
 			    descriptor.Id == EngineShaderPrograms.Bc4Compress || descriptor.Id == EngineShaderPrograms.Bc3Stitch ||
-			    descriptor.Id == EngineShaderPrograms.Bc5Stitch || descriptor.Id == EngineShaderPrograms.TerrainAuthoringBrushes)
+			    descriptor.Id == EngineShaderPrograms.Bc5Stitch || descriptor.Id == EngineShaderPrograms.Bc6hCompress ||
+			    descriptor.Id == EngineShaderPrograms.TextureSampleProbe ||
+			    descriptor.Id == EngineShaderPrograms.TerrainAuthoringBrushes)
 				continue;
 			if (IsGraphicsProgram(descriptor.Id))
 			{
@@ -338,7 +358,24 @@ public sealed class EngineShaderCatalog
 	{
 		if (id == EngineShaderPrograms.DeferredLighting) return ["DeferredLightingCS"];
 		if (id == EngineShaderPrograms.ClusteredLighting) return ["CSBuildClusters", "CSWriteLightIndices"];
-		if (id == EngineShaderPrograms.ProceduralSkybox) return ["ProceduralSkyboxCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereTransmittanceLut) return ["AtmosphereTransmittanceLutCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereMultipleScatteringLut) return ["AtmosphereMultipleScatteringLutCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereSkyViewLut) return ["AtmosphereSkyViewLutCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereAerialPerspective) return ["AtmosphereAerialPerspectiveCSMain"];
+		if (id == EngineShaderPrograms.AtmosphereEnvironment) return ["AtmosphereEnvironmentCSMain"];
+		if (id == EngineShaderPrograms.CloudNoise) return ["CloudNoiseShapeCS", "CloudNoiseDetailCS", "CloudNoiseWeatherCS"];
+		if (id == EngineShaderPrograms.Clouds)
+		{
+			return
+			[
+				"CloudMarchCS",
+				"CloudTemporalCS",
+				"CloudShadowCS",
+				"CloudEnvironmentMarchCS",
+				"CloudEnvironmentCompositeCS"
+			];
+		}
+		if (id == EngineShaderPrograms.GradientSky) return ["GradientSkyCSMain"];
 		if (id == EngineShaderPrograms.IblBrdfLut) return ["IblBrdfCSMain"];
 		if (id == EngineShaderPrograms.IblIrradiance) return ["IblIrradianceCSMain"];
 		if (id == EngineShaderPrograms.IblPrefilter) return ["IblPrefilterCSMain"];
@@ -380,6 +417,8 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.Bc4Compress) return ["CompressBc4"];
 		if (id == EngineShaderPrograms.Bc3Stitch) return ["StitchBc3"];
 		if (id == EngineShaderPrograms.Bc5Stitch) return ["StitchBc5"];
+		if (id == EngineShaderPrograms.Bc6hCompress) return ["CompressBc6h"];
+		if (id == EngineShaderPrograms.TextureSampleProbe) return ["SampleTextureCS"];
 		if (id == EngineShaderPrograms.GpuDrawInstanceUpdate) return ["CSUpdateInstance"];
 		if (id == EngineShaderPrograms.GpuDrawMaterialUpdate) return ["CSUpdateMaterial"];
 		if (id == EngineShaderPrograms.GpuDrawMeshUpdate) return ["CSUpdateMesh"];

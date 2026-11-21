@@ -734,6 +734,15 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		LogLibraryBuildStage($"Decoding texture '{relativeSourcePath}' ({semantic}).");
 		var importedTexture = _imageLoader.Load(absoluteSourcePath, semantic);
 		LogLibraryBuildStage($"Decoded texture '{relativeSourcePath}' ({importedTexture.Width}x{importedTexture.Height}).");
+		if (importSettings.Shape == TextureShape.Cube)
+		{
+			importedTexture = CubemapConverter.Convert(
+				importedTexture,
+				importSettings.CubemapFaceSize,
+				importSettings.MaxResolution);
+			LogLibraryBuildStage($"Converted texture '{relativeSourcePath}' to a cube ({importedTexture.Width}x{importedTexture.Height} faces).");
+		}
+
 		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Texture2D,
 			Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var relativeImportedPath = NormalizeRelativePath(Path.Combine(
@@ -752,7 +761,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			Height = importedTexture.Height,
 			Channels = importedTexture.Channels,
 			Semantic = importedTexture.Semantic,
-			SourceExtension = Path.GetExtension(relativeSourcePath).ToLowerInvariant()
+			SourceExtension = Path.GetExtension(relativeSourcePath).ToLowerInvariant(),
+			Dimension = importedTexture.Dimension,
+			IsHdr = importedTexture.IsHdr
 		};
 
 		return new ImportGraph
@@ -2606,7 +2617,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		LogLibraryBuildStage($"Building runtime texture for '{importedTexture.NameOrPath}'.");
 		var texture = CreateRuntimeTexture(importedTexture);
 		LogLibraryBuildStage($"Built runtime texture for '{importedTexture.NameOrPath}' ({texture.MipCount} mips, {texture.Format}).");
-		var compressionFamily = TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture.Semantic, out _)
+		var compressionFamily = TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture, out _)
 			? TextureCompressionFamily.Bc
 			: TextureCompressionFamily.None;
 		if (OperatingSystem.IsMacOS())
@@ -2635,15 +2646,27 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 	private Texture CreateRuntimeTexture(ImportedTexture importedTexture)
 	{
-		if (TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture.Semantic, out _) == false)
+		if (TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture, out _) == false)
 		{
+			// Uncompressed textures keep the decoded layout: 8-bit RGBA, or half floats for HDR sources.
+			var mips = TextureMipGenerator.GenerateMipChain(importedTexture.MipLevels[0], importedTexture.Format);
+			if (importedTexture.Dimension == TextureDimension.Cube)
+			{
+				return Texture.CreateCube(
+					importedTexture.NameOrPath,
+					importedTexture.Width,
+					importedTexture.IsSrgb,
+					importedTexture.Format,
+					mips);
+			}
+
 			return new Texture(
 				importedTexture.NameOrPath,
 				importedTexture.Width,
 				importedTexture.Height,
 				importedTexture.IsSrgb,
-				TextureFormat.Rgba8Unorm,
-				TextureMipGenerator.GenerateRgba32MipChain(importedTexture.MipLevels[0]));
+				importedTexture.Format,
+				mips);
 		}
 
 		return _textureGpuCompressionService.CompileBcTexture(importedTexture);

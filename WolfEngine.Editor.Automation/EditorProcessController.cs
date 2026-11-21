@@ -105,6 +105,19 @@ public sealed class EditorProcessController : IAsyncDisposable
 		await GetRunningEditor().DeleteEntityAsync(parsedId, cancellationToken).ConfigureAwait(false);
 	}
 
+	public Task<SavedPrefabResult> SaveEntityAsPrefabAsync(
+		string entityId,
+		string folderPath,
+		CancellationToken cancellationToken)
+	{
+		if (Guid.TryParse(entityId, out var parsedId) == false)
+		{
+			throw new InvalidOperationException("entity_id must be a GUID.");
+		}
+
+		return GetRunningEditor().SaveEntityAsPrefabAsync(parsedId, folderPath, cancellationToken);
+	}
+
 	public Task<InstantiatedModelResult> InstantiateModelAsync(
 		string assetName,
 		float? x,
@@ -121,6 +134,14 @@ public sealed class EditorProcessController : IAsyncDisposable
 
 	public Task<AnimationStateResult> GetAnimationStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetAnimationStateAsync(cancellationToken);
+
+	public Task<TextureSampleResult> SampleTextureAsync(
+		string assetPath,
+		float[][] coordinates,
+		float mipLevel,
+		bool linearFilter,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SampleTextureAsync(assetPath, coordinates, mipLevel, linearFilter, cancellationToken);
 
 	public Task<VfxPlayResult> PlayVfxAsync(
 		string assetPath,
@@ -252,6 +273,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 			subAssetSearch,
 			cancellationToken);
 
+	public Task<UI.EntitiesWindowState> GetEntitiesWindowStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetEntitiesWindowStateAsync(cancellationToken);
+
+	public Task SetEntitiesSearchAsync(string search, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEntitiesSearchAsync(search, cancellationToken);
+
 	public Task SetEditorKeyAsync(string key, bool pressed, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetEditorKeyAsync(key, pressed, cancellationToken);
 
@@ -328,6 +355,36 @@ public sealed class EditorProcessController : IAsyncDisposable
 			sharpening,
 			sharpness,
 			cancellationToken);
+
+	public Task<string> SetSkyAsync(
+		string mode,
+		string? hdriAssetPath,
+		bool clearHdri,
+		float? hdriRotationDegrees,
+		float? hdriIntensity,
+		float? gradientIntensity,
+		ProceduralSkyOverrides procedural,
+		string? lightingQuality,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SetSkyAsync(
+			mode,
+			hdriAssetPath,
+			clearHdri,
+			hdriRotationDegrees,
+			hdriIntensity,
+			gradientIntensity,
+			procedural,
+			lightingQuality,
+			cancellationToken);
+
+	public Task<string> SetCloudsAsync(CloudOverrides overrides, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetCloudsAsync(overrides, cancellationToken);
+
+	public Task<string> SetSunAsync(float elevationDegrees, float azimuthDegrees, float? intensity, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetSunAsync(elevationDegrees, azimuthDegrees, intensity, cancellationToken);
+
+	public Task<string> SetTonemappingExposureAsync(float exposure, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetTonemappingExposureAsync(exposure, cancellationToken);
 
 	public Task<string> SetRenderScaleAsync(float renderScale, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetRenderScaleAsync(renderScale, cancellationToken);

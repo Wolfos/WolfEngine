@@ -1,6 +1,7 @@
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Clouds;
 using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
@@ -37,6 +38,9 @@ public readonly struct VolumetricFogPassConfig
 	public required Vector4 LightDirectionEnabled { get; init; }
 	public required ShadowFrameData ShadowData { get; init; }
 	public required VolumetricFogConfig Settings { get; init; }
+
+	/// <summary>The cloud layer's sun shadow.</summary>
+	internal CloudCompositeBinding Clouds { get; init; }
 }
 
 public sealed class VolumetricFogPass
@@ -170,7 +174,8 @@ public sealed class VolumetricFogPass
 			LightColorIntensity = frame.LightColorIntensity,
 			LightDirectionEnabled = frame.LightDirectionEnabled,
 			ShadowData = frame.ShadowData,
-			Settings = frame.Settings
+			Settings = frame.Settings,
+			Clouds = CloudCompositeBinding.Resolve(context, _bindlessRegistry, resources.Clouds, includeComposite: false)
 		};
 	}
 
@@ -192,9 +197,13 @@ public sealed class VolumetricFogPass
 			var forward = Vector3.TransformNormal(Vector3.UnitZ, packet.Transform);
 			if (forward == Vector3.Zero) forward = new Vector3(0, -1, 0);
 			forward = Vector3.Normalize(forward);
-			var scale = DirectionalLightUtility.GetIntensityScale(packet.Light, forward);
+			var colorScale = sceneData.SunLightAttenuation.GetColorScale(packet.Light, forward);
 			return (
-				new Vector4(packet.Light.Color.R, packet.Light.Color.G, packet.Light.Color.B, packet.Light.Intensity * scale),
+				new Vector4(
+					packet.Light.Color.R * colorScale.X,
+					packet.Light.Color.G * colorScale.Y,
+					packet.Light.Color.B * colorScale.Z,
+					packet.Light.Intensity),
 				new Vector4(forward, 1.0f));
 		}
 		return (Vector4.Zero, Vector4.Zero);
@@ -258,6 +267,7 @@ public sealed class VolumetricFogPass
 		lighting.SetVector4("shadowTexelSizeEnabled", new Vector4(1.0f / resolution, 1.0f / resolution, shadow.Enabled ? 1.0f : 0.0f, shadow.Strength));
 		lighting.SetVector4("shadowDepthBiases", new Vector4(shadow.DepthBiases, 0.0f));
 		lighting.SetFloat("shadowMaxDistance", shadow.MaxDistance);
+		config.Clouds.Write(lighting);
 		commandList.SetComputeConstants(lighting.RegisterIndex, lighting.AsBytes());
 		commandList.SetComputeReadOnlyBuffer(10, config.VolumeBuffer);
 		commandList.SetComputeReadOnlyBuffer(11, config.CellHeaderBuffer);

@@ -1,21 +1,23 @@
 import "ibl_common.slang";
 import "../Common/constants.slang";
 import "../Common/common_bindless.slang";
+import "../Common/common_lighting.slang";
+import "../Common/sky_sampling.slang";
 
 cbuffer BindlessHandles : register(b0)
 {
-    uint environmentHandle;
+    SkyEnvironment skyEnvironment;
     uint irradianceHandle;
     uint samplerHandle;
     uint width;
     uint height;
-    uint sliceCount;     // unused here
-    uint sliceHeight;    // unused here
+    /// Hemisphere samples per texel, set by the sky's lighting quality.
+    uint sampleCount;
 };
 
-static float3 ImportanceSampleHemisphere(uint i, uint sampleCount, float3 n)
+static float3 ImportanceSampleHemisphere(uint i, uint count, float3 n)
 {
-    float2 xi = Hammersley(i, sampleCount);
+    float2 xi = Hammersley(i, count);
     float phi = xi.y * 2.0f * PI;
     float cosTheta = 1.0f - xi.x;
     float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
@@ -31,29 +33,28 @@ static float3 ImportanceSampleHemisphere(uint i, uint sampleCount, float3 n)
 void IblIrradianceCSMain(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= width || id.y >= height)
+    {
         return;
+    }
 
-    Texture2D<float4> environmentTex = GetTexture(environmentHandle);
     RWTexture2D<float4> irradianceOut = GetRWTexture(irradianceHandle);
-    SamplerState linearClamp = GetSampler(samplerHandle);
 
+    // Stored the way consumers read it, at DirToEnvUV of the normal.
     float2 uv = (float2(id.xy) + 0.5f) / float2(width, height);
-    float3 n = EquirectToDir(uv);
+    float3 n = EnvUVToDir(uv);
 
-    const uint SAMPLE_COUNT = 1024;
     float3 sum = 0.0f;
     float weight = 0.0f;
     [loop]
-    for (uint i = 0; i < SAMPLE_COUNT; ++i)
+    for (uint i = 0; i < sampleCount; ++i)
     {
-        float3 l = ImportanceSampleHemisphere(i, SAMPLE_COUNT, n);
+        float3 l = ImportanceSampleHemisphere(i, sampleCount, n);
         float NdotL = saturate(dot(n, l));
         if (NdotL > 0.0f)
         {
-            float2 envUV = DirToEquirect(l);
-            envUV.x = frac(envUV.x);
-            envUV.y = saturate(envUV.y);
-            float3 c = environmentTex.SampleLevel(linearClamp, envUV, 0.0f).rgb;
+            // The hemisphere is sampled uniformly in cos(theta), a density of 1 / (2 * PI).
+            float lod = SkyFilteredLod(skyEnvironment, l, 1.0f / (2.0f * PI), sampleCount);
+            float3 c = SampleSky(skyEnvironment, samplerHandle, l, lod);
             sum += c * NdotL;
             weight += NdotL;
         }

@@ -17,7 +17,7 @@ public sealed class GameplayUiViewportTests
 		var view = (RenderViewState)typeof(RenderGraphFrameBuilder).GetField("_view", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(builder)!;
 		view.Output = output;
 		builder.SetGameplayUiFrame(new GameplayUiRenderFrame { Screen = new UiFrameData { CommandCount = 1, Commands = [new UiDrawCommand()] } });
-		builder.BeginFrame(new Int2(100, 60), new Int2(50, 30), default, true, false, Vector3.UnitY, 1,
+		builder.BeginFrame(new Int2(100, 60), new Int2(50, 30), default, true, false, Vector3.UnitY, Vector3.One,
 			new RenderConfig { AntiAliasing = new AntiAliasingConfig { Enabled = false } }, Vector3.Zero);
 		builder.Build(graph);
 		Assert.That(graph.Passes.Any(p => p.Name == "Gameplay UI Screen Capture"), Is.True);

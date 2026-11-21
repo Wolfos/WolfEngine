@@ -9,6 +9,12 @@ public interface IGizmoLineRenderer
 {
 	void BeginFrame();
 	void DrawLine(Vector3 startWorld, Vector3 endWorld, ColorRGBA color, float thickness = 2.0f);
+
+	/// <summary>
+	/// Draws a billboarded icon centred on a world position. The icon keeps a constant size on screen
+	/// whatever its distance from the camera.
+	/// </summary>
+	void DrawIcon(Vector3 positionWorld, nint textureId, float sizePixels, ColorRGBA tint);
 }
 
 public sealed class GizmoLineRenderer : IGizmoLineRenderer
@@ -62,6 +68,29 @@ public sealed class GizmoLineRenderer : IGizmoLineRenderer
 		}
 
 		_drawList.AddLine(startScreen, endScreen, ImGui.ColorConvertFloat4ToU32(color), thickness);
+	}
+
+	public void DrawIcon(Vector3 positionWorld, nint textureId, float sizePixels, ColorRGBA tint)
+	{
+		if (_canDraw == false ||
+		    textureId == 0 ||
+		    TryProjectToScreen(positionWorld, out var centerScreen) == false)
+		{
+			return;
+		}
+
+		var halfSize = new Vector2(sizePixels * 0.5f);
+
+		// Clipped to the viewport image so an icon near the edge does not spill over the toolbar.
+		_drawList.PushClipRect(_viewportMin, _viewportMax, true);
+		_drawList.AddImage(
+			textureId,
+			centerScreen - halfSize,
+			centerScreen + halfSize,
+			Vector2.Zero,
+			Vector2.One,
+			ImGui.ColorConvertFloat4ToU32(tint));
+		_drawList.PopClipRect();
 	}
 
 	private bool TryProjectToScreen(Vector3 worldPoint, out Vector2 screenPoint)

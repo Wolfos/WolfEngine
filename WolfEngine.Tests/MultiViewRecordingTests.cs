@@ -73,7 +73,7 @@ public sealed class MultiViewRecordingTests
 		{
 			// A preview world lit by its own sun must not show the scene view's sky.
 			Assert.That(primary.Sky, Is.Not.SameAs(second.Sky));
-			Assert.That(primary.FrameResources.SkyboxEnvironment, Is.Not.EqualTo(second.FrameResources.SkyboxEnvironment));
+			Assert.That(primary.FrameResources.SkyEnvironment.ViewEnvironment, Is.Not.EqualTo(second.FrameResources.SkyEnvironment.ViewEnvironment));
 			Assert.That(second.Sky.SunDirection, Is.Not.EqualTo(primary.Sky.SunDirection));
 			Assert.That(graph.Passes.Single(pass => pass.Name == "Skybox Environment").View, Is.EqualTo(RenderViewId.Primary));
 			Assert.That(graph.Passes.Single(pass => pass.Name == "Skybox Environment [view2]").View, Is.EqualTo(Second));
@@ -173,8 +173,8 @@ public sealed class MultiViewRecordingTests
 		};
 		var framebuffer = new Int2(128, 128);
 		builder.BeginSharedFrame(framebuffer);
-		builder.BeginViewFrame(RenderViewId.Primary, framebuffer, primarySize, default, true, false, config, Vector3.Zero, Vector3.UnitY, 1.0f);
-		builder.BeginViewFrame(Second, framebuffer, secondSize, default, true, false, secondConfig ?? config, Vector3.Zero, secondSunDirection, 1.0f);
+		builder.BeginViewFrame(RenderViewId.Primary, framebuffer, primarySize, default, true, false, config, Vector3.Zero, Vector3.UnitY, Vector3.One);
+		builder.BeginViewFrame(Second, framebuffer, secondSize, default, true, false, secondConfig ?? config, Vector3.Zero, secondSunDirection, Vector3.One);
 		builder.RecordSharedPreparation(graph);
 		builder.BindView(RenderViewId.Primary);
 		builder.RecordBoundView(graph);

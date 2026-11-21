@@ -462,7 +462,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				// TAA with a reduced render scale is a spatial upscale, so it keeps the render resolution's mips.
 				MaterialMipBias = snapshot.Config.AntiAliasing.UsesFsr3
 					? Fsr3Constants.GetMaterialMipBias(_view.SceneRenderSize.X, _view.SceneDisplaySize.X)
-					: 0.0f
+					: 0.0f,
+				SunLightAttenuation = SunLightAttenuation.ForSky(snapshot.Config.Sky, cameraPosition.Y)
 			};
 
 			_view.PreviousResolvedProjection = _view.ResolvedProjection;
@@ -701,11 +702,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	public void CompleteSnapshotPublishing()
 	{
 		_snapshotBuffer.Complete();
-	}
-
-	public void SetSkybox(SkyboxResources skybox)
-	{
-		_frameBuilder.SetSkybox(skybox);
 	}
 
 	public void OnRender(float deltaTime)
@@ -1105,7 +1101,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				viewSnapshot.Config,
 				viewCameraPosition,
 				viewSnapshot.SunDirection,
-				viewSnapshot.SunIntensityScale);
+				viewSnapshot.SunIlluminance,
+				viewSnapshot.SkyHdri);
 			_frameBuilder.SetViewRenderFeatures(viewSnapshot.RenderFeatureFrames);
 			_frameBuilder.SetViewVfx(viewSnapshot.VfxFrame);
 		}

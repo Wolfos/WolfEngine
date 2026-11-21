@@ -23,7 +23,8 @@ public sealed class MaterialPreviewScene : IEditorRenderViewSource, IDisposable
 	private readonly RenderConfig _config = new()
 	{
 		AntiAliasing = new AntiAliasingConfig { Enabled = false },
-		ShadowMaps = new ShadowMapConfig { Enabled = false }
+		ShadowMaps = new ShadowMapConfig { Enabled = false },
+		Sky = new SkyConfig { Mode = SkyConfigMode.Gradient }
 	};
 	private bool _disposed;
 

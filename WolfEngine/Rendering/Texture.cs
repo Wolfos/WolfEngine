@@ -62,6 +62,17 @@ public sealed class Texture
     }
 
     /// <summary>
+    /// Creates a cube texture with square faces of <paramref name="faceSize"/>. Each mip's data holds the six
+    /// faces back to back in <see cref="TextureDimension.Cube"/> order. Shaders sample it through GetTextureCube.
+    /// </summary>
+    public static Texture CreateCube(string name, int faceSize, bool isSrgb, TextureFormat format,
+        TextureMipData[] mipLevels)
+    {
+        return new Texture(name, faceSize, faceSize, isSrgb, format, mipLevels, isRenderTarget: false,
+            TextureDimension.Cube, TextureDescriptor.CubeFaceCount);
+    }
+
+    /// <summary>
     /// Creates a logical texture whose storage is owned by a persistent GPU render target rather than CPU mip data.
     /// The render graph does not upload the placeholder mip; the surface renderer publishes the GPU resource.
     /// </summary>
@@ -274,6 +285,20 @@ public sealed class Texture
         if (dimension == TextureDimension.Texture2D && depth != 1)
         {
             throw new ArgumentOutOfRangeException(nameof(depth), "2D textures must have a depth of one.");
+        }
+
+        if (dimension == TextureDimension.Cube)
+        {
+            if (depth != TextureDescriptor.CubeFaceCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(depth),
+                    $"Cube textures must have a depth of {TextureDescriptor.CubeFaceCount}, one slice per face.");
+            }
+
+            if (width != height)
+            {
+                throw new ArgumentException("Cube texture faces must be square.", nameof(height));
+            }
         }
 
         if (mipLevels.Length == 0)

@@ -72,13 +72,15 @@ public sealed class ImageLoader : IImageLoader
 	{
 		var semantic = isSrgb ? TextureSemantic.BaseColor : TextureSemantic.Unknown;
 		var imported = _importImageLoader.Load(path, semantic);
-		var texture = new Texture(
-			Path.GetFileName(path),
-			imported.Width,
-			imported.Height,
-			imported.IsSrgb,
-			TextureFormat.Rgba8Unorm,
-			imported.MipLevels);
+		var texture = imported.IsHdr
+			? CreateHdrPreviewTexture(path, imported)
+			: new Texture(
+				Path.GetFileName(path),
+				imported.Width,
+				imported.Height,
+				imported.IsSrgb,
+				TextureFormat.Rgba8Unorm,
+				imported.MipLevels);
 
 		var resources = _mainThreadDispatcher.Invoke(() => _renderer.CreateTextureResources(texture));
 		var textureId = resources.ShaderResourceView.IsValid
@@ -91,6 +93,22 @@ public sealed class ImageLoader : IImageLoader
 			TextureResources = resources,
 			TextureId = textureId
 		};
+	}
+
+	/// <summary>
+	/// ImGui previews draw 8-bit sRGB images, so an HDR source is shown at its stored exposure with highlights clipped.
+	/// </summary>
+	private static Texture CreateHdrPreviewTexture(string path, ImportedTexture imported)
+	{
+		var preview = HdrPixels.ToPreviewRgba8Srgb(imported.MipLevels[0].Data);
+
+		return new Texture(
+			Path.GetFileName(path),
+			imported.Width,
+			imported.Height,
+			isSrgb: true,
+			TextureFormat.Rgba8Unorm,
+			[new TextureMipData(imported.Width, imported.Height, preview)]);
 	}
 
 	private static string ResolvePath(string path)

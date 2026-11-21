@@ -9,6 +9,9 @@ namespace WolfEngine.Editor.UI;
 public sealed class TextureAssetEditor
 {
 	private static readonly int[] ResolutionOptions = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192];
+
+	/// <summary>Cube face sizes offered in the inspector; zero derives the size from the source.</summary>
+	private static readonly int[] CubemapFaceSizeOptions = [0, 64, 128, 256, 512, 1024, 2048, 4096];
 	private static readonly Vector2 PreviewSize = new(96.0f, 96.0f);
 
 	private readonly IEditorProjectService _projectService;
@@ -54,8 +57,11 @@ public sealed class TextureAssetEditor
 		}
 
 		ImGui.Spacing();
-		ImGui.TextUnformatted($"Imported: {textureSummary.Width}x{textureSummary.Height}, {textureSummary.Channels} channel(s)");
-		ImGui.TextUnformatted($"Color Space: {(StbImageLoader.IsSrgb(textureSummary.Semantic) ? "sRGB" : "Linear")}");
+		var shapeLabel = textureSummary.Dimension == Rendering.TextureDimension.Cube
+			? $"cube, {textureSummary.Width}x{textureSummary.Height} faces"
+			: $"{textureSummary.Width}x{textureSummary.Height}";
+		ImGui.TextUnformatted($"Imported: {shapeLabel}, {textureSummary.Channels} channel(s)");
+		ImGui.TextUnformatted($"Color Space: {FormatColorSpaceLabel(textureSummary)}");
 
 		if (asset.IsGenerated)
 		{
@@ -96,6 +102,50 @@ public sealed class TextureAssetEditor
 				}
 			}
 		});
+
+		var currentShape = textureImportSettings.Shape;
+		EditorUIUtility.Combo("Shape", FormatShapeLabel(currentShape), () =>
+		{
+			foreach (TextureShape shape in Enum.GetValues<TextureShape>())
+			{
+				var isSelected = shape == currentShape;
+				if (ImGui.Selectable(FormatShapeLabel(shape), isSelected))
+				{
+					textureImportSettings.Shape = shape;
+					metadata.SetImportSettings(textureImportSettings);
+					SaveTextureMetadata(asset, metadata);
+				}
+
+				if (isSelected)
+				{
+					ImGui.SetItemDefaultFocus();
+				}
+			}
+		});
+
+		if (currentShape == TextureShape.Cube)
+		{
+			var currentFaceSize = textureImportSettings.CubemapFaceSize;
+			EditorUIUtility.Combo("Cube Face Size", FormatFaceSizeLabel(currentFaceSize), () =>
+			{
+				for (var i = 0; i < CubemapFaceSizeOptions.Length; i++)
+				{
+					var faceSize = CubemapFaceSizeOptions[i];
+					var isSelected = faceSize == currentFaceSize;
+					if (ImGui.Selectable(FormatFaceSizeLabel(faceSize), isSelected))
+					{
+						textureImportSettings.CubemapFaceSize = faceSize;
+						metadata.SetImportSettings(textureImportSettings);
+						SaveTextureMetadata(asset, metadata);
+					}
+
+					if (isSelected)
+					{
+						ImGui.SetItemDefaultFocus();
+					}
+				}
+			});
+		}
 
 		EditorUIUtility.Combo("Import Resolution", FormatResolutionLabel(ResolutionOptions[selectedIndex]), () =>
 		{
@@ -153,6 +203,35 @@ public sealed class TextureAssetEditor
 	private static string FormatResolutionLabel(int resolution)
 	{
 		return $"{resolution}x{resolution}";
+	}
+
+	private static string FormatFaceSizeLabel(int faceSize)
+	{
+		return faceSize <= 0
+			? "Automatic"
+			: $"{faceSize}x{faceSize}";
+	}
+
+	private static string FormatShapeLabel(TextureShape shape)
+	{
+		return shape switch
+		{
+			TextureShape.Texture2D => "2D",
+			TextureShape.Cube => "Cube",
+			_ => shape.ToString()
+		};
+	}
+
+	private static string FormatColorSpaceLabel(TextureAssetSummary summary)
+	{
+		if (summary.IsHdr)
+		{
+			return "Linear HDR";
+		}
+
+		return StbImageLoader.IsSrgb(summary.Semantic)
+			? "sRGB"
+			: "Linear";
 	}
 
 	private static string FormatSemanticLabel(TextureSemantic semantic)

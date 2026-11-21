@@ -1406,7 +1406,10 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		ComPtr<ID3D12Resource> gpuTexture,
 		ResourceStates initialState)
 	{
-		var subresourceCount = texture.MipCount;
+		// Subresources are numbered mip-fastest within each array layer: layer * MipCount + mip. Only cubes
+		// have more than one layer; a volume's slices live inside each mip's single subresource.
+		var arrayLayerCount = TextureFormatUtilities.GetArrayLayerCount(texture.Dimension);
+		var subresourceCount = texture.MipCount * arrayLayerCount;
 		var layouts = new PlacedSubresourceFootprint[subresourceCount];
 		var numRows = new uint[subresourceCount];
 		var rowSizeInBytes = new ulong[subresourceCount];
@@ -1455,16 +1458,21 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		SilkMarshal.ThrowHResult(uploadBuffer.Map(0, (Range*)null, (void**)&mapped));
 		try
 		{
-			for (var mipIndex = 0; mipIndex < subresourceCount; mipIndex++)
+			for (var subresource = 0; subresource < subresourceCount; subresource++)
 			{
+				var mipIndex = subresource % texture.MipCount;
+				var arrayLayer = subresource / texture.MipCount;
 				var mip = texture.MipLevels[mipIndex];
-				var rowPitch = (ulong)layouts[mipIndex].Footprint.RowPitch;
-				var rowsPerSlice = (ulong)numRows[mipIndex];
+				var rowPitch = (ulong)layouts[subresource].Footprint.RowPitch;
+				var rowsPerSlice = (ulong)numRows[subresource];
 				// Volume footprints lay slices out back to back, each rowsPerSlice rows at rowPitch.
-				// 2D textures are the single-slice case.
-				var sliceCount = Math.Max(1u, layouts[mipIndex].Footprint.Depth);
+				// 2D textures and cube faces are the single-slice case.
+				var sliceCount = Math.Max(1u, layouts[subresource].Footprint.Depth);
 				var sourceRowSize = (ulong)TextureFormatUtilities.GetBytesPerRow(texture.Format, mip.Width);
-				if ((ulong)mip.Data.Length < sliceCount * rowsPerSlice * sourceRowSize)
+				var sourceSubresourceSize = sliceCount * rowsPerSlice * sourceRowSize;
+				// A cube mip holds its faces back to back, so each face starts one subresource further in.
+				var sourceOffset = (ulong)arrayLayer * sourceSubresourceSize;
+				if ((ulong)mip.Data.Length < sourceOffset + sourceSubresourceSize)
 				{
 					throw new ArgumentException(
 						$"Texture '{texture.Name}' mip {mipIndex} data is smaller than its {texture.Format} footprint.",
@@ -1475,8 +1483,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 				{
 					for (ulong slice = 0; slice < sliceCount; slice++)
 					{
-						var destSlice = mapped + layouts[mipIndex].Offset + slice * rowsPerSlice * rowPitch;
-						var srcSlice = src + slice * rowsPerSlice * sourceRowSize;
+						var destSlice = mapped + layouts[subresource].Offset + slice * rowsPerSlice * rowPitch;
+						var srcSlice = src + sourceOffset + slice * rowsPerSlice * sourceRowSize;
 						for (ulong row = 0; row < rowsPerSlice; row++)
 						{
 							Buffer.MemoryCopy(srcSlice + row * sourceRowSize, destSlice + row * rowPitch,
@@ -1515,21 +1523,21 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			uploadCommandList.ResourceBarrier(1, &copyBarrier);
 		}
 
-		for (var mipIndex = 0; mipIndex < subresourceCount; mipIndex++)
+		for (var subresource = 0; subresource < subresourceCount; subresource++)
 		{
 			var destLocation = new TextureCopyLocation
 			{
 				PResource = gpuTexture.Handle,
 				Type = TextureCopyType.SubresourceIndex
 			};
-			destLocation.Anonymous.SubresourceIndex = (uint)mipIndex;
+			destLocation.Anonymous.SubresourceIndex = (uint)subresource;
 
 			var srcLocation = new TextureCopyLocation
 			{
 				PResource = uploadBuffer.Handle,
 				Type = TextureCopyType.PlacedFootprint
 			};
-			srcLocation.Anonymous.PlacedFootprint = layouts[mipIndex];
+			srcLocation.Anonymous.PlacedFootprint = layouts[subresource];
 
 			uploadCommandList.CopyTextureRegion(&destLocation, 0, 0, 0, &srcLocation, (Box*)null);
 		}

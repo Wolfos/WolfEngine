@@ -45,6 +45,9 @@
       <None Update="Assets\Icons\light.png">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
+      <None Update="Assets\Icons\camera.png">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
       <None Update="Assets\Icons\object.png">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>

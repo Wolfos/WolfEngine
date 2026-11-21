@@ -5,16 +5,23 @@ using WolfEngine.Editor.Projects;
 
 namespace WolfEngine.Editor.UI;
 
+public sealed record EntitiesWindowRowState(string Name, bool MatchesSearch);
+public sealed record EntitiesWindowState(string Search, IReadOnlyList<EntitiesWindowRowState> Rows);
+
 public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 {
 	private static readonly List<Entity> AllEntities = new();
 	private static readonly List<Entity> RootEntities = new();
 	private static readonly List<Entity> VisibleEntities = new();
+	private static readonly List<EntitiesWindowRowState> DrawnRows = new();
 	private static readonly List<Entity> PendingDeleteEntities = new();
 	private static readonly List<Entity> DraggedEntities = new();
 	private static readonly HashSet<Entity> RevealAncestors = new();
+	private static readonly HashSet<Entity> SearchMatches = new();
+	private static readonly HashSet<Entity> SearchMatchAncestors = new();
 	private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
 	private const string ContextMenuId = "EntitiesContextMenu";
+	private const float ClearSearchButtonSize = 20.0f;
 
 	private readonly IIconManager _iconManager;
 	private readonly IEditorInteractionState _interactionState;
@@ -31,6 +38,8 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	private EntitySelectionClick? _pendingSelectionClick;
 	private Entity? _deferredSelectionEntity;
 	private Entity? _revealEntity;
+	private string _searchText = string.Empty;
+	private bool _wasSearchActive;
 
 	public EntitiesWindow(
 		IIconManager iconManager,
@@ -69,19 +78,45 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Entities);
 		}
 
+		DrawSearchBar();
+
 		world.GetAllEntities(AllEntities);
 		BuildRootList(world);
+		var isSearchActive = BuildSearchResults(world);
 		_hoveredEntity = null;
 		VisibleEntities.Clear();
-		BeginRevealRequest(world);
+		DrawnRows.Clear();
+		BeginRevealRequest(world, isSearchActive);
+
+		// The tree scrolls in its own child so the search bar stays in place above it.
+		ImGui.BeginChild(
+			"##EntityTree",
+			Vector2.Zero,
+			ImGuiChildFlags.None,
+			ImGuiWindowFlags.NoBackground);
 
 		var style = ImGui.GetStyle();
 		ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(style.ItemSpacing.X, 0.0f));
 		ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(style.FramePadding.X, 4.0f));
 
+		// Expansion while searching lives under its own ID scope, so the branches a search forces open
+		// do not overwrite which branches the user had open in the unfiltered tree.
+		ImGui.PushID(isSearchActive ? "Search" : "Tree");
 		foreach (var entity in RootEntities)
 		{
-			DrawEntityNode(entity, world, scene);
+			if (IsShownBySearch(entity, isSearchActive) == false)
+			{
+				continue;
+			}
+
+			DrawEntityNode(entity, world, scene, isSearchActive);
+		}
+
+		ImGui.PopID();
+
+		if (isSearchActive && SearchMatches.Count == 0)
+		{
+			ImGui.TextDisabled("No matching entities");
 		}
 
 		ClearSelectionOnBackgroundClick();
@@ -91,7 +126,153 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		CompleteDragDrop(scene);
 		DrawContextMenu(scene);
 		ImGui.PopStyleVar(2);
+		ImGui.EndChild();
 		ImGui.End();
+	}
+
+	/// <summary>
+	/// The search text and the rows drawn in the last frame, in tree order. Used by editor automation.
+	/// </summary>
+	public EntitiesWindowState GetState()
+	{
+		return new EntitiesWindowState(_searchText, DrawnRows.ToArray());
+	}
+
+	/// <summary>
+	/// Replaces the search text, as typing into the search bar does. Used by editor automation.
+	/// </summary>
+	public void SetSearch(string search)
+	{
+		_searchText = search;
+	}
+
+	private void DrawSearchBar()
+	{
+		var style = ImGui.GetStyle();
+		var hasSearchText = _searchText.Length > 0;
+		var clearButtonWidth = hasSearchText
+			? ClearSearchButtonSize + style.ItemSpacing.X
+			: 0.0f;
+
+		ImGui.SetNextItemWidth(MathF.Max(40.0f, ImGui.GetContentRegionAvail().X - clearButtonWidth));
+		ImGui.InputTextWithHint("##EntitySearch", "Search entities...", ref _searchText, 256);
+		if (ImGui.IsItemFocused() && ImGui.IsKeyPressed(ImGuiKey.Escape))
+		{
+			_searchText = string.Empty;
+		}
+
+		if (hasSearchText == false)
+		{
+			return;
+		}
+
+		ImGui.SameLine();
+		if (DrawClearSearchButton())
+		{
+			_searchText = string.Empty;
+		}
+	}
+
+	private bool DrawClearSearchButton()
+	{
+		var frameHeight = ImGui.GetFrameHeight();
+		var buttonSize = new Vector2(ClearSearchButtonSize, frameHeight);
+		ImGui.InvisibleButton("ClearEntitySearch", buttonSize);
+
+		var min = ImGui.GetItemRectMin();
+		var max = ImGui.GetItemRectMax();
+		var drawList = ImGui.GetWindowDrawList();
+		if (ImGui.IsItemHovered())
+		{
+			drawList.AddRectFilled(min, max, ImGui.GetColorU32(ImGuiCol.HeaderHovered), 4.0f);
+		}
+
+		var iconSize = MathF.Min(ClearSearchButtonSize, frameHeight) - 4.0f;
+		var iconMin = (min + max - new Vector2(iconSize)) * 0.5f;
+		var iconColor = ImGui.GetColorU32(ImGuiCol.TextDisabled);
+		if (_iconManager.TryGet("close", out var texture))
+		{
+			drawList.AddImage(texture, iconMin, iconMin + new Vector2(iconSize), Vector2.Zero, Vector2.One, iconColor);
+		}
+		else
+		{
+			var inset = iconSize * 0.25f;
+			drawList.AddLine(iconMin + new Vector2(inset), iconMin + new Vector2(iconSize - inset), iconColor, 1.5f);
+			drawList.AddLine(
+				iconMin + new Vector2(iconSize - inset, inset),
+				iconMin + new Vector2(inset, iconSize - inset),
+				iconColor,
+				1.5f);
+		}
+
+		return ImGui.IsItemClicked();
+	}
+
+	/// <summary>
+	/// Collects the entities whose name contains the search text, and every ancestor of them so the
+	/// matches are still shown in their place in the hierarchy. Returns whether a search is active.
+	/// </summary>
+	private bool BuildSearchResults(World world)
+	{
+		SearchMatches.Clear();
+		SearchMatchAncestors.Clear();
+
+		var query = _searchText.Trim();
+		if (query.Length == 0)
+		{
+			return false;
+		}
+
+		foreach (var entity in AllEntities)
+		{
+			if (world.HasComponent<NameComponent>(entity) == false)
+			{
+				continue;
+			}
+
+			var name = world.GetComponent<NameComponent>(entity).Name;
+			if (name is null || name.Contains(query, StringComparison.OrdinalIgnoreCase) == false)
+			{
+				continue;
+			}
+
+			SearchMatches.Add(entity);
+			AddSearchMatchAncestors(world, entity);
+		}
+
+		return true;
+	}
+
+	private static void AddSearchMatchAncestors(World world, Entity entity)
+	{
+		var current = entity;
+		while (world.HasComponent<Parent>(current))
+		{
+			var parent = world.GetComponent<Parent>(current).Value;
+			if (parent.IsValid == false)
+			{
+				return;
+			}
+
+			// An ancestor already in the set had its own ancestors added when it was first reached.
+			if (SearchMatchAncestors.Add(parent) == false)
+			{
+				return;
+			}
+
+			current = parent;
+		}
+	}
+
+	private static bool IsShownBySearch(Entity entity, bool isSearchActive)
+	{
+		if (isSearchActive == false)
+		{
+			return true;
+		}
+
+		return SearchMatches.Contains(entity) ||
+		       SearchMatchAncestors.Contains(entity);
 	}
 
 	private static void BuildRootList(World world)
@@ -113,14 +294,15 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		}
 	}
 
-	private unsafe void DrawEntityNode(Entity entity, World world, EditorScene scene)
+	private unsafe void DrawEntityNode(Entity entity, World world, EditorScene scene, bool isSearchActive)
 	{
 		ImGui.PushID(entity.Index);
 
 		VisibleEntities.Add(entity);
 		var isSelected = EditorGui.SelectedEntities.Contains(entity);
-		var hasChildren = world.HasComponent<Children>(entity)
-		                  && world.GetComponent<Children>(entity).First.IsValid;
+		var hasChildren = isSearchActive
+			? SearchMatchAncestors.Contains(entity)
+			: world.HasComponent<Children>(entity) && world.GetComponent<Children>(entity).First.IsValid;
 		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.FramePadding;
 		if (!hasChildren)
 		{
@@ -145,7 +327,12 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 		var nameComponent = world.GetComponent<NameComponent>(entity);
 		var name = nameComponent.Name ?? "Unnamed";
-		if (RevealAncestors.Contains(entity))
+		if (isSearchActive && hasChildren)
+		{
+			// While searching, every branch on the way to a match is shown open.
+			ImGui.SetNextItemOpen(true);
+		}
+		else if (RevealAncestors.Contains(entity))
 		{
 			// Written into ImGui's own node storage, so the branch stays open afterwards and the user
 			// can collapse it again like any other.
@@ -166,7 +353,13 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			_hoveredEntity = entity;
 		}
 
-		DrawEntityLabelWithIcon(name, iconTexture, nodeCursorPosition.X);
+		// Ancestors that are only shown to place a match in the hierarchy are dimmed.
+		var matchesSearch = isSearchActive == false || SearchMatches.Contains(entity);
+		var labelColor = matchesSearch
+			? ImGuiCol.Text
+			: ImGuiCol.TextDisabled;
+		DrawnRows.Add(new EntitiesWindowRowState(name, matchesSearch));
+		DrawEntityLabelWithIcon(name, iconTexture, nodeCursorPosition.X, labelColor);
 
 		if (leftClicked)
 		{
@@ -193,7 +386,10 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			var childEntity = world.GetComponent<Children>(entity).First;
 			while (childEntity.IsValid)
 			{
-				DrawEntityNode(childEntity, world, scene);
+				if (IsShownBySearch(childEntity, isSearchActive))
+				{
+					DrawEntityNode(childEntity, world, scene, isSearchActive);
+				}
 
 				if (world.HasComponent<Sibling>(childEntity))
 				{
@@ -220,11 +416,21 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	/// Picks up a selection made elsewhere — the viewport, an undo, a freshly instantiated prefab —
 	/// and unfolds this frame's tree down to it.
 	/// </summary>
-	private void BeginRevealRequest(World world)
+	private void BeginRevealRequest(World world, bool isSearchActive)
 	{
+		var searchCleared = _wasSearchActive && isSearchActive == false;
+		_wasSearchActive = isSearchActive;
+
 		if (EditorGui.ConsumeSelectionRevealRequest(out var entity) == false)
 		{
-			return;
+			// Clearing a search goes back to the full tree, so unfold it to whatever was picked from the
+			// results instead of leaving the user scrolled somewhere unrelated.
+			if (searchCleared == false || EditorGui.HasSelectedEntity == false)
+			{
+				return;
+			}
+
+			entity = EditorGui.SelectedEntity;
 		}
 
 		if (world.IsAlive(entity) == false)
@@ -385,7 +591,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		return 0;
 	}
 
-	private static void DrawEntityLabelWithIcon(string label, nint iconTexture, float nodeCursorX)
+	private static void DrawEntityLabelWithIcon(string label, nint iconTexture, float nodeCursorX, ImGuiCol textColor)
 	{
 		var itemMin = ImGui.GetItemRectMin();
 		var itemMax = ImGui.GetItemRectMax();
@@ -405,7 +611,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			drawList.AddImage(iconTexture, iconPosition, iconPosition + Vector2.One * iconSize);
 		}
 
-		drawList.AddText(textPosition, ImGui.GetColorU32(ImGuiCol.Text), label);
+		drawList.AddText(textPosition, ImGui.GetColorU32(textColor), label);
 	}
 
 	private void DrawContextMenu(EditorScene scene)

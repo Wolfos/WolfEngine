@@ -4,6 +4,8 @@ import "../Common/draw_data.slang";
 import "../Common/common_lighting.slang";
 import "../Common/normal_decode.slang";
 import "../Common/volumetric_fog.slang";
+import "../Atmosphere/atmosphere_common.slang";
+import "../Common/cloud_sampling.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 1048576
 #define WOLF_MAX_MATERIAL_COUNT 1048576
@@ -27,7 +29,6 @@ cbuffer DrawIndexParams : register(b1)
 
 cbuffer TransparentEnvironmentParams : register(b0)
 {
-    uint environmentHandle;
     uint irradianceHandle;
     uint prefilteredHandle;
     uint brdfLutHandle;
@@ -40,6 +41,11 @@ cbuffer TransparentEnvironmentParams : register(b0)
     uint fogEnabled;
     uint fogSliceCount;
     float fogMaxDistance;
+    /// The Procedural sky's aerial perspective volume, used when aerialPerspectiveEnabled is non-zero.
+    uint aerialPerspectiveHandle;
+    uint aerialPerspectiveEnabled;
+    /// Only the sun shadow is read: clouds are composited behind transparents by deferred lighting.
+    CloudComposite cloudComposite;
 };
 
 cbuffer CameraParams : register(b2)
@@ -212,11 +218,19 @@ TransparentOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFa
     surface.emissive = emissive;
 
     float3 viewDir = normalize(-input.worldPos);
+
+    // The sun is the first directional light; the clouds shadow it.
+    DirectionalLightData shadedDirectionalLights[MAX_DIRECTIONAL_LIGHTS] = directionalLights;
+    if (directionalLightCount > 0u)
+    {
+        shadedDirectionalLights[0].colorIntensity.rgb *= SampleCloudShadow(cloudComposite, samplerHandle, input.worldPos);
+    }
+
     float3 color = EvaluateDirectionalLights(
         surface,
         viewDir,
         directionalLightCount,
-        directionalLights,
+        shadedDirectionalLights,
         shadowViewProjection0,
         shadowViewProjection1,
         shadowViewProjection2,
@@ -254,6 +268,14 @@ TransparentOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFa
         samplerHandle,
         IBL_EXPOSURE);
     color += surface.emissive;
+
+    // Atmosphere between the surface and the camera, then local fog in front of it.
+    if (aerialPerspectiveEnabled != 0u)
+    {
+        float2 screenUv = input.position.xy / float2(frameSizeX, frameSizeY);
+        float4 aerialPerspective = SampleAerialPerspective(aerialPerspectiveHandle, samplerHandle, screenUv, length(input.worldPos));
+        color = ApplyAerialPerspective(color, aerialPerspective);
+    }
 
     if (fogEnabled != 0u)
     {

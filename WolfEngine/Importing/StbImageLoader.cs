@@ -28,6 +28,11 @@ public sealed class StbImageLoader : IImageLoader
 
 	private static ImportedTexture Decode(byte[] data, TextureSemantic semantic, string nameHint)
 	{
+		if (HdrPixels.IsRadianceHdr(data))
+		{
+			return DecodeHdr(data, semantic, nameHint);
+		}
+
 		var image = ImageResult.FromMemory(data, ColorComponents.RedGreenBlueAlpha);
 
 		return new ImportedTexture(
@@ -37,6 +42,25 @@ public sealed class StbImageLoader : IImageLoader
 			IsSrgb(semantic),
 			semantic,
 			[new Rendering.TextureMipData(image.Width, image.Height, image.Data)]);
+	}
+
+	/// <summary>
+	/// Decodes a Radiance HDR file to linear half floats. HDR content is always linear, whatever the semantic,
+	/// so it is never marked sRGB.
+	/// </summary>
+	private static ImportedTexture DecodeHdr(byte[] data, TextureSemantic semantic, string nameHint)
+	{
+		var image = ImageResultFloat.FromMemory(data, ColorComponents.RedGreenBlueAlpha);
+		var halfRgba = HdrPixels.PackHalfRgba(image.Data);
+
+		return new ImportedTexture(
+			nameHint,
+			image.Width,
+			image.Height,
+			IsSrgb: false,
+			semantic,
+			[new Rendering.TextureMipData(image.Width, image.Height, halfRgba)],
+			Rendering.TextureFormat.Rgba16Float);
 	}
 
 	public static bool IsSrgb(TextureSemantic semantic) =>

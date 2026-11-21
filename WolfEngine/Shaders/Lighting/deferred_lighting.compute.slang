@@ -2,8 +2,11 @@ import "../Common/common.slang";
 import "../Common/constants.slang";
 import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
+import "../Common/sky_sampling.slang";
 import "../Ddgi/ddgi_sample.slang";
 import "../Common/volumetric_fog.slang";
+import "../Atmosphere/atmosphere_common.slang";
+import "../Common/cloud_sampling.slang";
 
 cbuffer BindlessHandles : register(b0)
 {
@@ -29,7 +32,7 @@ cbuffer BindlessHandles : register(b0)
     uint ddgiDominantProbeCoordDebugHandle;
     uint ddgiProbeRelocationDebugHandle;
     uint ddgiProbeRelocationDecisionDebugHandle;
-    uint environmentHandle;
+    SkyEnvironment skyEnvironment;
     uint irradianceHandle;
     uint prefilteredHandle;
     uint brdfLutHandle;
@@ -100,6 +103,14 @@ cbuffer LightingParams : register(b2)
     float fogMaxDistance;
     float indirectLightMinimum;
     uint ddgiFinalGatherEnabled;
+    /// The Procedural sky's atmosphere. atmosphereEnabled is zero in the other sky modes, which draw skyEnvironment.
+    uint atmosphereEnabled;
+    uint skyViewLutHandle;
+    uint atmosphereTransmittanceLutHandle;
+    uint aerialPerspectiveHandle;
+    AtmosphereConstants atmosphere;
+    /// The volumetric cloud layer and its sun shadow; disabled outside the Procedural sky.
+    CloudComposite cloudComposite;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
@@ -192,7 +203,22 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (IsBackgroundDepth(depth))
     {
         float3 skyDir = ReconstructWorldDirection(dispatchThreadId.xy, uint2(width, height), 1.0f, camera.invViewProjection);
-        float3 skyColor = SampleEnvironment(environmentHandle, samplerHandle, skyDir);
+        float3 skyColor;
+        if (atmosphereEnabled != 0u)
+        {
+            AtmosphereLuts atmosphereLuts = MakeAtmosphereLuts(atmosphereTransmittanceLutHandle, 0u, samplerHandle);
+            skyColor = SampleSkyViewLut(atmosphere, skyViewLutHandle, samplerHandle, skyDir) +
+                GetSunDiscLuminance(atmosphere, atmosphereLuts, skyDir);
+        }
+        else
+        {
+            skyColor = SampleSky(skyEnvironment, samplerHandle, skyDir, 0.0f);
+        }
+        if (CloudCompositeEnabled(cloudComposite))
+        {
+            float4 cloud = SampleCloudsUpsampled(cloudComposite, uv, CLOUD_BACKGROUND_DISTANCE_KM);
+            skyColor = skyColor * cloud.a + cloud.rgb;
+        }
         if (fogEnabled != 0u)
         {
             float4 fog = SampleIntegratedFog(fogIntegratedHandle, samplerHandle, uv,
@@ -230,11 +256,19 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     surface.occlusion = occlusion;
     surface.emissive = emissive;
 
+    // The sun is the first directional light; the clouds shadow it.
+    DirectionalLightData shadedDirectionalLights[MAX_DIRECTIONAL_LIGHTS] = directionalLights;
+    if (directionalLightCount > 0u)
+    {
+        float cloudShadow = SampleCloudShadow(cloudComposite, samplerHandle, cameraRelativeWorldPos);
+        shadedDirectionalLights[0].colorIntensity.rgb *= cloudShadow;
+    }
+
     float3 color = EvaluateDirectionalLights(
         surface,
         viewDir,
         directionalLightCount,
-        directionalLights,
+        shadedDirectionalLights,
         shadowViewProjection0,
         shadowViewProjection1,
         shadowViewProjection2,
@@ -369,6 +403,20 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             float4(saturate(ddgiDebug.probeRelocationDecision), 1.0f);
     }
     color += surface.emissive;
+
+    // Atmosphere between the surface and the camera, then local fog in front of it.
+    if (atmosphereEnabled != 0u)
+    {
+        float4 aerialPerspective = SampleAerialPerspective(aerialPerspectiveHandle, samplerHandle, uv, length(cameraRelativeWorldPos));
+        color = ApplyAerialPerspective(color, aerialPerspective);
+    }
+
+    // Clouds in front of the surface, already carrying the atmosphere between them and the camera.
+    if (CloudCompositeEnabled(cloudComposite))
+    {
+        float4 cloud = SampleCloudsUpsampled(cloudComposite, uv, length(cameraRelativeWorldPos) * 0.001f);
+        color = color * cloud.a + cloud.rgb;
+    }
 
     if (fogEnabled != 0u)
     {

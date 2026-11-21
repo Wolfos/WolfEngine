@@ -21,6 +21,7 @@ public class EditorPreferences
 
 	public Dictionary<ImGuiCol, ColorRGBA> EditorColors { get; set; } = new();
 	public float SceneViewportResolutionScale { get; set; } = 1.0f;
+	public bool ShowEntityIconGizmos { get; set; } = true;
 	// Limit how often the 3D views are drawn, not the editor as a whole. The names predate that and stay so that
 	// saved preferences keep loading.
 	public bool LimitFPS { get; set; } = false;
@@ -68,6 +69,26 @@ public class EditorPreferences
 		}
 
 		_instance.SceneViewportResolutionScale = Math.Clamp(scale, 0.5f, 1.0f);
+	}
+
+	public static bool GetShowEntityIconGizmos()
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		return _instance.ShowEntityIconGizmos;
+	}
+
+	public static void SetShowEntityIconGizmos(bool show)
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		_instance.ShowEntityIconGizmos = show;
 	}
 
 	public static bool GetLimitFPS()

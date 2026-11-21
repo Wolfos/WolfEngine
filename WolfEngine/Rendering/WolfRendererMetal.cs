@@ -905,8 +905,9 @@ internal unsafe class WolfRendererMetal : IRenderer
         {
             var mip = source.MipLevels[mipLevel];
             var isVolume = source.Dimension == TextureDimension.Texture3D;
-            var depth = isVolume ? mip.Depth : 1;
-            var expectedBytes = TextureFormatUtilities.GetMipDataSize(source.Format, mip.Width, mip.Height, depth);
+            var isCube = source.Dimension == TextureDimension.Cube;
+            var sliceCount = TextureFormatUtilities.GetMipSliceCount(source.Dimension, source.Depth, mipLevel);
+            var expectedBytes = TextureFormatUtilities.GetMipDataSize(source.Format, mip.Width, mip.Height, sliceCount);
             if (mip.Data.Length < expectedBytes)
             {
                 throw new ArgumentException(
@@ -915,17 +916,27 @@ internal unsafe class WolfRendererMetal : IRenderer
             }
 
             var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
-            var size = new MTLSize { width = (ulong)mip.Width, height = (ulong)mip.Height, depth = (ulong)depth };
+            var regionDepth = isVolume ? sliceCount : 1;
+            var size = new MTLSize { width = (ulong)mip.Width, height = (ulong)mip.Height, depth = (ulong)regionDepth };
             var region = new MTLRegion { origin = origin, size = size };
             var bytesPerRow = (ulong)TextureFormatUtilities.GetBytesPerRow(source.Format, mip.Width);
+            var bytesPerImage = (ulong)TextureFormatUtilities.GetMipDataSize(source.Format, mip.Width, mip.Height);
 
             fixed (byte* ptr = mip.Data)
             {
                 if (isVolume)
                 {
                     // The two-argument overload is 2D only; volumes need bytesPerImage to find each slice.
-                    var bytesPerImage = (ulong)TextureFormatUtilities.GetMipDataSize(source.Format, mip.Width, mip.Height);
                     texture.ReplaceRegion(region, (ulong)mipLevel, 0, (IntPtr)ptr, bytesPerRow, bytesPerImage);
+                }
+                else if (isCube)
+                {
+                    // Cube faces are slices of the texture, one region each, stored back to back in the mip.
+                    for (var face = 0; face < sliceCount; face++)
+                    {
+                        var facePointer = (IntPtr)(ptr + (long)face * (long)bytesPerImage);
+                        texture.ReplaceRegion(region, (ulong)mipLevel, (ulong)face, facePointer, bytesPerRow, bytesPerImage);
+                    }
                 }
                 else
                 {

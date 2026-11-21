@@ -52,6 +52,10 @@ public sealed class VfxPreviewScene : IEditorRenderViewSource, IDisposable
 		ShadowMaps = new ShadowMapConfig
 		{
 			Enabled = false
+		},
+		Sky = new SkyConfig
+		{
+			Mode = SkyConfigMode.Gradient
 		}
 	};
 	private readonly List<Entity> _modelEntities = new();

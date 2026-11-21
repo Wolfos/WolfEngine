@@ -299,7 +299,7 @@ public sealed class AntiAliasingRenderGraphTests
 			true,
 			false,
 			Vector3.UnitY,
-			1.0f,
+			Vector3.One,
 			config,
 			Vector3.Zero);
 	}

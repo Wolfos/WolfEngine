@@ -1,11 +1,16 @@
 using WolfEngine.Editor.Projects;
 using WolfEngine.ECS;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Editor;
 
 public interface IEditorSceneWorkspace
 {
 	EditorScene CurrentScene { get; }
+
+	/// <summary>Render settings for a scene whose WorldSettings names no render config.</summary>
+	RenderConfig DefaultRenderConfig { get; }
+
 	void Initialize(EditorScene scene);
 	void ReplaceCurrentScene(EditorScene scene);
 	void ResetToNewScene();
@@ -37,6 +42,8 @@ public sealed class EditorSceneWorkspace : IEditorSceneWorkspace
 	}
 
 	public EditorScene CurrentScene => _currentScene;
+
+	public RenderConfig DefaultRenderConfig { get; } = new();
 
 	public void Initialize(EditorScene scene)
 	{

@@ -41,17 +41,34 @@ public record struct ImportedMaterial(
 	bool DoubleSided
 );
 
+/// <summary>
+/// Decoded texture content before it is compiled for a backend.
+/// </summary>
+/// <param name="Format">
+/// Pixel layout of <see cref="MipLevels"/>: <see cref="TextureFormat.Rgba8Unorm"/> for 8-bit sources, or
+/// <see cref="TextureFormat.Rgba16Float"/> for HDR sources, whose linear values are kept as half floats.
+/// </param>
+/// <param name="Dimension">
+/// <see cref="TextureDimension.Cube"/> once a source has been converted to six faces; <see cref="Width"/> and
+/// <see cref="Height"/> are then the face size and each mip holds the faces back to back.
+/// </param>
 public record struct ImportedTexture(
 	string NameOrPath,
 	int Width,
 	int Height,
 	bool IsSrgb,
 	TextureSemantic Semantic,
-	TextureMipData[] MipLevels)
+	TextureMipData[] MipLevels,
+	TextureFormat Format = TextureFormat.Rgba8Unorm,
+	TextureDimension Dimension = TextureDimension.Texture2D)
 {
 	public int Channels => 4;
 	public int MipCount => MipLevels?.Length ?? 0;
 	public byte[] PixelData => MipLevels is { Length: > 0 } ? MipLevels[0].Data : [];
+	public bool IsHdr => Format == TextureFormat.Rgba16Float;
+	public int Depth => Dimension == TextureDimension.Cube
+		? TextureDescriptor.CubeFaceCount
+		: 1;
 }
 
 public record ImportedNode(

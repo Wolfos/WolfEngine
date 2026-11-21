@@ -16,7 +16,6 @@ cbuffer BindlessHandles : register(b0)
     uint normalHandle;
     uint materialHandle;
     uint velocityHandle;
-    uint environmentHandle;
     uint irradianceHandle;
     uint prefilteredHandle;
     uint brdfLutHandle;

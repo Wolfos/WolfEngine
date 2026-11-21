@@ -36,6 +36,7 @@ public sealed partial class EditorRemoteAutomationController
 	private readonly IEditorCommandService _commandService;
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
+	private readonly IPrefabAssetCreator _prefabAssetCreator;
 	private readonly IRenderer _renderer;
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly RenderFrameCoordinator _renderFrameCoordinator;
@@ -56,6 +57,8 @@ public sealed partial class EditorRemoteAutomationController
 	private readonly VfxAssetEditor _vfxEditor;
 	private readonly Rendering.Splash.SplashScreen _splashScreen;
 	private readonly Rendering.Shaders.EngineShaderOptions _engineShaderOptions;
+	private readonly Rendering.Shaders.IShaderProvider _shaderProvider;
+	private readonly Rendering.BindlessResourceRegistry _bindlessRegistry;
 
 	public EditorRemoteAutomationController(
 		string projectPath,
@@ -70,6 +73,7 @@ public sealed partial class EditorRemoteAutomationController
 		IEditorCommandService commandService,
 		ITerrainAuthoringService terrainAuthoringService,
 		IProjectAssetPipelineService assetPipelineService,
+		IPrefabAssetCreator prefabAssetCreator,
 		IRenderer renderer,
 		EditorFrameCoordinator editorFrameCoordinator,
 		RenderFrameCoordinator renderFrameCoordinator,
@@ -87,10 +91,14 @@ public sealed partial class EditorRemoteAutomationController
 		VfxService vfx,
 		VfxAssetEditor vfxEditor,
 		Rendering.Splash.SplashScreen splashScreen,
-		Rendering.Shaders.EngineShaderOptions engineShaderOptions)
+		Rendering.Shaders.EngineShaderOptions engineShaderOptions,
+		Rendering.Shaders.IShaderProvider shaderProvider,
+		Rendering.BindlessResourceRegistry bindlessRegistry)
 	{
 		_splashScreen = splashScreen;
 		_engineShaderOptions = engineShaderOptions;
+		_shaderProvider = shaderProvider;
+		_bindlessRegistry = bindlessRegistry;
 		_clipEditor = clipEditor;
 		_vfx = vfx;
 		_vfxEditor = vfxEditor;
@@ -112,6 +120,7 @@ public sealed partial class EditorRemoteAutomationController
 		_commandService = commandService;
 		_terrainAuthoringService = terrainAuthoringService;
 		_assetPipelineService = assetPipelineService;
+		_prefabAssetCreator = prefabAssetCreator;
 		_renderer = renderer;
 		_editorFrameCoordinator = editorFrameCoordinator;
 		_renderFrameCoordinator = renderFrameCoordinator;
@@ -710,6 +719,50 @@ public sealed partial class EditorRemoteAutomationController
 	}, cancellationToken);
 
 	/// <summary>
+	/// Saves an entity and its children as a prefab asset through the same path as the entity
+	/// hierarchy's Save as Prefab, so an imported model can become a reusable prefab.
+	/// </summary>
+	public Task<SavedPrefabResult> SaveEntityAsPrefabAsync(
+		Guid entityId,
+		string folderPath,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _sceneWorkspace.CurrentScene;
+			var entity = default(Entity);
+			foreach (var entry in scene.EntityIds)
+			{
+				if (entry.Value == entityId)
+				{
+					entity = entry.Key;
+					break;
+				}
+			}
+
+			if (entity.IsValid == false)
+			{
+				throw new InvalidOperationException($"Entity '{entityId:D}' was not found.");
+			}
+
+			var result = _prefabAssetCreator.SaveEntityAsPrefab(scene, entity, folderPath);
+			if (result.Success == false || result.AssetId is null)
+			{
+				throw new InvalidOperationException(result.ErrorMessage ?? "Saving the prefab failed.");
+			}
+
+			var prefabNodeId = result.AssetId.Value;
+			if (_projectService.TryGetAsset(prefabNodeId, out var prefabAsset) == false)
+			{
+				throw new InvalidOperationException($"Prefab '{prefabNodeId:D}' was saved but is not in the asset database.");
+			}
+
+			return new SavedPrefabResult(
+				prefabNodeId,
+				prefabAsset.RelativeSourcePath,
+				_editorFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
+
+	/// <summary>
 	/// Selects entities by persistent GUID through the same selection the entity
 	/// hierarchy and viewport picking write to, so anything driven by selection --
 	/// the transform gizmo, the outline -- behaves as it does for a real click.
@@ -938,6 +991,17 @@ public sealed partial class EditorRemoteAutomationController
 				search,
 				expandedSourceId,
 				subAssetSearch);
+		}, cancellationToken);
+
+	public Task<EntitiesWindowState> GetEntitiesWindowStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => ((EntitiesWindow)_windows.Get(EditorWindowIds.Entities).Window).GetState(), cancellationToken);
+
+	public Task SetEntitiesSearchAsync(string search, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			_workspaces.Activate(EditorWorkspaceService.SceneWorkspaceId);
+			_workspaces.OpenWindow(EditorWindowIds.Entities);
+			((EntitiesWindow)_windows.Get(EditorWindowIds.Entities).Window).SetSearch(search);
 		}, cancellationToken);
 
 	public Task SetEditorKeyAsync(string key, bool pressed, CancellationToken cancellationToken) =>
