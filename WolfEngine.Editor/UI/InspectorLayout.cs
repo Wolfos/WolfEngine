@@ -16,7 +16,10 @@ internal static class InspectorLayout
 	{
 		return EditableProperties.GetValue(type, static targetType => targetType
 			.GetProperties(BindingFlags.Instance | BindingFlags.Public)
-			.Where(property => property.CanRead && property.CanWrite && property.GetIndexParameters().Length == 0)
+			.Where(property => property.CanRead &&
+			                   property.CanWrite &&
+			                   property.GetIndexParameters().Length == 0 &&
+			                   property.IsDefined(typeof(HideFromEditorAttribute)) == false)
 			.OrderBy(property => GetInheritanceDepth(property.DeclaringType))
 			.ThenBy(property => property.MetadataToken)
 			.ToArray());

@@ -84,6 +84,13 @@ public sealed record EditorUndoResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+public sealed record FoliagePaintResult(
+	Guid TerrainEntityId,
+	Guid? FoliageAssetId,
+	int Added,
+	int Removed,
+	int Total);
+
 /// <summary>A prefab written from an authoring-scene entity subtree, as the hierarchy's Save as Prefab writes it.</summary>
 public sealed record SavedPrefabResult(
 	Guid PrefabNodeId,

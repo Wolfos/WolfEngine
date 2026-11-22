@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 
 namespace WolfEngine;
 
@@ -14,6 +15,8 @@ namespace WolfEngine;
 public sealed class TerrainFoliage : IDataAsset
 {
 	public const float DefaultCellSizeMeters = 64.0f;
+	private List<TerrainFoliageCell>? _orderedCells;
+	private int _orderedCellCount;
 
 	/// <summary>The foliage types instances refer to by index.</summary>
 	public List<AssetRef<FoliageType>> Types { get; set; } = [];
@@ -21,8 +24,13 @@ public sealed class TerrainFoliage : IDataAsset
 	/// <summary>Width and depth of a cell, in the terrain's local units.</summary>
 	public float CellSizeMeters { get; set; } = DefaultCellSizeMeters;
 
-	/// <summary>The cells that hold any instances.</summary>
+	/// <summary>The populated cells. Use the cell editing methods to update this list.</summary>
+	[HideFromEditor]
 	public List<TerrainFoliageCell> Cells { get; set; } = [];
+
+	[JsonIgnore]
+	internal float ResolvedCellSizeMeters =>
+		float.IsFinite(CellSizeMeters) && CellSizeMeters > 0.01f ? CellSizeMeters : DefaultCellSizeMeters;
 
 	/// <summary>Changes whenever the instances change, so runtime copies know to rebuild. Not authored.</summary>
 	[JsonIgnore]
@@ -48,6 +56,145 @@ public sealed class TerrainFoliage : IDataAsset
 		Revision++;
 	}
 
+	public (int X, int Z) GetCellCoordinates(float localX, float localZ)
+	{
+		var cellSize = ResolvedCellSizeMeters;
+		return (GetGridCoordinate(localX, cellSize), GetGridCoordinate(localZ, cellSize));
+	}
+
+	private static int GetGridCoordinate(float position, float cellSize) =>
+		(int)Math.Clamp(Math.Floor((double)position / cellSize), int.MinValue, int.MaxValue);
+
+	public TerrainFoliageCell? GetCell(int x, int z)
+	{
+		var index = FindCellIndex(x, z);
+		return index >= 0 ? Cells[index] : null;
+	}
+
+	internal IEnumerable<TerrainFoliageCell> GetCellsInRange(int minX, int minZ, int maxX, int maxZ)
+	{
+		var index = GetCellLowerBound(minX, minZ);
+		while (index < Cells.Count)
+		{
+			var cell = Cells[index];
+			if (cell.Z > maxZ) yield break;
+
+			if (cell.X < minX)
+			{
+				index = GetCellLowerBound(minX, cell.Z);
+				continue;
+			}
+
+			if (cell.X > maxX)
+			{
+				if (cell.Z == maxZ) yield break;
+
+				index = GetCellLowerBound(minX, cell.Z + 1);
+				continue;
+			}
+
+			yield return cell;
+			index++;
+		}
+	}
+
+	private int GetCellLowerBound(int x, int z)
+	{
+		var index = FindCellIndex(x, z);
+		return index >= 0 ? index : ~index;
+	}
+
+	/// <summary>Replaces or removes one cell. Call <see cref="MarkChanged"/> after the batch of edits.</summary>
+	public void ReplaceCell(int x, int z, IReadOnlyList<FoliageInstance> instances)
+	{
+		ArgumentNullException.ThrowIfNull(instances);
+		foreach (var instance in instances)
+		{
+			ValidateTypeIndex(instance.TypeIndex);
+		}
+
+		RestoreCell(x, z, instances.Count == 0 ? null : TerrainFoliageCell.Create(x, z, instances));
+	}
+
+	internal void RestoreCell(int x, int z, TerrainFoliageCell? cell)
+	{
+		var index = FindCellIndex(x, z);
+		if (index >= 0)
+		{
+			if (cell is null)
+			{
+				Cells.RemoveAt(index);
+			}
+			else
+			{
+				Cells[index] = cell;
+			}
+		}
+		else if (cell is not null)
+		{
+			Cells.Insert(~index, cell);
+		}
+
+		_orderedCellCount = Cells.Count;
+	}
+
+	private int FindCellIndex(int x, int z)
+	{
+		EnsureCellOrder();
+		var low = 0;
+		var high = Cells.Count - 1;
+		while (low <= high)
+		{
+			var middle = low + (high - low) / 2;
+			var order = CompareCell(Cells[middle], x, z);
+			if (order == 0) return middle;
+
+			if (order < 0)
+			{
+				low = middle + 1;
+			}
+			else
+			{
+				high = middle - 1;
+			}
+		}
+
+		return ~low;
+	}
+
+	private void EnsureCellOrder()
+	{
+		if (ReferenceEquals(_orderedCells, Cells) && _orderedCellCount == Cells.Count) return;
+
+		// Bulk replacement writes sorted cells. Handle older hand-authored lists on their first edit.
+		for (var i = 1; i < Cells.Count; i++)
+		{
+			var current = Cells[i];
+			if (CompareCell(Cells[i - 1], current.X, current.Z) > 0)
+			{
+				Cells.Sort((left, right) => CompareCell(left, right.X, right.Z));
+				break;
+			}
+		}
+
+		_orderedCells = Cells;
+		_orderedCellCount = Cells.Count;
+	}
+
+	private static int CompareCell(TerrainFoliageCell cell, int x, int z)
+	{
+		var row = cell.Z.CompareTo(z);
+		return row == 0 ? cell.X.CompareTo(x) : row;
+	}
+
+	private void ValidateTypeIndex(int typeIndex)
+	{
+		if ((uint)typeIndex >= (uint)Types.Count || (uint)typeIndex > FoliageInstancePacking.MaxTypeIndex)
+		{
+			throw new ArgumentOutOfRangeException(nameof(typeIndex), typeIndex, "A foliage instance names an invalid type index.");
+		}
+	}
+
 	/// <summary>
 	/// Replaces every instance, sorting them into cells of <see cref="CellSizeMeters"/>. Each cell's bounds enclose its
 	/// instances' positions, which the packed positions are quantised across.
@@ -56,19 +203,11 @@ public sealed class TerrainFoliage : IDataAsset
 	{
 		ArgumentNullException.ThrowIfNull(instances);
 
-		var cellSize = CellSizeMeters > 0.01f ? CellSizeMeters : DefaultCellSizeMeters;
 		var instancesByCell = new Dictionary<(int X, int Z), List<FoliageInstance>>();
 		foreach (var instance in instances)
 		{
-			if ((uint)instance.TypeIndex >= (uint)Types.Count)
-			{
-				throw new ArgumentOutOfRangeException(
-					nameof(instances),
-					instance.TypeIndex,
-					"A foliage instance names a type the asset does not list.");
-			}
-
-			var key = ((int)MathF.Floor(instance.Position.X / cellSize), (int)MathF.Floor(instance.Position.Z / cellSize));
+			ValidateTypeIndex(instance.TypeIndex);
+			var key = GetCellCoordinates(instance.Position.X, instance.Position.Z);
 			if (instancesByCell.TryGetValue(key, out var cellInstances) == false)
 			{
 				cellInstances = [];
@@ -78,12 +217,13 @@ public sealed class TerrainFoliage : IDataAsset
 			cellInstances.Add(instance);
 		}
 
+		var packedCells = instancesByCell.OrderBy(entry => entry.Key.Z).ThenBy(entry => entry.Key.X)
+			.Select(entry => TerrainFoliageCell.Create(entry.Key.X, entry.Key.Z, entry.Value))
+			.ToList();
 		Cells.Clear();
-		foreach (var ((x, z), cellInstances) in instancesByCell.OrderBy(entry => entry.Key.Z).ThenBy(entry => entry.Key.X))
-		{
-			Cells.Add(TerrainFoliageCell.Create(x, z, cellInstances));
-		}
-
+		Cells.AddRange(packedCells);
+		_orderedCells = Cells;
+		_orderedCellCount = Cells.Count;
 		MarkChanged();
 	}
 }

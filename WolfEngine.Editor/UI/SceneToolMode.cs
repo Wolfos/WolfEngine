@@ -13,5 +13,6 @@ internal enum TerrainTool
 	Smooth,
 	Brush,
 	Eyedropper,
-	Pen
+	Pen,
+	Foliage
 }

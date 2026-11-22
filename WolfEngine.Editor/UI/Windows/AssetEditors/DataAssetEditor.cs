@@ -27,6 +27,10 @@ public sealed class DataAssetEditor
 	private AssetDatabaseEntry? _loadedAssetEntry;
 	private EditorAssetFileSnapshot? _pendingBeforeSnapshot;
 	private bool _hasPendingChanges;
+	private TerrainFoliage? _summarizedFoliage;
+	private int _summarizedFoliageRevision;
+	private int[] _foliageTypeCounts = [];
+	private int _foliageInstanceCount;
 
 	public DataAssetEditor(
 		IEditorProjectService projectService,
@@ -61,6 +65,21 @@ public sealed class DataAssetEditor
 			CommitPendingChanges();
 		}
 
+		if (FoliageAssetTypes.IsTerrainFoliage(asset))
+		{
+			var foliage = AssetDatabase.GetInstance<TerrainFoliage>(asset.Id);
+			if (foliage is null)
+			{
+				ImGui.TextUnformatted("Failed to load terrain foliage.");
+			}
+			else
+			{
+				DrawFoliageSummary(foliage);
+			}
+
+			return;
+		}
+
 		var loadedAsset = EnsureLoaded(asset);
 
 		if (loadedAsset is null)
@@ -81,6 +100,41 @@ public sealed class DataAssetEditor
 		if (_hasPendingChanges && ImGui.IsAnyItemActive() == false)
 		{
 			CommitPendingChanges();
+		}
+	}
+
+	private void DrawFoliageSummary(TerrainFoliage foliage)
+	{
+		if (ReferenceEquals(_summarizedFoliage, foliage) == false || _summarizedFoliageRevision != foliage.Revision)
+		{
+			_summarizedFoliage = foliage;
+			_summarizedFoliageRevision = foliage.Revision;
+			_foliageTypeCounts = new int[foliage.Types.Count];
+			_foliageInstanceCount = 0;
+			foreach (var cell in foliage.Cells)
+			{
+				_foliageInstanceCount += cell.InstanceCount;
+				for (var i = 0; i < cell.InstanceCount; i++)
+				{
+					var typeIndex = cell.GetInstance(i).TypeIndex;
+					if ((uint)typeIndex < (uint)_foliageTypeCounts.Length)
+					{
+						_foliageTypeCounts[typeIndex]++;
+					}
+				}
+			}
+		}
+
+		ImGui.TextWrapped("Paint and erase instances with the terrain's Foliage tool.");
+		ImGui.TextUnformatted($"Total instances: {_foliageInstanceCount:N0}");
+		ImGui.TextUnformatted($"Cells: {foliage.Cells.Count:N0}");
+		ImGui.TextUnformatted($"Cell size: {foliage.ResolvedCellSizeMeters:0.##} m");
+		ImGui.SeparatorText("Foliage types");
+		for (var i = 0; i < foliage.Types.Count; i++)
+		{
+			var id = foliage.Types[i].NodeId;
+			var name = _projectService.TryGetAsset(id, out var type) ? type.Name : $"Missing type ({id:D})";
+			ImGui.TextUnformatted($"{name}  {_foliageTypeCounts[i]:N0}");
 		}
 	}
 
@@ -131,6 +185,11 @@ public sealed class DataAssetEditor
 		}
 		if (target is AnimationSet set) return DrawAnimationSet(set);
 		if (target is BoneMask mask) return DrawBoneMask(mask);
+		if (target is TerrainFoliage foliage)
+		{
+			DrawFoliageSummary(foliage);
+			return false;
+		}
 
 		var changed = false;
 		foreach (var property in InspectorLayout.GetEditableProperties(targetType))

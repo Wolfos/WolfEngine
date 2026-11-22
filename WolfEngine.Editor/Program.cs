@@ -57,6 +57,7 @@ public static class Program
 		services.AddSingleton<IEditorAssetSnapshotService, EditorAssetSnapshotService>();
 		services.AddSingleton<ITerrainTexturePreviewRegistry, TerrainTexturePreviewRegistry>();
 		services.AddSingleton<ITerrainAssetPersistenceService, TerrainAssetPersistenceService>();
+		services.AddSingleton<TerrainFoliageAssetService>();
 		services.AddSingleton<IEditorUndoRedoService, EditorUndoRedoService>();
 		services.AddSingleton<IEditorCommandService, EditorCommandService>();
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
@@ -152,6 +153,7 @@ public static class Program
 		services.AddSingleton<TerrainBrushPreviewDecalController>();
 		services.AddSingleton<ITerrainBrushGpuExecutor, TerrainBrushGpuExecutor>();
 		services.AddSingleton<ITerrainAuthoringService, TerrainAuthoringService>();
+		services.AddSingleton<FoliageAuthoringService>();
 		services.AddSingleton<TerrainToolController>();
 		services.AddSingleton<BoxColliderGizmoDrawer>();
 		services.AddSingleton<SphereColliderGizmoDrawer>();

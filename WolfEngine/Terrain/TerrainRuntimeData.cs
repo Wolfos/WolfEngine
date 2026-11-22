@@ -1109,7 +1109,7 @@ public sealed class TerrainRuntimeData
 		       Matrix4x4.Invert(localToWorld, out worldToLocal);
 	}
 
-	private bool TrySampleLocalSurface(float localX, float localZ, out Vector3 surfacePoint, out Vector3 surfaceNormal)
+	internal bool TrySampleLocalSurface(float localX, float localZ, out Vector3 surfacePoint, out Vector3 surfaceNormal)
 	{
 		surfacePoint = Vector3.Zero;
 		surfaceNormal = Vector3.UnitY;

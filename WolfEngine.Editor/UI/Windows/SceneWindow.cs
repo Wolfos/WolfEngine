@@ -244,8 +244,13 @@ public class SceneWindow: EditorWindow
                 layerSet = world.GetComponent<TerrainComponent>(EditorGui.SelectedEntity).LayerSetAsset.Asset;
             }
 
-            _terrainToolSettingsOverlay.Draw(_terrainTool, _terrainToolController.Settings, layerSet, imageMin, imageMax);
+			_terrainToolSettingsOverlay.Draw(_terrainTool, _terrainToolController, layerSet, imageMin, imageMax);
         }
+
+		if (_sceneToolMode != SceneToolMode.Terrain || _playSession.State != EditorPlayState.Edit)
+		{
+			_terrainToolController.FinishFoliageStroke();
+		}
 
         _viewportStateBus.PublishUiState(RenderViewId.Primary, new SceneViewportUiState(
             visible,
@@ -291,8 +296,16 @@ public class SceneWindow: EditorWindow
                     _sceneSelectionController.Update(scene);
                     break;
                 case SceneToolMode.Terrain:
-                    _terrainToolController.DrawAndHandle(scene, _terrainTool);
-                    break;
+					if (_terrainTool == TerrainTool.Foliage && _playSession.State != EditorPlayState.Edit)
+					{
+						_terrainToolController.ClearPreview();
+					}
+					else
+					{
+						_terrainToolController.DrawAndHandle(scene, _terrainTool);
+					}
+
+					break;
                 default:
                     _terrainToolController.ClearPreview();
                     break;
@@ -375,6 +388,25 @@ public class SceneWindow: EditorWindow
         DrawTerrainToolButton("Eyedropper", "eyedropper", TerrainTool.Eyedropper);
         ImGui.SameLine();
         DrawTerrainToolButton("Pen", "pen", TerrainTool.Pen);
+		ImGui.SameLine();
+		var foliageSelected = _terrainTool == TerrainTool.Foliage;
+		if (foliageSelected)
+		{
+			var selectedColor = ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive];
+			ImGui.PushStyleColor(ImGuiCol.Button, selectedColor);
+			ImGui.PushStyleColor(ImGuiCol.ButtonHovered, selectedColor);
+			ImGui.PushStyleColor(ImGuiCol.ButtonActive, selectedColor);
+		}
+
+		if (ImGui.Button("Foliage"))
+		{
+			_terrainTool = TerrainTool.Foliage;
+		}
+
+		if (foliageSelected)
+		{
+			ImGui.PopStyleColor(3);
+		}
     }
 
     private bool DrawTerrainToolButton(string buttonId, string iconName, TerrainTool tool)

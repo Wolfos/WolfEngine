@@ -328,6 +328,30 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().UndoAsync(cancellationToken);
 
+	public Task<EditorUndoResult> RedoAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().RedoAsync(cancellationToken);
+
+	public Task<FoliagePaintResult> PaintFoliageAsync(
+		string? terrainEntityId,
+		float localX,
+		float localZ,
+		float radiusMeters,
+		float density,
+		IReadOnlyList<string> foliageTypePaths,
+		bool erase,
+		int? seed,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().PaintFoliageAsync(
+			terrainEntityId,
+			localX,
+			localZ,
+			radiusMeters,
+			density,
+			foliageTypePaths,
+			erase,
+			seed,
+			cancellationToken);
+
 	public Task<GameplayStateResult> GetGameplayStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetGameplayStateAsync(cancellationToken);
 

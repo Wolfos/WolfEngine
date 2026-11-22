@@ -222,7 +222,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		var currentId = GetAssetLinkId(valueType, context.Value);
 		var authoringTypeName = descriptor.AuthoringType.AssemblyQualifiedName ?? string.Empty;
 		var authoringTypeId = _typeResolver.GetStableTypeId(descriptor.AuthoringType);
-		var candidates = _projectService.HasOpenProject
+		IReadOnlyList<AssetDatabaseEntry> GetCandidates() => _projectService.HasOpenProject
 			? AssetLinkPickerLogic.GetCandidates(
 				_projectService.CurrentAssetCatalog.Assets.Select(mounted => mounted.Asset).ToArray(),
 				descriptor, authoringTypeName, authoringTypeId)
@@ -235,7 +235,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			context.Label,
 			AssetLinkPickerLogic.GetPreviewLabel(_projectService.HasOpenProject, currentId, currentAsset, descriptor, authoringTypeName, authoringTypeId),
 			currentId,
-			candidates,
+			GetCandidates,
 			context.AssetLinkSelectionButton,
 			out var nextId);
 
@@ -253,7 +253,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 	{
 		ArgumentNullException.ThrowIfNull(isCandidate);
 
-		var candidates = _projectService.HasOpenProject
+		IReadOnlyList<AssetDatabaseEntry> GetCandidates() => _projectService.HasOpenProject
 			? _projectService.CurrentAssetCatalog.Assets
 				.Select(mounted => mounted.Asset)
 				.Where(isCandidate)
@@ -270,7 +270,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 				: isCandidate(currentAsset)
 					? currentAsset.Name
 					: "Invalid";
-		if (DrawAssetPickerPopup(label, previewLabel, assetId, candidates, selectionButton, out var chosenId) == false)
+		if (DrawAssetPickerPopup(label, previewLabel, assetId, GetCandidates, selectionButton, out var chosenId) == false)
 		{
 			return false;
 		}
@@ -284,7 +284,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		string label,
 		string previewLabel,
 		Guid currentId,
-		IReadOnlyList<AssetDatabaseEntry> candidates,
+		Func<IReadOnlyList<AssetDatabaseEntry>> getCandidates,
 		AssetLinkSelectionButton? selectionButton,
 		out Guid chosenId)
 	{
@@ -297,6 +297,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			AssetLinkPickerSize,
 			() =>
 		{
+			var candidates = getCandidates();
 			var popupStateId = ImGui.GetID(AssetLinkPickerPopupId);
 			if (_assetLinkSearchTexts.TryGetValue(popupStateId, out var searchText) == false || ImGui.IsWindowAppearing())
 			{

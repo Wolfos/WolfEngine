@@ -82,6 +82,35 @@ public sealed class FoliageTests
 	}
 
 	[Test]
+	public void ReplaceCell_RecomputesBoundsAndPreservesTheOtherCellsBytes()
+	{
+		var foliage = CreateFoliage(typeCount: 1);
+		foliage.SetInstances(
+		[
+			Placed(2.0f, 3.0f, typeIndex: 0),
+			Placed(5.0f, 7.0f, typeIndex: 0),
+			Placed(66.0f, 66.0f, typeIndex: 0)
+		]);
+		var otherCell = foliage.GetCell(1, 1)!;
+		var otherBytes = otherCell.Instances.ToArray();
+
+		foliage.ReplaceCell(0, 0, [Placed(13.0f, 12.0f, typeIndex: 0), Placed(15.0f, 16.0f, typeIndex: 0)]);
+		var updated = foliage.GetCell(0, 0)!;
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(updated.BoundsMin, Is.EqualTo(new Vector3(13.0f, 0.0f, 12.0f)));
+			Assert.That(updated.BoundsMax, Is.EqualTo(new Vector3(15.0f, 0.0f, 16.0f)));
+			Assert.That(foliage.GetCell(1, 1), Is.SameAs(otherCell));
+			Assert.That(foliage.GetCell(1, 1)!.Instances, Is.EqualTo(otherBytes));
+		});
+
+		foliage.ReplaceCell(0, 0, []);
+		Assert.That(foliage.GetCell(0, 0), Is.Null);
+		Assert.That(foliage.Cells, Is.EqualTo(new[] { otherCell }));
+	}
+
+	[Test]
 	public void SetInstances_RejectsATypeTheAssetDoesNotList()
 	{
 		var foliage = CreateFoliage(typeCount: 1);

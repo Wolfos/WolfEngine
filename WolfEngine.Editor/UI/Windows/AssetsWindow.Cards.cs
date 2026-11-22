@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Editor.Projects;
 
 namespace WolfEngine.Editor.UI;
 
@@ -130,6 +131,13 @@ public sealed partial class AssetsWindow
 		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
 		var doubleClicked = leftClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
 		var hovered = ImGui.IsItemHovered();
+		var releasedOverCard = hovered && ImGui.IsItemDeactivated() && ImGui.IsMouseReleased(ImGuiMouseButton.Left);
+		var isFoliageDragSource = (ImGui.IsItemActive() || releasedOverCard) && FoliageAssetTypes.IsFoliageType(source.PrimaryAsset);
+		if (isFoliageDragSource)
+		{
+			FoliageAssetDragDrop.DrawSource(source.PrimaryAsset.Id);
+		}
+
 		var appearance = AssetBrowserAppearance.For(source.PrimaryAsset.Type);
 		var selected = _assetSelectionService.SelectedAssetId is { } id && (source.PrimaryAsset.Id == id || source.SubAssets.Any(asset => asset.Id == id));
 		var expanded = _selection.ExpandedSourceId == source.SourceId;
@@ -158,7 +166,8 @@ public sealed partial class AssetsWindow
 			}
 
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectAsset(source.PrimaryAsset, folderPath: source.FolderPath);
+			// Keep the card active while it can become a foliage drag.
+			SelectAsset(source.PrimaryAsset, requestFocus: isFoliageDragSource == false, folderPath: source.FolderPath);
 			if (_selection.ExpandedSourceId.HasValue && expanded == false)
 			{
 				_selection.ExpandedSourceId = hasChildren ? source.SourceId : null;
@@ -168,6 +177,11 @@ public sealed partial class AssetsWindow
 			{
 				OpenAsset(source.PrimaryAsset, scene);
 			}
+		}
+
+		if (releasedOverCard && isFoliageDragSource)
+		{
+			SelectAsset(source.PrimaryAsset, folderPath: source.FolderPath);
 		}
 
 		if (rightClicked)

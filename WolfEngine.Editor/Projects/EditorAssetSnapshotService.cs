@@ -87,7 +87,14 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 	{
 		EnsureWritable(asset.Id);
 		_dataAssetStore.SaveAsset(_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeAssetPath), dataAssetType, dataAsset);
-		_projectService.RefreshAssetSource(asset.RelativeSourcePath);
+		if (dataAsset is TerrainFoliage && ReferenceEquals(dataAsset, AssetDatabase.GetInstance<TerrainFoliage>(asset.Id)))
+		{
+			_projectService.RefreshAssetSource(asset.RelativeSourcePath, asset.Id);
+		}
+		else
+		{
+			_projectService.RefreshAssetSource(asset.RelativeSourcePath);
+		}
 	}
 
 	public void ApplyMaterialAssetSnapshot(EditorAssetFileSnapshot snapshot)

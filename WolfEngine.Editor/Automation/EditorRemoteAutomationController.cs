@@ -35,6 +35,7 @@ public sealed partial class EditorRemoteAutomationController
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
+	private readonly FoliageAuthoringService _foliageAuthoringService;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
 	private readonly IPrefabAssetCreator _prefabAssetCreator;
 	private readonly IRenderer _renderer;
@@ -72,6 +73,7 @@ public sealed partial class EditorRemoteAutomationController
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
 		ITerrainAuthoringService terrainAuthoringService,
+		FoliageAuthoringService foliageAuthoringService,
 		IProjectAssetPipelineService assetPipelineService,
 		IPrefabAssetCreator prefabAssetCreator,
 		IRenderer renderer,
@@ -119,6 +121,7 @@ public sealed partial class EditorRemoteAutomationController
 		_interactionState = interactionState;
 		_commandService = commandService;
 		_terrainAuthoringService = terrainAuthoringService;
+		_foliageAuthoringService = foliageAuthoringService;
 		_assetPipelineService = assetPipelineService;
 		_prefabAssetCreator = prefabAssetCreator;
 		_renderer = renderer;
@@ -1240,9 +1243,82 @@ public sealed partial class EditorRemoteAutomationController
 				_renderFrameCoordinator.CompletedSequence);
 		}, cancellationToken);
 
+	public Task<FoliagePaintResult> PaintFoliageAsync(
+		string? terrainEntityId,
+		float localX,
+		float localZ,
+		float radiusMeters,
+		float density,
+		IReadOnlyList<string> foliageTypePaths,
+		bool erase,
+		int? seed,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.State != EditorPlayState.Edit)
+			{
+				throw new InvalidOperationException("Foliage authoring is only available outside Play mode.");
+			}
+
+			ValidateFinite(localX, nameof(localX));
+			ValidateFinite(localZ, nameof(localZ));
+			var settings = new FoliageBrushSettings { RadiusMeters = radiusMeters, Density = density };
+			var palette = foliageTypePaths.Distinct(StringComparer.OrdinalIgnoreCase)
+				.Select(ResolveFoliagePaletteEntry)
+				.ToArray();
+			var scene = _sceneWorkspace.CurrentScene;
+			var (entity, persistentId) = ResolveTerrainEntity(scene, terrainEntityId);
+			if (_foliageAuthoringService.BeginStroke(scene, entity, settings, palette, seed) == false)
+			{
+				throw new InvalidOperationException($"Could not begin a foliage stroke on terrain entity '{persistentId:D}'.");
+			}
+
+			try
+			{
+				var result = _foliageAuthoringService.AppendStamp(
+					new Vector2(localX, localZ),
+					new TerrainBrushModifierState(erase));
+				var assetId = _foliageAuthoringService.AssetId.GetValueOrDefault();
+				return new FoliagePaintResult(
+					persistentId,
+					assetId == Guid.Empty ? null : assetId,
+					result.Added,
+					result.Removed,
+					_foliageAuthoringService.InstanceCount);
+			}
+			finally
+			{
+				_foliageAuthoringService.EndStroke();
+			}
+		}, cancellationToken);
+
+	private FoliagePaletteEntry ResolveFoliagePaletteEntry(string path)
+	{
+		var projectRoot = _projectService.ProjectRootPath!;
+		var fullPath = Path.GetFullPath(path, projectRoot);
+		var relativePath = Normalize(Path.GetRelativePath(projectRoot, fullPath));
+		var asset = _projectService.CurrentAssetCatalog.Assets
+			.Select(mounted => mounted.Asset)
+			.FirstOrDefault(entry =>
+				string.Equals(entry.RelativeSourcePath, relativePath, StringComparison.OrdinalIgnoreCase) &&
+				FoliageAssetTypes.IsFoliageType(entry));
+		if (asset is null)
+		{
+			throw new InvalidOperationException($"Foliage type '{path}' was not found in the project asset catalog.");
+		}
+
+		return new FoliagePaletteEntry(new AssetRef<FoliageType> { NodeId = asset.Id });
+	}
+
 	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
 		Enqueue(() => new EditorUndoResult(
 			_commandService.SceneDocument.Undo(),
+			_editorFrameCoordinator.CompletedSequence,
+			_renderFrameCoordinator.CompletedSequence), cancellationToken);
+
+	public Task<EditorUndoResult> RedoAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => new EditorUndoResult(
+			_commandService.SceneDocument.Redo(),
 			_editorFrameCoordinator.CompletedSequence,
 			_renderFrameCoordinator.CompletedSequence), cancellationToken);
 

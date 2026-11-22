@@ -349,9 +349,35 @@ public sealed class EditorAutomationTools
 			invert,
 			cancellationToken);
 
+	[McpServerTool(Name = "paint_foliage"), Description("Apply one undoable placed-foliage stamp. Returns added, removed and total instances, plus the foliage asset GUID when assigned.")]
+	public Task<FoliagePaintResult> PaintFoliage(
+		[Description("Persistent terrain entity GUID. Omit when the scene contains exactly one terrain.")] string? terrainEntityId = null,
+		[Description("Terrain-local X coordinate in metres.")] float localX = 0.0f,
+		[Description("Terrain-local Z coordinate in metres.")] float localZ = 0.0f,
+		[Description("Brush radius in metres.")] float radiusMeters = 12.0f,
+		[Description("Target instances per 100 square metres in the brush circle.")] float density = 1.0f,
+		[Description("Project-relative FoliageType paths. In erase mode, an empty palette targets all types.")] string[]? foliageTypePaths = null,
+		[Description("Erase matching instances within the brush.")] bool erase = false,
+		[Description("Optional deterministic seed.")] int? seed = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.PaintFoliageAsync(
+			terrainEntityId,
+			localX,
+			localZ,
+			radiusMeters,
+			density,
+			foliageTypePaths ?? [],
+			erase,
+			seed,
+			cancellationToken);
+
 	[McpServerTool(Name = "undo"), Description("Undo the most recent editor authoring action, including a terrain stroke.")]
 	public Task<EditorUndoResult> Undo(CancellationToken cancellationToken) =>
 		_controller.UndoAsync(cancellationToken);
+
+	[McpServerTool(Name = "redo"), Description("Redo the most recently undone editor authoring action.")]
+	public Task<EditorUndoResult> Redo(CancellationToken cancellationToken) =>
+		_controller.RedoAsync(cancellationToken);
 
 	[McpServerTool(Name = "get_gameplay_state"), Description("Return the loaded gameplay assembly's generation and path, whether the gameplay source changed since that build (rescanned now), whether a build is running, and whether the last build failed for the current source.")]
 	public Task<GameplayStateResult> GetGameplayState(CancellationToken cancellationToken) =>

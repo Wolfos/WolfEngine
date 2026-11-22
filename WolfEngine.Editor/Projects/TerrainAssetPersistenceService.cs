@@ -15,16 +15,19 @@ public sealed class TerrainAssetPersistenceService : ITerrainAssetPersistenceSer
 	private readonly IEditorProjectService _projectService;
 	private readonly ITerrainTexturePreviewRegistry _texturePreviewRegistry;
 	private readonly ITerrainBrushGpuExecutor _brushGpuExecutor;
+	private readonly TerrainFoliageAssetService? _foliageAssets;
 	private readonly Dictionary<Guid, TerrainAssetSnapshot> _dirtyStates = new();
 
 	public TerrainAssetPersistenceService(
 		IEditorProjectService projectService,
 		ITerrainTexturePreviewRegistry texturePreviewRegistry,
-		ITerrainBrushGpuExecutor brushGpuExecutor)
+		ITerrainBrushGpuExecutor brushGpuExecutor,
+		TerrainFoliageAssetService? foliageAssets = null)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_texturePreviewRegistry = texturePreviewRegistry ?? throw new ArgumentNullException(nameof(texturePreviewRegistry));
 		_brushGpuExecutor = brushGpuExecutor ?? throw new ArgumentNullException(nameof(brushGpuExecutor));
+		_foliageAssets = foliageAssets;
 	}
 
 	public void RecordPendingTerrainAssetState(IReadOnlyList<TerrainAssetSnapshot> snapshots)
@@ -82,6 +85,7 @@ public sealed class TerrainAssetPersistenceService : ITerrainAssetPersistenceSer
 
 	public void SaveDirtyTerrainAssets()
 	{
+		_foliageAssets?.SaveDirtyAssets();
 		if (_dirtyStates.Count == 0)
 		{
 			return;

@@ -8,14 +8,21 @@ namespace WolfEngine.Editor.Projects;
 public sealed class DataAssetRuntimeResolver : IDataAssetRuntimeResolver
 {
 	private readonly IDataAssetStore _dataAssetStore;
+	private readonly TerrainFoliageAssetService? _foliageAssets;
 
-	public DataAssetRuntimeResolver(IDataAssetStore dataAssetStore)
+	public DataAssetRuntimeResolver(IDataAssetStore dataAssetStore, TerrainFoliageAssetService? foliageAssets = null)
 	{
 		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
+		_foliageAssets = foliageAssets;
 	}
 
 	public object? Resolve(RuntimeAssetResolveContext context)
 	{
+		if (context.RuntimeType == typeof(TerrainFoliage) && _foliageAssets?.GetPending(context.AssetId) is { } foliage)
+		{
+			return foliage;
+		}
+
 		var loadedAsset = _dataAssetStore.LoadAsset(context.GetAbsolutePath(context.Asset.RelativeAssetPath)).Asset;
 		if (context.RuntimeType.IsInstanceOfType(loadedAsset) == false)
 		{
