@@ -96,6 +96,33 @@ public readonly struct ViewProjection
 		return true;
 	}
 
+	/// <summary>
+	/// Projects a world-space point to normalized viewport coordinates, the inverse of
+	/// <see cref="TryViewportPointToRay"/>: (0,0) is top-left and (1,1) is bottom-right. A point off the edge of the
+	/// view extrapolates outside 0..1. Returns false for a point behind the camera or on its plane, which has no
+	/// position on screen.
+	/// </summary>
+	public bool TryWorldPointToViewport(Vector3 worldPoint, out Vector2 viewportPoint)
+	{
+		viewportPoint = default;
+		if (_isValid == false || IsFinite(worldPoint) == false)
+		{
+			return false;
+		}
+
+		var clip = Vector4.Transform(new Vector4(worldPoint, 1.0f), _worldToClip);
+		if (IsFinite(clip) == false || clip.W <= 1e-6f)
+		{
+			return false;
+		}
+
+		var ndcX = clip.X / clip.W;
+		var ndcY = clip.Y / clip.W;
+		viewportPoint = new Vector2(ndcX * 0.5f + 0.5f, 0.5f - ndcY * 0.5f);
+
+		return IsFinite(viewportPoint);
+	}
+
 	private bool TryUnproject(Vector3 ndc, out Vector3 point)
 	{
 		point = default;

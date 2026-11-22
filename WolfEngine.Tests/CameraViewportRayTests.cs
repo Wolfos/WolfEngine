@@ -61,6 +61,33 @@ public sealed class CameraViewportRayTests
 		Assert.That(camera.TryViewportPointToRay(new Vector2(float.NaN, 0.5f), CreateTransform(Vector3.Zero), out _), Is.False);
 	}
 
+	[TestCase(0.5f, 0.5f)]
+	[TestCase(0.2f, 0.8f)]
+	[TestCase(0.9f, 0.1f)]
+	[TestCase(1.3f, -0.2f)]
+	public void WorldPointToViewport_InvertsViewportPointToRay(float x, float y)
+	{
+		var camera = CreateCamera(new Int2(1600, 900), 60.0f);
+		var transform = CreateTransform(new Vector3(4.0f, 3.0f, -2.0f));
+		var viewportPoint = new Vector2(x, y);
+
+		Assert.That(camera.TryViewportPointToRay(viewportPoint, transform, out var ray), Is.True);
+		Assert.That(camera.TryWorldPointToViewport(ray.GetPoint(12.0f), transform.LocalToWorld, out var projected), Is.True);
+		Assert.That(projected.X, Is.EqualTo(x).Within(1e-4f));
+		Assert.That(projected.Y, Is.EqualTo(y).Within(1e-4f));
+	}
+
+	[Test]
+	public void WorldPointToViewport_PointBehindCameraHasNoViewportPosition()
+	{
+		var camera = CreateCamera(new Int2(800, 600), 70.0f);
+		var transform = CreateTransform(Vector3.Zero);
+
+		Assert.That(camera.TryWorldPointToViewport(new Vector3(0.0f, 0.0f, -5.0f), transform.LocalToWorld, out _), Is.False);
+		Assert.That(camera.TryWorldPointToViewport(new Vector3(0.0f, 1.0f, 5.0f), transform.LocalToWorld, out var above), Is.True);
+		Assert.That(above.Y, Is.LessThan(0.5f));
+	}
+
 	private static Camera CreateCamera(Int2 resolution, float fov)
 	{
 		var camera = new Camera

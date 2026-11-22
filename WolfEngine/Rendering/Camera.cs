@@ -80,9 +80,41 @@ public struct Camera: IEntityComponent, IJsonOnDeserialized
 		out Ray ray)
 	{
 		ray = default;
+		if (TryGetViewProjection(cameraWorldTransform.LocalToWorld, out var viewProjection) == false)
+		{
+			return false;
+		}
+
+		return viewProjection.TryViewportPointToRay(viewportPoint, out ray);
+	}
+
+	/// <summary>
+	/// Projects a world-space point to normalized viewport coordinates using this camera's current projection
+	/// settings, the inverse of <see cref="TryViewportPointToRay"/>. Coordinates use a top-left origin and
+	/// extrapolate outside 0..1 for points off the edge of the view.
+	/// </summary>
+	/// <remarks>Returns false when the camera or transform is invalid, or the point is behind the camera.</remarks>
+	public bool TryWorldPointToViewport(
+		Vector3 worldPoint,
+		in Matrix4x4 cameraLocalToWorld,
+		out Vector2 viewportPoint)
+	{
+		viewportPoint = default;
+		if (TryGetViewProjection(cameraLocalToWorld, out var viewProjection) == false)
+		{
+			return false;
+		}
+
+		return viewProjection.TryWorldPointToViewport(worldPoint, out viewportPoint);
+	}
+
+	/// <summary>Builds the projection snapshot for this camera at <paramref name="cameraLocalToWorld"/>.</summary>
+	public bool TryGetViewProjection(in Matrix4x4 cameraLocalToWorld, out ViewProjection viewProjection)
+	{
+		viewProjection = default;
 		if (ScreenResolution.X <= 0 || ScreenResolution.Y <= 0 ||
 		    float.IsFinite(Fov) == false || float.IsFinite(NearPlane) == false || float.IsFinite(FarPlane) == false ||
-		    Matrix4x4.Invert(cameraWorldTransform.LocalToWorld, out var view) == false)
+		    Matrix4x4.Invert(cameraLocalToWorld, out var view) == false)
 		{
 			return false;
 		}
@@ -93,13 +125,12 @@ public struct Camera: IEntityComponent, IJsonOnDeserialized
 		var effectiveFarPlane = FarPlane > effectiveNearPlane ? FarPlane : DefaultFarPlane;
 		if (effectiveFov <= 0.0f || effectiveFov >= 180.0f ||
 		    float.IsFinite(effectiveFovRadians) == false || effectiveFovRadians <= 0.0f || effectiveFovRadians >= MathF.PI ||
-		    effectiveNearPlane <= 0.0f || effectiveFarPlane <= effectiveNearPlane ||
-		    ViewProjection.TryCreate(view, GetPerspective(ScreenResolution), out var viewProjection) == false)
+		    effectiveNearPlane <= 0.0f || effectiveFarPlane <= effectiveNearPlane)
 		{
 			return false;
 		}
 
-		return viewProjection.TryViewportPointToRay(viewportPoint, out ray);
+		return ViewProjection.TryCreate(view, GetPerspective(ScreenResolution), out viewProjection);
 	}
 
 	public void OnDeserialized()
