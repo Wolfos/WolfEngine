@@ -82,6 +82,39 @@ public readonly struct GpuInstanceData
 	public readonly uint MeshHandle;
 	public readonly uint DrawKind;
 	public readonly uint Flags;
+
+	/// <summary>A <see cref="LodGroup"/>'s bounds in world space, which a grouped instance's level is measured on.</summary>
+	public readonly Vector4 LodSphere;
+
+	/// <summary>Packed by <see cref="GpuDrawLodParams"/>; zero for an instance outside any group.</summary>
+	public readonly uint LodParams;
+	private readonly uint _lodPad0;
+	private readonly uint _lodPad1;
+	private readonly uint _lodPad2;
+}
+
+/// <summary>
+/// Packs a grouped instance's level of detail parameters into one word. Mirrors the LOD_PARAMS_ constants in
+/// draw_data.slang.
+/// </summary>
+public static class GpuDrawLodParams
+{
+	public const uint GroupedBit = 1u;
+	public const int FirstLevelShift = 1;
+	public const int LastLevelShift = 4;
+	public const int ThresholdSetShift = 7;
+	public const uint LevelMask = 0x7u;
+
+	/// <summary>Threshold sets a frame can name; the level table reserves this many entries for them.</summary>
+	public const int MaxThresholdSetCount = 4096;
+
+	public static uint Pack(int thresholdSetIndex, int firstLevel, int lastLevel)
+	{
+		return GroupedBit |
+		       ((uint)Math.Clamp(firstLevel, 0, GpuDrawLod.MaxLevel) << FirstLevelShift) |
+		       ((uint)Math.Clamp(lastLevel, 0, GpuDrawLod.MaxLevel) << LastLevelShift) |
+		       ((uint)thresholdSetIndex << ThresholdSetShift);
+	}
 }
 
 /// <summary>
@@ -283,7 +316,9 @@ public readonly struct GpuDrawCommand
 	public readonly uint InstanceHandle;
 	public readonly uint BatchIndex;
 	public readonly uint Flags;
-	private readonly uint _pad0;
+
+	/// <summary>The level of detail the camera cull last picked, which the next cull starts from for hysteresis.</summary>
+	public readonly uint LodLevel;
 }
 
 /// <summary>
@@ -291,6 +326,41 @@ public readonly struct GpuDrawCommand
 /// instances are written from <see cref="VisibleOffset"/> into each view's slice of the visible instance list, and
 /// never more than <see cref="Capacity"/> of them. A batch with no members has a capacity of zero.
 /// </summary>
+/// <summary>
+/// How the cull picks a level of detail for the instances of one batch: the batch drawing each level, and the
+/// screen sizes it switches at. Indexed like the batch table, by the instances' level 0 batch. A batch whose mesh has
+/// no coarser levels has a level count of one. Mirrors GpuDrawBatchLodData in draw_data.slang; see docs/mesh-lod.md.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public struct GpuDrawBatchLodData
+{
+	/// <summary>Levels a batch can switch between, level 0 included.</summary>
+	public const int MaxLevelCount = 8;
+
+	public uint LevelCount;
+	private uint _pad0;
+	private uint _pad1;
+	private uint _pad2;
+
+	/// <summary>Batch drawing each level, level 0 first. Entry 0 is the batch this entry is indexed by.</summary>
+	public LevelBatchIndices LevelBatches;
+
+	/// <summary>Screen size each coarser level starts below: entry n is the threshold into level n + 1.</summary>
+	public LevelScreenSizes ScreenSizes;
+
+	[System.Runtime.CompilerServices.InlineArray(MaxLevelCount)]
+	public struct LevelBatchIndices
+	{
+		private uint _element;
+	}
+
+	[System.Runtime.CompilerServices.InlineArray(MaxLevelCount)]
+	public struct LevelScreenSizes
+	{
+		private float _element;
+	}
+}
+
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuDrawBatchData
 {
@@ -336,7 +406,9 @@ public readonly struct GpuDrawInstanceUpdateData
 		uint drawKind,
 		uint meshHandle,
 		uint materialHandle,
-		uint drawFlags)
+		uint drawFlags,
+		Vector4 lodSphere,
+		uint lodParams)
 	{
 		PreviousWorld = previousWorld;
 		World = world;
@@ -351,6 +423,11 @@ public readonly struct GpuDrawInstanceUpdateData
 		MaterialHandle = materialHandle;
 		DrawFlags = drawFlags;
 		_pad0 = 0;
+		LodSphere = lodSphere;
+		LodParams = lodParams;
+		_lodPad0 = 0;
+		_lodPad1 = 0;
+		_lodPad2 = 0;
 	}
 
 	public readonly Matrix4x4 PreviousWorld;
@@ -366,6 +443,12 @@ public readonly struct GpuDrawInstanceUpdateData
 	public readonly uint MaterialHandle;
 	public readonly uint DrawFlags;
 	private readonly uint _pad0;
+
+	public readonly Vector4 LodSphere;
+	public readonly uint LodParams;
+	private readonly uint _lodPad0;
+	private readonly uint _lodPad1;
+	private readonly uint _lodPad2;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

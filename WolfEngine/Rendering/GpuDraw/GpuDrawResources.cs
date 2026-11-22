@@ -58,6 +58,18 @@ public sealed class GpuDrawResources : IDisposable
 
 	/// <summary>The batch table, uploaded per frame slot whenever batch membership changes.</summary>
 	public IGfxBuffer? BatchBuffer => _batchBuffers[_activeFrameSlot];
+
+	/// <summary>
+	/// The level of detail table, indexed like the batch table and uploaded with it. See
+	/// <see cref="GpuDrawBatches.GetBatchLodTable"/>.
+	/// </summary>
+	public IGfxBuffer? BatchLodBuffer => _batchLodBuffers[_activeFrameSlot];
+
+	/// <summary>
+	/// Entries in each view's slice of the visible instance list. An instance with levels of detail has a slot in the
+	/// batch of every level, so this can exceed <see cref="InstanceCapacity"/>.
+	/// </summary>
+	public int VisibleInstanceCapacity { get; private set; }
 	public IGfxBuffer? InstanceGenerationBuffer => _instanceGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? MaterialGenerationBuffer => _materialGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? MeshGenerationBuffer => _meshGenerationBuffers[_activeFrameSlot];
@@ -96,6 +108,7 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxBuffer?[] _drawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _shadowDrawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _batchBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _batchLodBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _instanceGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _materialGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _meshGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
@@ -459,7 +472,16 @@ public sealed class GpuDrawResources : IDisposable
 	/// check re-uploads the whole GPU draw state and re-encodes every draw record.
 	/// </summary>
 	/// <returns>True when any table was replaced.</returns>
-	public bool EnsureTableCapacity(IGfxDevice device, int instanceSlots, int meshSlots, int materialSlots)
+	/// <param name="visibleInstanceSlots">
+	/// Entries each view's visible instance list needs: the batches' total capacity. Never less than the instance
+	/// capacity.
+	/// </param>
+	public bool EnsureTableCapacity(
+		IGfxDevice device,
+		int instanceSlots,
+		int meshSlots,
+		int materialSlots,
+		int visibleInstanceSlots = 0)
 	{
 		ArgumentNullException.ThrowIfNull(device);
 
@@ -511,20 +533,6 @@ public sealed class GpuDrawResources : IDisposable
 				Marshal.SizeOf<GpuDrawArgs>(),
 				BufferUsage.Indirect,
 				"ShadowDrawArgsBuffer");
-			VisibleInstanceBuffer = ReplaceTable(
-				device,
-				VisibleInstanceBuffer,
-				instanceCapacity,
-				sizeof(uint),
-				BufferUsage.Structured,
-				"VisibleInstanceBuffer");
-			ShadowVisibleInstanceBuffer = ReplaceTable(
-				device,
-				ShadowVisibleInstanceBuffer,
-				MaxShadowViewCount * instanceCapacity,
-				sizeof(uint),
-				BufferUsage.Structured,
-				"ShadowVisibleInstanceBuffer");
 			for (var i = 0; i < MaxFramesInFlight; i++)
 			{
 				_batchBuffers[i] = ReplaceTable(
@@ -534,6 +542,14 @@ public sealed class GpuDrawResources : IDisposable
 					Marshal.SizeOf<GpuDrawBatchData>(),
 					BufferUsage.Structured,
 					$"BatchBuffer[{i}]");
+				// Batch entries first, then the LodGroup threshold sets GpuDrawPass places after them.
+				_batchLodBuffers[i] = ReplaceTable(
+					device,
+					_batchLodBuffers[i],
+					instanceCapacity + GpuDrawLodParams.MaxThresholdSetCount,
+					System.Runtime.CompilerServices.Unsafe.SizeOf<GpuDrawBatchLodData>(),
+					BufferUsage.Structured,
+					$"BatchLodBuffer[{i}]");
 				_instanceGenerationBuffers[i] = ReplaceTable(
 					device,
 					_instanceGenerationBuffers[i],
@@ -543,6 +559,31 @@ public sealed class GpuDrawResources : IDisposable
 					$"InstanceGenerationBuffer[{i}]");
 			}
 
+			grew = true;
+		}
+
+		var visibleInstanceCapacity = GrowCapacity(
+			VisibleInstanceCapacity,
+			Math.Max(visibleInstanceSlots, InstanceCapacity),
+			InitialInstanceCapacity,
+			MaxInstanceCount * GpuDrawBatchLodData.MaxLevelCount);
+		if (visibleInstanceCapacity != VisibleInstanceCapacity)
+		{
+			VisibleInstanceCapacity = visibleInstanceCapacity;
+			VisibleInstanceBuffer = ReplaceTable(
+				device,
+				VisibleInstanceBuffer,
+				visibleInstanceCapacity,
+				sizeof(uint),
+				BufferUsage.Structured,
+				"VisibleInstanceBuffer");
+			ShadowVisibleInstanceBuffer = ReplaceTable(
+				device,
+				ShadowVisibleInstanceBuffer,
+				MaxShadowViewCount * visibleInstanceCapacity,
+				sizeof(uint),
+				BufferUsage.Structured,
+				"ShadowVisibleInstanceBuffer");
 			grew = true;
 		}
 
@@ -835,6 +876,12 @@ public sealed class GpuDrawResources : IDisposable
 		return _batchBuffers[frameSlot];
 	}
 
+	public IGfxBuffer? GetBatchLodBufferSlot(int frameSlot)
+	{
+		ValidateFrameSlot(frameSlot);
+		return _batchLodBuffers[frameSlot];
+	}
+
 	public IGfxBuffer? GetInstanceGenerationBufferSlot(int frameSlot)
 	{
 		ValidateFrameSlot(frameSlot);
@@ -929,6 +976,7 @@ public sealed class GpuDrawResources : IDisposable
 			(_drawExecutionRangePerBucketBuffers[i] as IDisposable)?.Dispose();
 			(_shadowDrawExecutionRangePerBucketBuffers[i] as IDisposable)?.Dispose();
 			(_batchBuffers[i] as IDisposable)?.Dispose();
+			(_batchLodBuffers[i] as IDisposable)?.Dispose();
 			(_instanceGenerationBuffers[i] as IDisposable)?.Dispose();
 			(_materialGenerationBuffers[i] as IDisposable)?.Dispose();
 			(_meshGenerationBuffers[i] as IDisposable)?.Dispose();
@@ -948,6 +996,7 @@ public sealed class GpuDrawResources : IDisposable
 			_drawExecutionRangePerBucketBuffers[i] = null;
 			_shadowDrawExecutionRangePerBucketBuffers[i] = null;
 			_batchBuffers[i] = null;
+			_batchLodBuffers[i] = null;
 			_instanceGenerationBuffers[i] = null;
 			_materialGenerationBuffers[i] = null;
 			_meshGenerationBuffers[i] = null;

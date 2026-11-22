@@ -469,6 +469,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		if (rootCount == 1)
 		{
 			var rootEntity = CreateModelNodeEntities(modelFile.Nodes, world, rootParent: null, modelFile);
+			var rootLocal = modelFile.Nodes.First(node => node.ParentIndex < 0).LocalTransform;
+			AddModelLodGroup(world, rootEntity, modelFile.LodGroup, rootLocal);
 			ApplySpawnPosition(world, rootEntity, spawnPosition);
 			return;
 		}
@@ -477,8 +479,35 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			world.CreateEntity(string.IsNullOrWhiteSpace(modelFile.Name) ? "Imported 3D Model" : modelFile.Name);
 		world.AddTransform(wrapper, System.Numerics.Matrix4x4.Identity);
 		CreateModelNodeEntities(modelFile.Nodes, world, wrapper, modelFile);
+		AddModelLodGroup(world, wrapper, modelFile.LodGroup, System.Numerics.Matrix4x4.Identity);
 
 		ApplySpawnPosition(world, wrapper, spawnPosition);
+	}
+
+	/// <summary>
+	/// Adds a model's generated <see cref="LodGroup"/> to the entity its renderers hang from. The group's bounds are in
+	/// the model's space, so they are moved into that entity's local space.
+	/// </summary>
+	private static void AddModelLodGroup(World world, Entity groupEntity, ImportedModelLodGroup? lodGroup, Matrix4x4 entityLocal)
+	{
+		if (lodGroup is null ||
+		    lodGroup.BoundsRadius <= 0.0f ||
+		    Matrix4x4.Invert(entityLocal, out var toEntity) == false)
+		{
+			return;
+		}
+
+		var scale = MathF.Max(
+			new Vector3(toEntity.M11, toEntity.M12, toEntity.M13).Length(),
+			MathF.Max(
+				new Vector3(toEntity.M21, toEntity.M22, toEntity.M23).Length(),
+				new Vector3(toEntity.M31, toEntity.M32, toEntity.M33).Length()));
+		world.AddComponent(groupEntity, new LodGroup
+		{
+			ScreenSizes = lodGroup.ScreenSizes.ToArray(),
+			BoundsCenter = Vector3.Transform(lodGroup.BoundsCenter, toEntity),
+			BoundsRadius = lodGroup.BoundsRadius * scale
+		});
 	}
 
 	public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
@@ -1253,6 +1282,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
             importedScene = AnimationRigBinding.Bind(importedScene, new ImportedSkeleton(rig.Name, rig.BoneNames, rig.ParentIndices, rig.BindPoseLocal, rig.InverseBindMatrices), importSettings.IgnoredAnimationChannels.ToHashSet(StringComparer.Ordinal));
         }
 		LogLibraryBuildStage($"Parsed 3D source '{relativeSourcePath}' ({importedScene.Textures.Count} textures, {importedScene.Materials.Count} materials, {importedScene.Nodes.Count(node => node.ParentIndex < 0)} root nodes).");
+		var lodGroups = ModelLodGroups.Find(importedScene);
+		importedScene = lodGroups.Scene;
+		if (lodGroups.GroupedMeshCount > 0)
+		{
+			LogLibraryBuildStage($"Grouped {lodGroups.GroupedMeshCount} meshes of '{relativeSourcePath}' with their levels of detail.");
+		}
 		var nodes = new List<AssetNodeRecord>();
 		var artifacts = new List<AssetArtifactRecord>();
 		var dependencies = new List<AssetDependencyRecord>();
@@ -1381,7 +1416,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		var sourceAssetName = Path.GetFileName(relativeSourcePath);
 		var modelDisplayName = Path.GetFileNameWithoutExtension(relativeSourcePath);
-		var totalRootCount = importedScene.Nodes.Count(node => node.ParentIndex < 0);
+		var totalRootCount = importedScene.Nodes
+			.Where((node, nodeIndex) => node.ParentIndex < 0 && lodGroups.IsExcluded(nodeIndex) == false)
+			.Count();
 		var modelGraph = new ImportedModelAssetFile
 		{
 			Name = modelDisplayName,
@@ -1389,47 +1426,100 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			SkeletonNodeIds = skeletonNodeIds,
 			AnimationNodeIds = animationNodeIds
 		};
+		// Keys come from every node, levels of detail included, so grouping levels never moves an existing mesh id.
 		var hierarchyKeys = new string[importedScene.Nodes.Count];
 		var childCounts = new int[importedScene.Nodes.Count];
-		// Assimp mesh identity is shared across instances; keep geometry independent of node placement.
-		var sharedMeshes = new Dictionary<Mesh, (Guid NodeId, string Path)>(ReferenceEqualityComparer.Instance);
 		var rootCount = 0;
 		for (var i = 0; i < importedScene.Nodes.Count; i++)
 		{
 			var importedNode = importedScene.Nodes[i];
-			string hierarchyKey;
 			if (importedNode.ParentIndex < 0)
 			{
-				hierarchyKey = $"root-{rootCount++}-{SanitizeKey(importedNode.Name)}";
+				hierarchyKeys[i] = $"root-{rootCount++}-{SanitizeKey(importedNode.Name)}";
+				continue;
 			}
-			else
+
+			if (importedNode.ParentIndex >= i)
 			{
-				if (importedNode.ParentIndex >= i)
+				throw new InvalidDataException(
+					$"Imported node {i} has invalid parent index {importedNode.ParentIndex}; parents must precede children.");
+			}
+
+			var childIndex = childCounts[importedNode.ParentIndex]++;
+			hierarchyKeys[i] =
+				$"{hierarchyKeys[importedNode.ParentIndex]}/child-{childIndex}-{SanitizeKey(importedNode.Name)}";
+		}
+
+		// Assimp mesh identity is shared across instances; keep geometry independent of node placement.
+		var sharedMeshes = new Dictionary<Mesh, (Guid NodeId, string Path)>(ReferenceEqualityComparer.Instance);
+		var modelNodeIndices = new int[importedScene.Nodes.Count];
+		var renderedMeshes = new List<(int ModelNodeIndex, BoundingSphere Bounds, int LevelCount)>();
+		for (var i = 0; i < importedScene.Nodes.Count; i++)
+		{
+			var importedNode = importedScene.Nodes[i];
+			var meshLodLevelNodeIds = new List<IReadOnlyList<Guid>>(importedNode.Meshes.Count);
+			for (var meshIndex = 0; meshIndex < importedNode.Meshes.Count; meshIndex++)
+			{
+				var levelNodeIds = new List<Guid>();
+				foreach (var level in lodGroups.GetLevels(i, meshIndex))
 				{
-					throw new InvalidDataException(
-						$"Imported node {i} has invalid parent index {importedNode.ParentIndex}; parents must precede children.");
+					var levelMesh = importedScene.Nodes[level.NodeIndex].Meshes[level.MeshIndex];
+					levelNodeIds.Add(GetOrCreateNodeId(
+						metadata,
+						GetMeshNodeKey(hierarchyKeys[level.NodeIndex], level.MeshIndex, levelMesh.Name),
+						AssetType.Mesh,
+						levelMesh.Name));
 				}
 
-				var childIndex = childCounts[importedNode.ParentIndex]++;
-				hierarchyKey =
-					$"{hierarchyKeys[importedNode.ParentIndex]}/child-{childIndex}-{SanitizeKey(importedNode.Name)}";
+				meshLodLevelNodeIds.Add(levelNodeIds);
 			}
 
-			hierarchyKeys[i] = hierarchyKey;
-			modelGraph.Nodes.Add(CreateModelNode(
+			var modelNode = CreateModelNode(
 				projectRootPath,
 				metadata,
 				relativeSourcePath,
 				relativeMetaPath,
-				hierarchyKey,
+				hierarchyKeys[i],
 				importedNode,
 				GetModelNodeDisplayName(importedNode, totalRootCount, modelDisplayName),
 				materialNodeIds,
 				skeletonNodeIds,
+				meshLodLevelNodeIds,
+				importSettings.LodScreenSizes,
 				sharedMeshes,
 				nodes,
-				dependencies));
+				dependencies);
+
+			// A node that only carries coarser levels still writes its meshes, as the levels, but is not an entity.
+			if (lodGroups.IsExcluded(i))
+			{
+				modelNodeIndices[i] = -1;
+				continue;
+			}
+
+			if (importedNode.ParentIndex >= 0)
+			{
+				modelNode.ParentIndex = modelNodeIndices[importedNode.ParentIndex];
+				if (modelNode.ParentIndex < 0)
+				{
+					throw new InvalidDataException(
+						$"Imported node '{importedNode.Name}' sits under a level of detail that was left out of the model.");
+				}
+			}
+
+			modelNodeIndices[i] = modelGraph.Nodes.Count;
+			for (var meshIndex = 0; meshIndex < importedNode.Meshes.Count; meshIndex++)
+			{
+				renderedMeshes.Add((
+					modelGraph.Nodes.Count,
+					importedNode.Meshes[meshIndex].Mesh.BoundingSphere,
+					meshLodLevelNodeIds[meshIndex].Count + 1));
+			}
+
+			modelGraph.Nodes.Add(modelNode);
 		}
+
+		modelGraph.LodGroup = CreateModelLodGroup(modelGraph, renderedMeshes, importSettings.LodScreenSizes);
 
 		var modelNodeId = GetOrCreateNodeId(metadata, "scene", AssetType.Model3D, sourceAssetName);
 		var relativeModelPath = NormalizeRelativePath(Path.Combine(
@@ -1843,6 +1933,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string displayName,
 		IReadOnlyList<Guid> materialNodeIds,
 		IReadOnlyList<Guid> skeletonNodeIds,
+		IReadOnlyList<IReadOnlyList<Guid>> meshLodLevelNodeIds,
+		IReadOnlyList<float> lodScreenSizes,
 		Dictionary<Mesh, (Guid NodeId, string Path)> sharedMeshes,
 		List<AssetNodeRecord> nodes,
 		List<AssetDependencyRecord> dependencies)
@@ -1859,7 +1951,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		for (var i = 0; i < node.Meshes.Count; i++)
 		{
 			var meshInfo = node.Meshes[i];
-			var nodeKey = $"mesh:{hierarchyKey}:{i}:{SanitizeKey(meshInfo.Name)}";
+			var nodeKey = GetMeshNodeKey(hierarchyKey, i, meshInfo.Name);
+			var lodLevelNodeIds = meshLodLevelNodeIds[i];
 			var meshNodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Mesh, meshInfo.Name);
 			var relativeMeshPath = NormalizeRelativePath(Path.Combine(
 				AssetPipelinePaths.LibraryFolderName,
@@ -1894,7 +1987,23 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					Tangents = meshInfo.Mesh.Tangents,
 					UVs = meshInfo.Mesh.UVs,
 					BoneIndices = meshInfo.Mesh.BoneIndices ?? [],
-					BoneWeights = meshInfo.Mesh.BoneWeights ?? []
+					BoneWeights = meshInfo.Mesh.BoneWeights ?? [],
+					LodLevelNodeIds = lodLevelNodeIds.ToArray(),
+					LodScreenSizes = lodLevelNodeIds.Count > 0 && lodScreenSizes.Count > 0
+						? Mesh.FitLodScreenSizes(lodScreenSizes, lodLevelNodeIds.Count)
+						: []
+				});
+			}
+
+			// Hard, so a build that cooks this mesh cooks its levels too.
+			foreach (var lodLevelNodeId in lodLevelNodeIds)
+			{
+				dependencies.Add(new AssetDependencyRecord
+				{
+					FromNodeId = meshNodeId,
+					ToNodeId = lodLevelNodeId,
+					Kind = "mesh-lod",
+					IsHard = true
 				});
 			}
 
@@ -1915,7 +2024,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					RelativeImportedMeshPath = relativeMeshPath,
 					VertexCount = meshInfo.Mesh.Vertices.Length,
 					IndexCount = meshInfo.Mesh.Indices.Length,
-					IsSkinned = meshInfo.Mesh.IsSkinned
+					IsSkinned = meshInfo.Mesh.IsSkinned,
+					LodLevelCount = lodLevelNodeIds.Count + 1
 				})
 			});
 
@@ -2548,7 +2658,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportComputeShaderSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				15,
+				17,
 				path =>
 				{
 					var extension = Path.GetExtension(path);
@@ -3235,6 +3345,72 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 			index++;
 		}
+	}
+
+	/// <summary>
+	/// A LodGroup for a model whose renderers would otherwise switch levels separately: one with two or more renderers
+	/// that have levels of detail, such as a tree's trunk and leaves. Its bounds enclose every renderer of the model, in
+	/// the model's space, and its thresholds are the model's, fitted to its deepest mesh.
+	/// </summary>
+	private static ImportedModelLodGroup? CreateModelLodGroup(
+		ImportedModelAssetFile modelGraph,
+		IReadOnlyList<(int ModelNodeIndex, BoundingSphere Bounds, int LevelCount)> renderedMeshes,
+		IReadOnlyList<float> lodScreenSizes)
+	{
+		var meshesWithLevels = renderedMeshes.Count(mesh => mesh.LevelCount > 1);
+		if (meshesWithLevels < 2)
+		{
+			return null;
+		}
+
+		var nodeWorlds = new Matrix4x4[modelGraph.Nodes.Count];
+		for (var i = 0; i < modelGraph.Nodes.Count; i++)
+		{
+			var node = modelGraph.Nodes[i];
+			nodeWorlds[i] = node.ParentIndex >= 0
+				? node.LocalTransform * nodeWorlds[node.ParentIndex]
+				: node.LocalTransform;
+		}
+
+		var spheres = new List<(Vector3 Center, float Radius)>(renderedMeshes.Count);
+		foreach (var mesh in renderedMeshes)
+		{
+			var world = nodeWorlds[mesh.ModelNodeIndex];
+			var scale = MathF.Max(
+				new Vector3(world.M11, world.M12, world.M13).Length(),
+				MathF.Max(
+					new Vector3(world.M21, world.M22, world.M23).Length(),
+					new Vector3(world.M31, world.M32, world.M33).Length()));
+			spheres.Add((Vector3.Transform(mesh.Bounds.Center, world), mesh.Bounds.Radius * scale));
+		}
+
+		var minimum = new Vector3(float.MaxValue);
+		var maximum = new Vector3(float.MinValue);
+		foreach (var sphere in spheres)
+		{
+			minimum = Vector3.Min(minimum, sphere.Center - new Vector3(sphere.Radius));
+			maximum = Vector3.Max(maximum, sphere.Center + new Vector3(sphere.Radius));
+		}
+
+		var center = (minimum + maximum) * 0.5f;
+		var radius = 0.0f;
+		foreach (var sphere in spheres)
+		{
+			radius = MathF.Max(radius, Vector3.Distance(center, sphere.Center) + sphere.Radius);
+		}
+
+		var levelCount = Math.Min(renderedMeshes.Max(mesh => mesh.LevelCount), GpuDrawBatchLodData.MaxLevelCount);
+		return new ImportedModelLodGroup
+		{
+			ScreenSizes = Mesh.FitLodScreenSizes(lodScreenSizes, levelCount - 1),
+			BoundsCenter = center,
+			BoundsRadius = radius
+		};
+	}
+
+	private static string GetMeshNodeKey(string hierarchyKey, int meshIndex, string meshName)
+	{
+		return $"mesh:{hierarchyKey}:{meshIndex}:{SanitizeKey(meshName)}";
 	}
 
 	private static string SanitizeKey(string value)

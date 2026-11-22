@@ -15,6 +15,11 @@ namespace WolfEngine.Rendering;
 /// per frame however many members moved. Visible list offsets are prefix sums of the capacities and live only in
 /// the batch table, so moving them never touches a record.
 /// </para>
+/// <para>
+/// An instance whose mesh has coarser levels of detail is also a member of one batch per coarser level, keyed by the
+/// same lane and that level's mesh, so its slot exists in whichever level the cull picks. The level of detail table
+/// tells the cull, per level 0 batch, which batch draws each level. See docs/mesh-lod.md.
+/// </para>
 /// <para>Render thread only.</para>
 /// </remarks>
 internal sealed class GpuDrawBatches : ILiveDrawSource
@@ -31,6 +36,7 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 	private Batch[] _batches;
 	private bool[] _batchDirty;
 	private GpuDrawBatchData[] _batchTable;
+	private GpuDrawBatchLodData[] _batchLodTable;
 	// Indexed by instance index, and grown as higher instances are assigned.
 	private Member[] _members;
 	private int _batchCount;
@@ -55,6 +61,7 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 		_batches = new Batch[initialSlotCount];
 		_batchDirty = new bool[initialSlotCount];
 		_batchTable = new GpuDrawBatchData[initialSlotCount];
+		_batchLodTable = new GpuDrawBatchLodData[initialSlotCount];
 		_members = new Member[initialSlotCount];
 	}
 
@@ -123,9 +130,49 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 			LeaveBatch(ref member);
 		}
 
+		var batchIndex = JoinBatch(key, lane.ExecutionIndex);
+		if (batchIndex == NoBatch)
+		{
+			return NoBatch;
+		}
+
+		member = new Member(instanceHandle, batchIndex, JoinLevelBatches(key, lane.ExecutionIndex, mesh));
+		return (uint)batchIndex;
+	}
+
+	/// <summary>
+	/// Joins the batch for each coarser level of the mesh, finest first. Stops at the first level whose batch cannot be
+	/// created, so the cull only ever picks levels the instance has a slot in.
+	/// </summary>
+	private int[]? JoinLevelBatches(in BatchKey levelZeroKey, int laneIndex, Mesh mesh)
+	{
+		var levels = mesh.LodLevels;
+		var coarserLevelCount = Math.Min(levels.Count, GpuDrawBatchLodData.MaxLevelCount - 1);
+		if (coarserLevelCount == 0)
+		{
+			return null;
+		}
+
+		var levelBatchIndices = new List<int>(coarserLevelCount);
+		for (var level = 0; level < coarserLevelCount; level++)
+		{
+			var levelBatchIndex = JoinBatch(levelZeroKey with { Mesh = levels[level] }, laneIndex);
+			if (levelBatchIndex == NoBatch)
+			{
+				break;
+			}
+
+			levelBatchIndices.Add(levelBatchIndex);
+		}
+
+		return levelBatchIndices.Count > 0 ? levelBatchIndices.ToArray() : null;
+	}
+
+	private int JoinBatch(in BatchKey key, int laneIndex)
+	{
 		if (_batchIndicesByKey.TryGetValue(key, out var batchIndex) == false)
 		{
-			batchIndex = CreateBatch(key, lane.ExecutionIndex);
+			batchIndex = CreateBatch(key, laneIndex);
 			if (batchIndex == NoBatch)
 			{
 				return NoBatch;
@@ -135,9 +182,8 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 		ref var batch = ref _batches[batchIndex];
 		batch.Capacity++;
 		_totalCapacity++;
-		member = new Member(instanceHandle, batchIndex);
 		MarkDirty(batchIndex);
-		return (uint)batchIndex;
+		return batchIndex;
 	}
 
 	/// <summary>Takes an instance out of its batch. Ignored when the slot now holds a newer instance.</summary>
@@ -254,22 +300,68 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 	/// </summary>
 	public ReadOnlySpan<GpuDrawBatchData> GetBatchTable()
 	{
-		var upperBound = (int)ActiveBatchUpperBound;
-		if (_batchTableDirty)
-		{
-			var visibleOffset = 0u;
-			_batchTable[0] = default;
-			for (var batchIndex = 1; batchIndex < upperBound; batchIndex++)
-			{
-				ref readonly var batch = ref _batches[batchIndex];
-				_batchTable[batchIndex] = new GpuDrawBatchData(visibleOffset, batch.Capacity, (uint)batch.LaneIndex);
-				visibleOffset += batch.Capacity;
-			}
+		RebuildTablesIfDirty();
+		return _batchTable.AsSpan(0, (int)ActiveBatchUpperBound);
+	}
 
-			_batchTableDirty = false;
+	/// <summary>
+	/// The level of detail table, indexed like <see cref="GetBatchTable"/>: for each level 0 batch, the batch drawing
+	/// each level and the screen sizes it switches at.
+	/// </summary>
+	public ReadOnlySpan<GpuDrawBatchLodData> GetBatchLodTable()
+	{
+		RebuildTablesIfDirty();
+		return _batchLodTable.AsSpan(0, (int)ActiveBatchUpperBound);
+	}
+
+	private void RebuildTablesIfDirty()
+	{
+		if (_batchTableDirty == false)
+		{
+			return;
 		}
 
-		return _batchTable.AsSpan(0, upperBound);
+		var upperBound = (int)ActiveBatchUpperBound;
+		var visibleOffset = 0u;
+		_batchTable[0] = default;
+		_batchLodTable[0] = default;
+		for (var batchIndex = 1; batchIndex < upperBound; batchIndex++)
+		{
+			ref readonly var batch = ref _batches[batchIndex];
+			_batchTable[batchIndex] = new GpuDrawBatchData(visibleOffset, batch.Capacity, (uint)batch.LaneIndex);
+			_batchLodTable[batchIndex] = batch.Capacity > 0
+				? CreateLodEntry(batchIndex, batch.Key)
+				: default;
+			visibleOffset += batch.Capacity;
+		}
+
+		_batchTableDirty = false;
+	}
+
+	private GpuDrawBatchLodData CreateLodEntry(int batchIndex, in BatchKey key)
+	{
+		var entry = new GpuDrawBatchLodData();
+		entry.LevelBatches[0] = (uint)batchIndex;
+		entry.LevelCount = 1;
+
+		var levels = key.Mesh.LodLevels;
+		var screenSizes = key.Mesh.LodScreenSizes;
+		var coarserLevelCount = Math.Min(levels.Count, GpuDrawBatchLodData.MaxLevelCount - 1);
+		for (var level = 0; level < coarserLevelCount; level++)
+		{
+			// Every member of this batch joined the level batches too, so they exist while it does. One that
+			// could not be created ends the chain here, as it did for the members.
+			if (_batchIndicesByKey.TryGetValue(key with { Mesh = levels[level] }, out var levelBatchIndex) == false)
+			{
+				break;
+			}
+
+			entry.LevelBatches[level + 1] = (uint)levelBatchIndex;
+			entry.ScreenSizes[level] = screenSizes[level];
+			entry.LevelCount++;
+		}
+
+		return entry;
 	}
 
 	public bool IsCurrent(in GpuDrawHandle drawHandle) => _batchPool.IsCurrent(drawHandle);
@@ -327,10 +419,25 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 	private void LeaveBatch(ref Member member)
 	{
 		var batchIndex = member.BatchIndex;
+		var levelBatchIndices = member.LevelBatchIndices;
+		member = default;
+		LeaveBatchIndex(batchIndex);
+		if (levelBatchIndices is null)
+		{
+			return;
+		}
+
+		foreach (var levelBatchIndex in levelBatchIndices)
+		{
+			LeaveBatchIndex(levelBatchIndex);
+		}
+	}
+
+	private void LeaveBatchIndex(int batchIndex)
+	{
 		ref var batch = ref _batches[batchIndex];
 		batch.Capacity--;
 		_totalCapacity--;
-		member = default;
 		MarkDirty(batchIndex);
 		if (batch.Capacity > 0)
 		{
@@ -371,6 +478,7 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 		Array.Resize(ref _batches, length);
 		Array.Resize(ref _batchDirty, length);
 		Array.Resize(ref _batchTable, length);
+		Array.Resize(ref _batchLodTable, length);
 	}
 
 	private void EnsureMemberSlot(int instanceIndex)
@@ -430,5 +538,6 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 		public uint Capacity;
 	}
 
-	private readonly record struct Member(GpuDrawHandle InstanceHandle, int BatchIndex);
+	/// <param name="LevelBatchIndices">The batches of the mesh's coarser levels, finest first, or null without any.</param>
+	private readonly record struct Member(GpuDrawHandle InstanceHandle, int BatchIndex, int[]? LevelBatchIndices = null);
 }

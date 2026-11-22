@@ -209,7 +209,7 @@ public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
 		var absoluteMeshPath = context.GetAbsolutePath(summary.RelativeImportedMeshPath);
 		var meshFile = ImportedMeshSerializer.Read(absoluteMeshPath);
 		var hasSkin = meshFile.BoneIndices.Length > 0 && meshFile.BoneWeights.Length > 0;
-		return new Mesh(
+		var mesh = new Mesh(
 			meshFile.Vertices,
 			meshFile.Indices,
 			meshFile.Normals,
@@ -218,6 +218,26 @@ public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
 			hasSkin ? meshFile.BoneIndices : null,
 			hasSkin ? meshFile.BoneWeights : null,
 			meshFile.ShadowOpaqueIndices, meshFile.ShadowAlphaTestIndices);
+
+		if (meshFile.LodLevelNodeIds.Length > 0)
+		{
+			var levels = new Mesh[meshFile.LodLevelNodeIds.Length];
+			for (var i = 0; i < levels.Length; i++)
+			{
+				var levelNodeId = meshFile.LodLevelNodeIds[i];
+				levels[i] = context.ResolveAsset(levelNodeId, typeof(Mesh)) as Mesh
+				            ?? throw new InvalidOperationException(
+					            $"Mesh '{context.Asset.Name}' is missing its level of detail {i + 1} ('{levelNodeId}').");
+			}
+
+			mesh.SetLodLevels(levels);
+			if (meshFile.LodScreenSizes.Length > 0)
+			{
+				mesh.SetLodScreenSizes(Mesh.FitLodScreenSizes(meshFile.LodScreenSizes, levels.Length));
+			}
+		}
+
+		return mesh;
 	}
 }
 

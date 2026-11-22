@@ -78,6 +78,8 @@ public sealed class GpuDrawPass
 	private readonly List<uint> _materialGenerations = new();
 	// The batch table version each frame slot's batch buffer was last uploaded at.
 	private readonly ulong[] _uploadedBatchTableVersions = new ulong[GpuDrawResources.MaxFramesInFlight];
+	private readonly LodThresholdSets _lodThresholdSets = new();
+	private readonly ulong[] _uploadedLodThresholdSetVersions = new ulong[GpuDrawResources.MaxFramesInFlight];
 	private ulong _uploadedTableGeneration;
 	private readonly uint[] _lastGpuDiagnosticCounters = new uint[GpuDrawResources.HardeningCounterCount];
 	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GpuDrawExecutionLanes.ExecutionLaneCount];
@@ -542,7 +544,9 @@ public sealed class GpuDrawPass
 				update.MaterialHandle.Value,
 				// The owner is applied here rather than cached with the material's draw state: materials are
 				// shared across views, so a cached owner would stamp one view's ownership on another's draws.
-				drawFlags == 0u ? 0u : drawFlags | ownerFlags));
+				drawFlags == 0u ? 0u : drawFlags | ownerFlags,
+				update.Lod.WorldSphere,
+				PackLodParams(update.Lod)));
 
 			if (update.Type is GpuDrawUpdateType.Add or GpuDrawUpdateType.UpdateMesh)
 			{
@@ -632,6 +636,7 @@ public sealed class GpuDrawPass
 		_batches.PublishStructuralChanges(_records);
 		_gpuDrawResources.ActiveDrawCommandUpperBound = _batches.ActiveBatchUpperBound;
 		UploadBatchTable(activeSlot);
+		UploadLodThresholdSets(activeSlot);
 
 		if (_instanceUpdateData.Count == 0 &&
 		    _meshUpdateData.Count == 0 &&
@@ -662,7 +667,8 @@ public sealed class GpuDrawPass
 		}
 	}
 
-	public void RecordCull(RenderGraphContext context, SceneDrawData sceneData)
+	/// <summary>Culls for the camera, which also decides each instance's level of detail for the frame.</summary>
+	public void RecordCull(RenderGraphContext context, SceneDrawData sceneData, in MeshLodConfig meshLod)
 	{
 		ArgumentNullException.ThrowIfNull(sceneData);
 		Span<Matrix4x4> viewProjections = stackalloc Matrix4x4[1];
@@ -672,20 +678,8 @@ public sealed class GpuDrawPass
 			viewProjections,
 			sceneData.CameraOrigin,
 			useShadowBuffers: false,
-			DrawPassParticipation.None);
-	}
-
-	public void RecordCullForView(RenderGraphContext context, Matrix4x4 viewProjection, Vector3 cameraOrigin,
-		bool useShadowBuffers = false)
-	{
-		Span<Matrix4x4> viewProjections = stackalloc Matrix4x4[1];
-		viewProjections[0] = viewProjection;
-		RecordCullForViews(
-			context,
-			viewProjections,
-			cameraOrigin,
-			useShadowBuffers,
-			useShadowBuffers ? DrawPassParticipation.ShadowCaster : DrawPassParticipation.None);
+			DrawPassParticipation.None,
+			MeshLodCullSettings.ForCamera(sceneData, meshLod));
 	}
 
 	public void RecordCullForViews(
@@ -694,6 +688,7 @@ public sealed class GpuDrawPass
 		Vector3 cameraOrigin,
 		bool useShadowBuffers,
 		DrawPassParticipation participation,
+		in MeshLodCullSettings meshLod,
 		ReadOnlySpan<Vector4> cullingPlanes = default,
 		ReadOnlySpan<int> cullingPlaneCounts = default)
 	{
@@ -809,7 +804,14 @@ public sealed class GpuDrawPass
 			cullParamsWriter.SetUInt("participatingLaneMask", BuildParticipatingLaneMask(participation));
 			cullParamsWriter.SetUInt("ownerViewIndex", (uint)context.View.Index);
 			cullParamsWriter.SetUInt("maxInstanceCount", _gpuDrawResources.ActiveInstanceUpperBound);
-			cullParamsWriter.SetUInt("visibleInstanceStride", (uint)_gpuDrawResources.InstanceCapacity);
+			cullParamsWriter.SetUInt("visibleInstanceStride", (uint)_gpuDrawResources.VisibleInstanceCapacity);
+			cullParamsWriter.SetVector4(
+				"lodProjection",
+				new Vector4(meshLod.ProjectionScale, meshLod.PerspectiveW, meshLod.ConstantW, meshLod.Bias));
+			cullParamsWriter.SetFloat("lodHysteresis", meshLod.Hysteresis);
+			cullParamsWriter.SetUInt("lodEnabled", meshLod.Enabled ? 1u : 0u);
+			cullParamsWriter.SetUInt("lodWriteState", meshLod.WriteState ? 1u : 0u);
+			cullParamsWriter.SetUInt("lodThresholdSetBase", (uint)_gpuDrawResources.InstanceCapacity);
 
 			// Every batch's args are reset to an empty slice of the visible list first, then each visible instance
 			// is appended to its batch. The appends count through the args the reset wrote, so it has to land first.
@@ -861,6 +863,7 @@ public sealed class GpuDrawPass
 		commandList.SetComputeBuffer(6, visibleInstanceBuffer);
 		commandList.SetComputeBuffer(7, _gpuDrawResources.InstanceGenerationBuffer!);
 		commandList.SetComputeBuffer(11, _gpuDrawResources.BatchBuffer!);
+		commandList.SetComputeBuffer(2, _gpuDrawResources.BatchLodBuffer!);
 		if (GpuDrawDiagnosticsEnabled)
 		{
 			commandList.SetComputeBuffer(4, drawCountPerBucketBuffer);
@@ -1898,7 +1901,14 @@ public sealed class GpuDrawPass
 			materialSlots = Math.Max(materialSlots, database.MaterialSlotCount);
 		}
 
-		_gpuDrawResources.EnsureTableCapacity(device, instanceSlots, meshSlots, materialSlots);
+		// Membership changes later this frame. A level of detail chain that outgrows the visible lists then is
+		// bounds-checked by the cull and drawn once the lists have grown next frame.
+		_gpuDrawResources.EnsureTableCapacity(
+			device,
+			instanceSlots,
+			meshSlots,
+			materialSlots,
+			checked((int)_batches.TotalCapacity));
 	}
 
 	/// <summary>
@@ -1911,6 +1921,7 @@ public sealed class GpuDrawPass
 		if (_uploadedTableGeneration != _gpuDrawResources.TableGeneration)
 		{
 			Array.Clear(_uploadedBatchTableVersions);
+			Array.Clear(_uploadedLodThresholdSetVersions);
 			_uploadedTableGeneration = _gpuDrawResources.TableGeneration;
 		}
 
@@ -1920,7 +1931,99 @@ public sealed class GpuDrawPass
 		}
 
 		WriteBuffer<GpuDrawBatchData>(_gpuDrawResources.BatchBuffer!, _batches.GetBatchTable(), "BatchBuffer");
+		WriteBuffer<GpuDrawBatchLodData>(_gpuDrawResources.BatchLodBuffer!, _batches.GetBatchLodTable(), "BatchLodBuffer");
 		_uploadedBatchTableVersions[frameSlot] = _batches.Version;
+	}
+
+	/// <summary>
+	/// Uploads the <see cref="LodGroup"/> threshold sets into the level table's reserved region, after its batch
+	/// entries, when a set was added since this slot last uploaded them.
+	/// </summary>
+	private void UploadLodThresholdSets(int frameSlot)
+	{
+		if (_lodThresholdSets.Count == 0 ||
+		    _uploadedLodThresholdSetVersions[frameSlot] == _lodThresholdSets.Version)
+		{
+			return;
+		}
+
+		if (_gpuDrawResources.BatchLodBuffer is not IWritableGpuBuffer writable)
+		{
+			return;
+		}
+
+		writable.Write<GpuDrawBatchLodData>(
+			_lodThresholdSets.Entries,
+			(ulong)_gpuDrawResources.InstanceCapacity);
+		_uploadedLodThresholdSetVersions[frameSlot] = _lodThresholdSets.Version;
+	}
+
+	private uint PackLodParams(in GpuDrawLod lod)
+	{
+		if (lod.IsGrouped == false)
+		{
+			return 0u;
+		}
+
+		var thresholdSetIndex = _lodThresholdSets.GetOrAdd(lod.ScreenSizes!);
+		if (thresholdSetIndex < 0)
+		{
+			// The reserved region is full: the instance falls back to its own mesh's levels.
+			return 0u;
+		}
+
+		var lastLevel = lod.LastLevel < 0 ? GpuDrawLod.MaxLevel : lod.LastLevel;
+		return GpuDrawLodParams.Pack(thresholdSetIndex, lod.FirstLevel, lastLevel);
+	}
+
+	/// <summary>
+	/// The distinct <see cref="LodGroup"/> threshold sets in use, each stored as a level table entry whose screen sizes
+	/// are the group's thresholds. Sets are only added, so an instance's index stays valid; groups that share
+	/// thresholds share a set.
+	/// </summary>
+	private sealed class LodThresholdSets
+	{
+		private readonly Dictionary<float[], int> _indicesByArray = new(ReferenceEqualityComparer.Instance);
+		private readonly Dictionary<string, int> _indicesByValue = new(StringComparer.Ordinal);
+		private readonly List<GpuDrawBatchLodData> _entries = new();
+
+		public int Count => _entries.Count;
+		public ulong Version { get; private set; } = 1;
+		public ReadOnlySpan<GpuDrawBatchLodData> Entries => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_entries);
+
+		/// <returns>The set's index, or -1 when the reserved region is full.</returns>
+		public int GetOrAdd(float[] screenSizes)
+		{
+			if (_indicesByArray.TryGetValue(screenSizes, out var index))
+			{
+				return index;
+			}
+
+			var key = string.Join(",", screenSizes.Select(value => BitConverter.SingleToInt32Bits(value)));
+			if (_indicesByValue.TryGetValue(key, out index) == false)
+			{
+				if (_entries.Count >= GpuDrawLodParams.MaxThresholdSetCount)
+				{
+					return -1;
+				}
+
+				var entry = new GpuDrawBatchLodData();
+				var levelCount = Math.Min(screenSizes.Length, GpuDrawBatchLodData.MaxLevelCount - 1);
+				for (var i = 0; i < levelCount; i++)
+				{
+					entry.ScreenSizes[i] = screenSizes[i];
+				}
+
+				entry.LevelCount = (uint)levelCount + 1;
+				index = _entries.Count;
+				_entries.Add(entry);
+				_indicesByValue.Add(key, index);
+				Version++;
+			}
+
+			_indicesByArray[screenSizes] = index;
+			return index;
+		}
 	}
 
 	/// <summary>
@@ -2096,7 +2199,7 @@ public sealed class GpuDrawPass
 				entry.Mesh,
 				entry.Material,
 				entry.TerrainInstanceData,
-				entry.TerrainSurface));
+				entry.TerrainSurface).WithLod(entry.Lod));
 		}
 
 		return destination.Count - initialCount;
@@ -2362,5 +2465,71 @@ public sealed class GpuDrawPass
 		Span<T> tmp = stackalloc T[1];
 		tmp[0] = data;
 		writableBuffer.Write<T>(tmp, elementOffset);
+	}
+}
+
+/// <summary>
+/// What the cull needs to pick a level of detail: the camera the screen size is measured from, the bias, and whether
+/// this cull records the result as the instances' level for the frame. Shadow culls measure from the main camera too,
+/// so shadows draw the level the camera does, and only read the level state. See docs/mesh-lod.md.
+/// </summary>
+public readonly struct MeshLodCullSettings
+{
+	private MeshLodCullSettings(
+		bool enabled,
+		float projectionScale,
+		float perspectiveW,
+		float constantW,
+		float bias,
+		float hysteresis,
+		bool writeState)
+	{
+		Enabled = enabled;
+		ProjectionScale = projectionScale;
+		PerspectiveW = perspectiveW;
+		ConstantW = constantW;
+		Bias = bias;
+		Hysteresis = hysteresis;
+		WriteState = writeState;
+	}
+
+	public bool Enabled { get; }
+
+	/// <summary>The projection's vertical scale, which turns a radius over a distance into a fraction of screen height.</summary>
+	public float ProjectionScale { get; }
+
+	/// <summary>Clip W per unit of distance: one for a perspective projection, zero for an orthographic one.</summary>
+	public float PerspectiveW { get; }
+
+	/// <summary>Clip W at distance zero: zero for a perspective projection, one for an orthographic one.</summary>
+	public float ConstantW { get; }
+
+	public float Bias { get; }
+	public float Hysteresis { get; }
+	public bool WriteState { get; }
+
+	public static MeshLodCullSettings ForCamera(SceneDrawData sceneData, in MeshLodConfig config)
+	{
+		return Create(sceneData, config, config.Bias, writeState: true);
+	}
+
+	public static MeshLodCullSettings ForShadows(SceneDrawData sceneData, in MeshLodConfig config)
+	{
+		return Create(sceneData, config, config.Bias * config.ShadowBias, writeState: false);
+	}
+
+	private static MeshLodCullSettings Create(SceneDrawData sceneData, in MeshLodConfig config, float bias, bool writeState)
+	{
+		ArgumentNullException.ThrowIfNull(sceneData);
+		var projection = sceneData.UnjitteredProjection;
+
+		return new MeshLodCullSettings(
+			config.Enabled,
+			MathF.Abs(projection.M22),
+			projection.M34,
+			projection.M44,
+			bias,
+			config.Hysteresis,
+			writeState);
 	}
 }

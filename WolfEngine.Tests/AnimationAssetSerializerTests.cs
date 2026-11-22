@@ -168,6 +168,26 @@ public sealed class AnimationAssetSerializerTests
 		});
 	}
 
+	[Test]
+	public void ImportedMeshSerializer_RoundTripsLevelOfDetailIds()
+	{
+		var written = new ImportedMeshAssetFile
+		{
+			Vertices = [new Vector4(1, 2, 3, 1)],
+			Indices = [0, 0, 0],
+			Normals = [Vector3.UnitY],
+			Tangents = [new Vector4(1, 0, 0, 1)],
+			UVs = [Vector2.Zero],
+			LodLevelNodeIds = [Guid.NewGuid(), Guid.NewGuid()]
+		};
+
+		var path = Path.Combine(_directory, "levels.mesh.bin");
+		ImportedMeshSerializer.Write(path, written);
+		var read = ImportedMeshSerializer.Read(path);
+
+		Assert.That(read.LodLevelNodeIds, Is.EqualTo(written.LodLevelNodeIds));
+	}
+
 	/// <summary>
 	/// The Library is a build artifact, but a version bump that threw would force a full rebuild on
 	/// everyone who pulls this change. Version 1 payloads have to keep loading as unskinned meshes.
@@ -197,6 +217,7 @@ public sealed class AnimationAssetSerializerTests
 		{
 			Assert.That(read.Version, Is.EqualTo(1));
 			Assert.That(read.Vertices, Has.Length.EqualTo(1));
+			Assert.That(read.LodLevelNodeIds, Is.Empty);
 			Assert.That(read.BoneIndices, Is.Empty);
 			Assert.That(read.BoneWeights, Is.Empty);
 		});

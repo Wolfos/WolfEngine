@@ -93,15 +93,19 @@ void CSUpdateInstance(uint3 dispatchThreadId : SV_DispatchThreadID)
     instanceData.meshHandle = meshHandle;
     instanceData.drawKind = update.drawKind;
     instanceData.flags = update.drawFlags;
+    instanceData.lodSphere = update.lodSphere;
+    instanceData.lodParams = update.lodParams;
     g_InstanceTable[instanceIndex] = instanceData;
 
     g_InstanceGenerations[instanceIndex] = instanceGeneration;
 
-    // An instance in no batch is not drawn, whatever its flags say.
+    // An instance in no batch is not drawn, whatever its flags say. It keeps the level of detail the cull picked for
+    // it, so moving does not reset hysteresis; a new instance in the slot starts at level 0.
+    GpuDrawCommand previousCommand = g_DrawCommands[instanceIndex];
     GpuDrawCommand drawCommand = (GpuDrawCommand)0;
     drawCommand.instanceHandle = update.instanceHandle;
     drawCommand.batchIndex = update.batchIndex;
     drawCommand.flags = update.batchIndex == 0 ? 0 : update.drawFlags;
-    drawCommand.pad0 = 0;
+    drawCommand.lodLevel = previousCommand.instanceHandle == update.instanceHandle ? previousCommand.lodLevel : 0;
     g_DrawCommands[instanceIndex] = drawCommand;
 }

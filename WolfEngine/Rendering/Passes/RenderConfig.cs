@@ -38,7 +38,53 @@ public class RenderConfig: IDataAsset
 	public ColorGradingConfig ColorGrading { get; set; } = new();
 	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
+	public MeshLodConfig MeshLod { get; set; } = new();
 	public MotionVectorDebugConfig MotionVectorDebug { get; set; } = new();
+}
+
+/// <summary>How meshes with levels of detail pick a level. See docs/mesh-lod.md.</summary>
+public struct MeshLodConfig
+{
+	private float _bias = 1.0f;
+	private float _shadowBias = 1.0f;
+	private float _hysteresis = 0.1f;
+
+	public MeshLodConfig()
+	{
+	}
+
+	/// <summary>Off draws every mesh at level 0, for comparing against full detail.</summary>
+	public bool Enabled { get; set; } = true;
+
+	/// <summary>
+	/// Multiplies every mesh's screen size before it is compared with its thresholds. Above one keeps detail longer;
+	/// below one switches sooner.
+	/// </summary>
+	public float Bias
+	{
+		get => _bias;
+		set => _bias = float.IsFinite(value) && value > 0.0f ? value : 1.0f;
+	}
+
+	/// <summary>
+	/// Multiplies <see cref="Bias"/> for shadow casters. Shadows otherwise draw the level the camera does; below one
+	/// they switch to coarser levels sooner, which is where most of the shadow saving comes from.
+	/// </summary>
+	public float ShadowBias
+	{
+		get => _shadowBias;
+		set => _shadowBias = float.IsFinite(value) && value > 0.0f ? value : 1.0f;
+	}
+
+	/// <summary>
+	/// Fraction of a threshold the screen size has to pass it by before the level changes, so an object sitting on a
+	/// threshold does not flicker between two levels.
+	/// </summary>
+	public float Hysteresis
+	{
+		get => _hysteresis;
+		set => _hysteresis = float.IsFinite(value) ? Math.Clamp(value, 0.0f, 0.5f) : 0.1f;
+	}
 }
 
 public struct VolumetricFogConfig

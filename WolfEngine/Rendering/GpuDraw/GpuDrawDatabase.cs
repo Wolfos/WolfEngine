@@ -93,12 +93,17 @@ public sealed class GpuDrawDatabase
 
 	public void TouchMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
 	{
-		TouchMesh(entity, mesh, material, worldTransform, persistent: false);
+		TouchMesh(entity, mesh, material, worldTransform, persistent: false, default);
 	}
 
-	public void TouchPersistentMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
+	public void TouchPersistentMesh(
+		Entity entity,
+		Mesh mesh,
+		Material material,
+		in Matrix4x4 worldTransform,
+		in GpuDrawLod lod = default)
 	{
-		TouchMesh(entity, mesh, material, worldTransform, persistent: true);
+		TouchMesh(entity, mesh, material, worldTransform, persistent: true, lod);
 	}
 
 	public void RemovePersistentMesh(Entity entity)
@@ -111,18 +116,25 @@ public sealed class GpuDrawDatabase
 		}
 	}
 
-	private void TouchMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform, bool persistent)
+	private void TouchMesh(
+		Entity entity,
+		Mesh mesh,
+		Material material,
+		in Matrix4x4 worldTransform,
+		bool persistent,
+		in GpuDrawLod lod)
 	{
 		var key = new DrawRecordKey(_currentWorldId, entity, 0);
 		if (_records.TryGetValue(key, out var record))
 		{
 			SetPersistence(key, persistent);
-			ApplyChanges(key, record, GpuDrawKind.Mesh, mesh, material, worldTransform);
+			ApplyChanges(key, record, GpuDrawKind.Mesh, mesh, material, worldTransform, lod);
 			record.LastSeenStamp = _syncStamp;
 			return;
 		}
 
 		var newRecord = CreateRecord(key, GpuDrawKind.Mesh, mesh, material, worldTransform);
+		newRecord.Lod = lod;
 		_records.Add(key, newRecord);
 		SetPersistence(key, persistent);
 
@@ -135,7 +147,7 @@ public sealed class GpuDrawDatabase
 			newRecord.World,
 			newRecord.BoundsCenterRadius,
 			mesh,
-			material));
+			material).WithLod(lod));
 	}
 
 	public void TouchDebugPrimitive(
@@ -378,7 +390,8 @@ public sealed class GpuDrawDatabase
 				record.TerrainRayTracingChunk,
 				record.PreviousWorld,
 				record.World,
-				record.BoundsCenterRadius));
+				record.BoundsCenterRadius,
+				record.Lod));
 		}
 	}
 
@@ -451,7 +464,8 @@ public sealed class GpuDrawDatabase
 		GpuDrawKind drawKind,
 		Mesh mesh,
 		Material material,
-		in Matrix4x4 worldTransform)
+		in Matrix4x4 worldTransform,
+		in GpuDrawLod lod = default)
 	{
 		if (record.DrawKind != drawKind)
 		{
@@ -467,13 +481,15 @@ public sealed class GpuDrawDatabase
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
 		var materialResourceChanged = materialChanged == false && record.MaterialResourceRevision != material.ResourceRevision;
 		var uploadStale = _transformHistory.IsUploadStale(key, uploadPreviousWorld, worldTransform);
+		var lodChanged = record.Lod.Equals(lod) == false;
 
 		// The record mirrors what the instance table should hold even when nothing is uploaded, because a
 		// full GPU state refresh re-uploads straight from the records.
 		record.PreviousWorld = uploadPreviousWorld;
 		record.World = worldTransform;
+		record.Lod = lod;
 
-		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || uploadStale) == false)
+		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || uploadStale || lodChanged) == false)
 		{
 			return;
 		}
@@ -512,7 +528,7 @@ public sealed class GpuDrawDatabase
 				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
-				mesh));
+				mesh).WithLod(record.Lod));
 		}
 
 		if (materialChanged || materialResourceChanged || windingChanged)
@@ -526,10 +542,11 @@ public sealed class GpuDrawDatabase
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
-				material));
+				material).WithLod(record.Lod));
 		}
 
-		if (uploadStale)
+		// Group membership lives in the instance data, which a transform update rewrites.
+		if (uploadStale || lodChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawKind,
@@ -539,7 +556,7 @@ public sealed class GpuDrawDatabase
 				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
-				mesh: record.Mesh));
+				mesh: record.Mesh).WithLod(record.Lod));
 		}
 
 		_transformHistory.RecordUpload(key, record.PreviousWorld, record.World);
@@ -981,6 +998,7 @@ public sealed class GpuDrawDatabase
 		public Matrix4x4 PreviousWorld;
 		public Matrix4x4 World;
 		public Vector4 BoundsCenterRadius;
+		public GpuDrawLod Lod;
 		public int LastSeenStamp;
 	}
 
@@ -1028,7 +1046,8 @@ public readonly struct GpuDrawEntry
 		TerrainRayTracingChunkData terrainRayTracingChunk,
 		Matrix4x4 previousWorld,
 		Matrix4x4 world,
-		Vector4 boundsCenterRadius)
+		Vector4 boundsCenterRadius,
+		GpuDrawLod lod = default)
 	{
 		DrawKind = drawKind;
 		InstanceHandle = instanceHandle;
@@ -1042,6 +1061,7 @@ public readonly struct GpuDrawEntry
 		PreviousWorld = previousWorld;
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
+		Lod = lod;
 	}
 
 	public GpuDrawKind DrawKind { get; }
@@ -1056,6 +1076,7 @@ public readonly struct GpuDrawEntry
 	public Matrix4x4 PreviousWorld { get; }
 	public Matrix4x4 World { get; }
 	public Vector4 BoundsCenterRadius { get; }
+	public GpuDrawLod Lod { get; }
 
 	public int InstanceIndex => InstanceHandle.Index;
 	public int MeshIndex => MeshHandle.Index;
@@ -1108,9 +1129,14 @@ public readonly struct GpuDrawUpdate
 	public TerrainDrawSurface? TerrainSurface { get; }
 	public TerrainRayTracingChunkData TerrainRayTracingChunk { get; }
 
+	/// <summary>The instance's <see cref="LodGroup"/> membership, which every update rewrites with its instance data.</summary>
+	public GpuDrawLod Lod { get; private init; }
+
 	public int InstanceIndex => InstanceHandle.Index;
 	public int MeshIndex => MeshHandle.Index;
 	public int MaterialIndex => MaterialHandle.Index;
+
+	public GpuDrawUpdate WithLod(in GpuDrawLod lod) => this with { Lod = lod };
 
 	public static GpuDrawUpdate CreateAdd(
 		GpuDrawKind drawKind,

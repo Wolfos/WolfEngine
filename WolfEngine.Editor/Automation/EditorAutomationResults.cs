@@ -90,13 +90,19 @@ public sealed record SavedPrefabResult(
 	string RelativeSourcePath,
 	long EditorFrameSequence);
 
+/// <param name="MeshLodLevelCounts">
+/// For each mesh renderer the model brought with it, in entity order, its mesh's level of detail count including
+/// level 0. 1 for a mesh without coarser levels.
+/// </param>
 public sealed record InstantiatedModelResult(
 	string AssetName,
 	Guid ModelNodeId,
 	Guid RootEntityId,
 	int SkinnedMeshRendererCount,
 	int AnimatorCount,
-	long EditorFrameSequence);
+	long EditorFrameSequence,
+	int MeshRendererCount,
+	IReadOnlyList<int> MeshLodLevelCounts);
 
 /// <summary>
 /// Runtime state of one animator, so animation can be validated by measurement rather than only by

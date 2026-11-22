@@ -30,7 +30,21 @@ struct GpuInstanceData
     uint meshHandle;
     uint drawKind;
     uint flags;
+    // A LodGroup's bounds in world space, which a grouped instance's level is measured on.
+    float4 lodSphere;
+    // Packed as below; zero for an instance outside any group. See docs/mesh-lod.md.
+    uint lodParams;
+    uint lodPad0;
+    uint lodPad1;
+    uint lodPad2;
 };
+
+// Mirrors GpuDrawLodParams in GpuDrawData.cs.
+static const uint LOD_PARAMS_GROUPED = 1u;
+static const uint LOD_PARAMS_FIRST_LEVEL_SHIFT = 1u;
+static const uint LOD_PARAMS_LAST_LEVEL_SHIFT = 4u;
+static const uint LOD_PARAMS_THRESHOLD_SET_SHIFT = 7u;
+static const uint LOD_PARAMS_LEVEL_MASK = 0x7u;
 
 // Bits of GpuMaterialData.materialFlags. Mirrors GpuMaterialFlags in GpuDrawData.cs.
 static const uint GPU_MATERIAL_FLAG_DOUBLE_SIDED = 1u << 0;
@@ -106,13 +120,15 @@ struct GpuMeshData
     uint pad2;
 };
 
-// Indexed by instance index. batchIndex names the batch whose visible list culling appends the instance to.
+// Indexed by instance index. batchIndex names the batch whose visible list culling appends the instance to: its
+// level 0 batch when its mesh has levels of detail. lodLevel is the level the camera cull last picked, kept for
+// hysteresis; see docs/mesh-lod.md.
 struct GpuDrawCommand
 {
     uint instanceHandle;
     uint batchIndex;
     uint flags;
-    uint pad0;
+    uint lodLevel;
 };
 
 // Indexed by batch index, which is also the draw index of the batch's records. A batch's visible instances live
@@ -125,6 +141,30 @@ struct GpuDrawBatchData
     uint laneIndex;
     uint pad0;
 };
+
+// Mirrors GpuDrawBatchLodData in GpuDrawData.cs. levelBatches[n] draws level n; screenSizes[n] is the threshold
+// into level n + 1. Eight levels, packed four to a vector.
+static const uint GPU_DRAW_MAX_LOD_LEVELS = 8;
+
+struct GpuDrawBatchLodData
+{
+    uint levelCount;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+    uint4 levelBatches[2];
+    float4 screenSizes[2];
+};
+
+uint GetLodLevelBatch(GpuDrawBatchLodData lod, uint level)
+{
+    return lod.levelBatches[level / 4u][level % 4u];
+}
+
+float GetLodThreshold(GpuDrawBatchLodData lod, uint index)
+{
+    return lod.screenSizes[index / 4u][index % 4u];
+}
 
 struct GpuDrawArgs
 {
@@ -153,6 +193,11 @@ struct GpuDrawInstanceUpdateData
     uint32_t materialHandle;
     uint32_t drawFlags;
     uint32_t pad0;
+    float4 lodSphere;
+    uint32_t lodParams;
+    uint32_t lodPad0;
+    uint32_t lodPad1;
+    uint32_t lodPad2;
 };
 
 struct GpuDrawMeshUpdateData

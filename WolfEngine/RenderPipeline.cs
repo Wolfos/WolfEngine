@@ -40,6 +40,66 @@ public class RenderPipeline : IRenderPipeline
 {
 	// Both snapshot databases consume the change, then one additional snapshot settles motion history.
 	private const int DirtyWorldTransformSyncCount = 3;
+
+	/// <summary>
+	/// Finds the nearest <see cref="LodGroup"/> at or above a mesh renderer and returns what the GPU cull needs to pick
+	/// the group's level for it. A renderer outside any group, or under one without bounds, gets the default, and
+	/// picks a level from its own mesh. Runs only for renderers whose transform changed, which moving the group does.
+	/// </summary>
+	private static GpuDrawLod ResolveLodGroupMembership(World world, Entity entity)
+	{
+		const int maxDepth = 64;
+		var current = entity;
+		for (var depth = 0; depth < maxDepth; depth++)
+		{
+			if (world.HasComponent<LodGroup>(current))
+			{
+				return CreateLodGroupMembership(world, entity, current);
+			}
+
+			if (world.HasComponent<Parent>(current) == false)
+			{
+				return default;
+			}
+
+			current = world.GetComponent<Parent>(current).Value;
+		}
+
+		return default;
+	}
+
+	private static GpuDrawLod CreateLodGroupMembership(World world, Entity renderer, Entity groupEntity)
+	{
+		var group = world.GetComponent<LodGroup>(groupEntity);
+		if (group.IsValid == false ||
+		    world.HasComponent<WorldTransform>(groupEntity) == false)
+		{
+			return default;
+		}
+
+		var groupWorld = world.GetComponent<WorldTransform>(groupEntity).LocalToWorld;
+		var center = Vector3.Transform(group.BoundsCenter, groupWorld);
+		var scale = MathF.Max(
+			new Vector3(groupWorld.M11, groupWorld.M12, groupWorld.M13).Length(),
+			MathF.Max(
+				new Vector3(groupWorld.M21, groupWorld.M22, groupWorld.M23).Length(),
+				new Vector3(groupWorld.M31, groupWorld.M32, groupWorld.M33).Length()));
+
+		var firstLevel = 0;
+		var lastLevel = -1;
+		if (world.HasComponent<LodGroupMember>(renderer))
+		{
+			var member = world.GetComponent<LodGroupMember>(renderer);
+			firstLevel = member.FirstLevel;
+			lastLevel = member.LastLevel;
+		}
+
+		return new GpuDrawLod(
+			new Vector4(center, group.BoundsRadius * scale),
+			group.ScreenSizes,
+			firstLevel,
+			lastLevel);
+	}
 	// Both snapshot databases consume the removal; motion history is dropped along with the draw.
 	private const int WorldTransformRemovalSyncCount = 2;
 	private const int DdgiDebugProbeEntityBaseIndex = -2_000_000_000;
@@ -377,7 +437,12 @@ public class RenderPipeline : IRenderPipeline
 
 
 						var transformMatrix = transform.LocalToWorld;
-						gpuDrawDatabase.TouchPersistentMesh(entry.Entity, mesh, material, transformMatrix);
+						gpuDrawDatabase.TouchPersistentMesh(
+							entry.Entity,
+							mesh,
+							material,
+							transformMatrix,
+							ResolveLodGroupMembership(world, entry.Entity));
 					}
 				}
 

@@ -305,6 +305,7 @@ public sealed class RenderViewSnapshot
 		Config.ColorGrading = config.ColorGrading;
 		Config.Bloom = config.Bloom;
 		Config.Decals = config.Decals;
+		Config.MeshLod = config.MeshLod;
 		Config.MotionVectorDebug = config.MotionVectorDebug;
 	}
 

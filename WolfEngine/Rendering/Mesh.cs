@@ -99,6 +99,134 @@ public class Mesh
     /// <summary>Whether the renderer has backed this mesh with GPU geometry. Exposed for diagnostics.</summary>
     public bool HasGpuVertexRange => VertexBuffer is not null;
 
+    private IReadOnlyList<Mesh> _lodLevels = Array.Empty<Mesh>();
+
+    /// <summary>
+    /// Coarser levels of detail, finest first, so entry 0 is level 1. This mesh is level 0. Each level is a complete
+    /// mesh in this mesh's local space, with its own GPU geometry, and has no levels of its own. Empty for a mesh
+    /// without levels. See docs/mesh-lod.md.
+    /// </summary>
+    public IReadOnlyList<Mesh> LodLevels => _lodLevels;
+
+    /// <summary>Number of levels of detail including this mesh.</summary>
+    public int LodLevelCount => _lodLevels.Count + 1;
+
+    /// <summary>Screen size the first coarser level starts below, when none are authored. Each further level halves it.</summary>
+    public const float DefaultFirstLodScreenSize = 0.25f;
+
+    private float[]? _lodScreenSizes;
+
+    /// <summary>
+    /// One threshold per coarser level, decreasing: level <c>n + 1</c> draws once the mesh's bounds cover less than
+    /// <c>LodScreenSizes[n]</c> of the screen height. Defaults to <see cref="DefaultFirstLodScreenSize"/>, halving
+    /// per level. See docs/mesh-lod.md.
+    /// </summary>
+    public IReadOnlyList<float> LodScreenSizes => _lodScreenSizes ??= CreateDefaultLodScreenSizes(_lodLevels.Count);
+
+    /// <summary>Sets authored switch thresholds, one per coarser level, each smaller than the one before.</summary>
+    public void SetLodScreenSizes(IReadOnlyList<float> screenSizes)
+    {
+        ArgumentNullException.ThrowIfNull(screenSizes);
+        if (screenSizes.Count != _lodLevels.Count)
+        {
+            throw new ArgumentException(
+                $"A mesh with {_lodLevels.Count} coarser levels needs {_lodLevels.Count} thresholds, not {screenSizes.Count}.",
+                nameof(screenSizes));
+        }
+
+        for (var i = 0; i < screenSizes.Count; i++)
+        {
+            var screenSize = screenSizes[i];
+            if (float.IsFinite(screenSize) == false || screenSize <= 0.0f)
+            {
+                throw new ArgumentException($"Threshold {i} must be a positive screen size.", nameof(screenSizes));
+            }
+
+            if (i > 0 && screenSize >= screenSizes[i - 1])
+            {
+                throw new ArgumentException("Each threshold must be smaller than the one before it.", nameof(screenSizes));
+            }
+        }
+
+        _lodScreenSizes = screenSizes.ToArray();
+    }
+
+    /// <summary>
+    /// Fits authored thresholds to this mesh's levels: extra ones are dropped, and missing ones continue halving from
+    /// the last given, so a model's thresholds apply to each of its meshes whatever its level count.
+    /// </summary>
+    public static float[] FitLodScreenSizes(IReadOnlyList<float> authored, int coarserLevelCount)
+    {
+        ArgumentNullException.ThrowIfNull(authored);
+        var fitted = new float[coarserLevelCount];
+        var screenSize = DefaultFirstLodScreenSize;
+        for (var i = 0; i < coarserLevelCount; i++)
+        {
+            if (i < authored.Count && float.IsFinite(authored[i]) && authored[i] > 0.0f)
+            {
+                screenSize = authored[i];
+            }
+            else if (i > 0)
+            {
+                screenSize *= 0.5f;
+            }
+
+            // Thresholds must decrease; a non-decreasing authored value falls back to halving.
+            if (i > 0 && screenSize >= fitted[i - 1])
+            {
+                screenSize = fitted[i - 1] * 0.5f;
+            }
+
+            fitted[i] = screenSize;
+        }
+
+        return fitted;
+    }
+
+    private static float[] CreateDefaultLodScreenSizes(int coarserLevelCount)
+    {
+        var screenSizes = new float[coarserLevelCount];
+        var screenSize = DefaultFirstLodScreenSize;
+        for (var i = 0; i < coarserLevelCount; i++)
+        {
+            screenSizes[i] = screenSize;
+            screenSize *= 0.5f;
+        }
+
+        return screenSizes;
+    }
+
+    /// <summary>Attaches the coarser levels that asset loading resolved for this mesh.</summary>
+    internal void SetLodLevels(IReadOnlyList<Mesh> levels)
+    {
+        ArgumentNullException.ThrowIfNull(levels);
+        foreach (var level in levels)
+        {
+            if (level is null)
+            {
+                throw new ArgumentException("A level of detail cannot be null.", nameof(levels));
+            }
+
+            if (ReferenceEquals(level, this))
+            {
+                throw new ArgumentException("A mesh cannot be one of its own coarser levels.", nameof(levels));
+            }
+
+            if (level._lodLevels.Count > 0)
+            {
+                throw new ArgumentException("A level of detail cannot have levels of its own.", nameof(levels));
+            }
+
+            if (level.IsSkinned != IsSkinned)
+            {
+                throw new ArgumentException("Every level of detail must match the mesh's skinning.", nameof(levels));
+            }
+        }
+
+        _lodLevels = levels.ToArray();
+        _lodScreenSizes = null;
+    }
+
     public Mesh(
         IReadOnlyList<Vector4> vertices,
         IReadOnlyList<uint> indices,

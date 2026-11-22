@@ -46,7 +46,7 @@ public sealed class EditorAutomationTools
 		return $"Deleted entity {entityId}.";
 	}
 
-	[McpServerTool(Name = "instantiate_model"), Description("Instantiate an imported 3D model into the authoring scene by asset name, through the same path the Assets window uses. Reports how many skinned mesh renderers and animators the model brought with it.")]
+	[McpServerTool(Name = "instantiate_model"), Description("Instantiate an imported 3D model into the authoring scene by asset name, through the same path the Assets window uses. Reports how many mesh renderers, skinned mesh renderers and animators the model brought with it, and each mesh renderer's level of detail count.")]
 	public Task<InstantiatedModelResult> InstantiateModel(
 		[Description("Substring of the 3D model asset name, such as 'Macarena'.")] string assetName,
 		[Description("Optional spawn X in world units.")] float? x = null,
@@ -495,6 +495,14 @@ public sealed class EditorAutomationTools
 	[McpServerTool(Name = "set_shadow_caster_culling"), Description("Enable or disable tighter shadow-caster culling in memory without saving the render config. Use for identical-scene capture and GPU timing comparisons.")]
 	public Task<string> SetShadowCasterCulling(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetShadowCasterCullingAsync(enabled, cancellationToken);
+
+	[McpServerTool(Name = "set_mesh_lod"), Description("Change mesh level of detail selection in the active scene's render config in memory, without saving the asset. Disabling it draws every mesh at level 0, for identical-scene capture and GPU timing comparisons.")]
+	public Task<string> SetMeshLod(
+		CancellationToken cancellationToken,
+		[Description("Optional: select levels (true) or draw every mesh at level 0 (false).")] bool? enabled = null,
+		[Description("Optional screen size multiplier. Above one keeps detail longer.")] float? bias = null,
+		[Description("Optional multiplier on the bias for shadow casters. Below one makes shadows coarser.")] float? shadowBias = null) =>
+		_controller.SetMeshLodAsync(enabled, bias, shadowBias, cancellationToken);
 
 	[McpServerTool(Name = "set_shadow_vertex_welding"), Description("Enable or disable lossless shadow vertex welding in memory without saving the render config. Use for identical-scene capture and GPU timing comparisons.")]
 	public Task<string> SetShadowVertexWelding(bool enabled, CancellationToken cancellationToken) =>

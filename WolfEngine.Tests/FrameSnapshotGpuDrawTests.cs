@@ -231,6 +231,42 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void GpuDrawDatabase_LodGroupChange_RewritesTheInstanceData()
+	{
+		var database = new GpuDrawDatabase();
+		var mesh = CreateTestMesh();
+		var material = new Material("leaves");
+		var entity = new Entity(1, 1);
+		var updates = new List<GpuDrawUpdate>();
+		var screenSizes = new[] { 0.3f, 0.1f };
+		var grouped = new GpuDrawLod(new Vector4(0.0f, 5.0f, 0.0f, 8.0f), screenSizes, 0, 1);
+
+		database.BeginSync();
+		database.TouchPersistentMesh(entity, mesh, material, Matrix4x4.Identity);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+		Assert.That(updates.Single().Lod.IsGrouped, Is.False);
+
+		database.BeginSync();
+		database.TouchPersistentMesh(entity, mesh, material, Matrix4x4.Identity, grouped);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Single().Type, Is.EqualTo(GpuDrawUpdateType.UpdateTransform));
+		Assert.That(updates.Single().Lod, Is.EqualTo(grouped));
+
+		var entries = new List<GpuDrawEntry>();
+		database.CollectDrawEntries(entries);
+		Assert.That(entries.Single().Lod, Is.EqualTo(grouped), "a full GPU state refresh replays the membership");
+
+		database.BeginSync();
+		database.TouchPersistentMesh(entity, mesh, material, Matrix4x4.Identity, grouped);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+		Assert.That(updates, Is.Empty, "unchanged membership uploads nothing");
+	}
+
+	[Test]
 	public void FrameSnapshotBuffer_CompleteReleasesBlockedWriter()
 	{
 		var buffer = new FrameSnapshotBuffer();

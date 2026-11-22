@@ -40,6 +40,17 @@ cbuffer CullParams : register(b12)
     uint maxInstanceCount;
     // Visible instance list entries per view.
     uint visibleInstanceStride;
+    // Level of detail selection, measured from the main camera in every view; see docs/mesh-lod.md.
+    // x: projection vertical scale, y: clip W per unit distance, z: clip W at zero distance, w: bias.
+    float4 lodProjection;
+    // Fraction of a threshold the screen size must pass it by before the level changes.
+    float lodHysteresis;
+    // Zero draws every instance at level 0.
+    uint lodEnabled;
+    // Nonzero for the camera cull, which records the picked level for the next frame's hysteresis.
+    uint lodWriteState;
+    // Where the LodGroup threshold sets start in g_BatchLods, after the batch entries.
+    uint lodThresholdSetBase;
 };
 
 RWStructuredBuffer<GpuDrawCommand> g_DrawCommands : register(u0);
@@ -57,6 +68,37 @@ RWStructuredBuffer<uint> g_MaterialGenerations : register(u9);
 RWStructuredBuffer<uint> g_Diagnostics : register(u10);
 #endif
 RWStructuredBuffer<GpuDrawBatchData> g_Batches : register(u11);
+// Read only. A UAV because every SRV register D3D12's compute root offers shares a Metal buffer index with one of
+// this shader's other bindings.
+RWStructuredBuffer<GpuDrawBatchLodData> g_BatchLods : register(u2);
+
+// The fraction of the screen height the bounds' diameter covers, scaled by the bias.
+float GetLodScreenSize(float3 relativeCenter, float radius)
+{
+    float clipW = max(length(relativeCenter) * lodProjection.y + lodProjection.z, 1e-4f);
+    return radius * lodProjection.x / clipW * lodProjection.w;
+}
+
+// Steps from the level the instance had towards the one its screen size asks for. A level changes only once the
+// size passes its threshold by the hysteresis margin, so an object resting on a threshold keeps its level. Gives the
+// same answer when fed its own result, which lets shadow culls repeat the camera's choice without storing it.
+uint SelectLodLevel(GpuDrawBatchLodData lod, uint previousLevel, float screenSize)
+{
+    uint level = min(previousLevel, lod.levelCount - 1u);
+    while (level + 1u < lod.levelCount &&
+           screenSize < GetLodThreshold(lod, level) * (1.0f - lodHysteresis))
+    {
+        level++;
+    }
+
+    while (level > 0u &&
+           screenSize > GetLodThreshold(lod, level - 1u) * (1.0f + lodHysteresis))
+    {
+        level--;
+    }
+
+    return level;
+}
 
 bool IsSphereVisible(uint viewIndex, float3 center, float radius)
 {
@@ -211,6 +253,91 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     float3 relativeCenter = instanceData.boundsCenterRadius.xyz - cameraPosition;
+
+    // An instance whose mesh has levels of detail is a member of every level's batch; draw it in the one its screen
+    // size picks.
+    uint drawBatchIndex = batchIndex;
+    uint lodParams = instanceData.lodParams;
+    if ((lodParams & LOD_PARAMS_GROUPED) != 0u)
+    {
+        // A LodGroup picks one level for all its renderers from the group's bounds and thresholds. Every member
+        // steps from its own stored level with the same inputs, so they agree.
+        uint groupLevel = 0u;
+        if (lodEnabled != 0u)
+        {
+            GpuDrawBatchLodData thresholds =
+                g_BatchLods[lodThresholdSetBase + (lodParams >> LOD_PARAMS_THRESHOLD_SET_SHIFT)];
+            float groupScreenSize = GetLodScreenSize(
+                instanceData.lodSphere.xyz - cameraPosition,
+                instanceData.lodSphere.w);
+            groupLevel = SelectLodLevel(thresholds, cmd.lodLevel, groupScreenSize);
+            if (lodWriteState != 0u && groupLevel != cmd.lodLevel)
+            {
+                cmd.lodLevel = groupLevel;
+                g_DrawCommands[instanceIndex] = cmd;
+            }
+        }
+
+        uint firstLevel = (lodParams >> LOD_PARAMS_FIRST_LEVEL_SHIFT) & LOD_PARAMS_LEVEL_MASK;
+        uint lastLevel = (lodParams >> LOD_PARAMS_LAST_LEVEL_SHIFT) & LOD_PARAMS_LEVEL_MASK;
+        if (groupLevel < firstLevel || groupLevel > lastLevel)
+        {
+            return;
+        }
+
+        // A renderer whose mesh has fewer levels than its range keeps drawing its coarsest.
+        GpuDrawBatchLodData meshLod = g_BatchLods[batchIndex];
+        uint meshLevelCount = clamp(meshLod.levelCount, 1u, GPU_DRAW_MAX_LOD_LEVELS);
+        uint meshLevel = min(groupLevel - firstLevel, meshLevelCount - 1u);
+        if (meshLevel > 0u)
+        {
+            drawBatchIndex = GetLodLevelBatch(meshLod, meshLevel);
+            if (drawBatchIndex == 0 || drawBatchIndex >= maxBatchCount)
+            {
+                return;
+            }
+
+            batch = g_Batches[drawBatchIndex];
+            if (batch.capacity == 0)
+            {
+                return;
+            }
+        }
+    }
+    else if (lodEnabled != 0u)
+    {
+        GpuDrawBatchLodData lod = g_BatchLods[batchIndex];
+        if (lod.levelCount > 1u && lod.levelCount <= GPU_DRAW_MAX_LOD_LEVELS)
+        {
+            float screenSize = GetLodScreenSize(relativeCenter, instanceData.boundsCenterRadius.w);
+            uint level = SelectLodLevel(lod, cmd.lodLevel, screenSize);
+            if (lodWriteState != 0u && level != cmd.lodLevel)
+            {
+                cmd.lodLevel = level;
+                g_DrawCommands[instanceIndex] = cmd;
+            }
+
+            drawBatchIndex = GetLodLevelBatch(lod, level);
+            if (drawBatchIndex == 0 || drawBatchIndex >= maxBatchCount)
+            {
+                return;
+            }
+
+            batch = g_Batches[drawBatchIndex];
+            if (batch.capacity == 0)
+            {
+                return;
+            }
+        }
+    }
+
+    // Visible lists grow from the batches' total capacity a frame after it changes, so a batch can briefly reach past
+    // its view's slice. Its instances wait for the lists to grow rather than land in the next view's slice.
+    if (batch.visibleOffset + batch.capacity > visibleInstanceStride)
+    {
+        return;
+    }
+
     for (uint viewIndex = 0; viewIndex < viewCount; viewIndex++)
     {
         if (IsSphereVisible(viewIndex, relativeCenter, instanceData.boundsCenterRadius.w) == false)
@@ -229,10 +356,10 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
 
         uint rangeBase = laneIndex * 2;
-        InterlockedMax(g_DrawExecutionRangePerBucket[rangeBase + 1], batchIndex + 1);
+        InterlockedMax(g_DrawExecutionRangePerBucket[rangeBase + 1], drawBatchIndex + 1);
 #endif
 
-        uint argsIndex = (viewIndex * outputDrawArgsStride) + batchIndex;
+        uint argsIndex = (viewIndex * outputDrawArgsStride) + drawBatchIndex;
         uint slot;
         InterlockedAdd(g_DrawArgs[argsIndex].instanceCount, 1, slot);
         // The batch table and the command table are written in the same frame, so a member past capacity means

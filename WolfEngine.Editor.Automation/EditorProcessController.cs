@@ -402,6 +402,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<string> SetShadowCasterCullingAsync(bool enabled, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetShadowCasterCullingAsync(enabled, cancellationToken);
 
+	public Task<string> SetMeshLodAsync(bool? enabled, float? bias, float? shadowBias, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetMeshLodAsync(enabled, bias, shadowBias, cancellationToken);
+
 	public Task<string> SetShadowVertexWeldingAsync(bool enabled, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetShadowVertexWeldingAsync(enabled, cancellationToken);
 

@@ -369,6 +369,96 @@ public sealed class GpuDrawBatchesTests
 		return draws;
 	}
 
+	[Test]
+	public void InstanceWithLevelsOfDetail_JoinsTheBatchOfEveryLevel()
+	{
+		var mesh = CreateMeshWithLevels(out var levelOne, out var levelTwo);
+
+		var levelZeroBatch = _batches.Assign(Instance(1), _opaque, mesh);
+		_batches.Assign(Instance(2), _opaque, mesh);
+		var levelOneBatch = _batches.Assign(Instance(3), _opaque, levelOne);
+		var lod = _batches.GetBatchLodTable()[(int)levelZeroBatch];
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(_batches.BatchCount, Is.EqualTo(3));
+			Assert.That(_batches.TotalCapacity, Is.EqualTo(7u), "two instances in three levels, plus one direct user of level 1");
+			Assert.That(_batches.GetCapacity((int)levelZeroBatch), Is.EqualTo(2u));
+			Assert.That(_batches.GetCapacity((int)levelOneBatch), Is.EqualTo(3u), "level batches are shared with direct users");
+			Assert.That(lod.LevelCount, Is.EqualTo(3u));
+			Assert.That(lod.LevelBatches[0], Is.EqualTo(levelZeroBatch));
+			Assert.That(lod.LevelBatches[1], Is.EqualTo(levelOneBatch));
+			Assert.That(_batches.GetCapacity((int)lod.LevelBatches[2]), Is.EqualTo(2u));
+			Assert.That(lod.ScreenSizes[0], Is.EqualTo(Mesh.DefaultFirstLodScreenSize));
+			Assert.That(lod.ScreenSizes[1], Is.EqualTo(Mesh.DefaultFirstLodScreenSize * 0.5f));
+			Assert.That(_batches.GetBatchLodTable()[(int)levelOneBatch].LevelCount, Is.EqualTo(1u));
+		});
+
+		GC.KeepAlive(levelTwo);
+	}
+
+	[Test]
+	public void RemovingAnInstanceWithLevels_LeavesEveryLevelBatch()
+	{
+		var mesh = CreateMeshWithLevels(out _, out _);
+		_batches.Assign(Instance(1), _opaque, mesh);
+
+		_batches.Remove(Instance(1));
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(_batches.BatchCount, Is.Zero);
+			Assert.That(_batches.TotalCapacity, Is.Zero);
+		});
+	}
+
+	[Test]
+	public void SwitchingToAMeshWithoutLevels_LeavesTheOldLevelBatches()
+	{
+		var mesh = CreateMeshWithLevels(out _, out _);
+		_batches.Assign(Instance(1), _opaque, mesh);
+
+		var batch = _batches.Assign(Instance(1), _opaque, _meshA);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(_batches.BatchCount, Is.EqualTo(1));
+			Assert.That(_batches.TotalCapacity, Is.EqualTo(1u));
+			Assert.That(_batches.GetBatchLodTable()[(int)batch].LevelCount, Is.EqualTo(1u));
+		});
+	}
+
+	[Test]
+	public void BatchLodData_MatchesTheShaderLayout()
+	{
+		// GpuDrawBatchLodData in draw_data.slang: four uints, then uint4 levelBatches[2] and float4 screenSizes[2].
+		var data = new GpuDrawBatchLodData();
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(System.Runtime.CompilerServices.Unsafe.SizeOf<GpuDrawBatchLodData>(), Is.EqualTo(80));
+			Assert.That(OffsetOf(ref data, ref data.LevelBatches[0]), Is.EqualTo(16));
+			Assert.That(OffsetOf(ref data, ref data.ScreenSizes[0]), Is.EqualTo(48));
+		});
+	}
+
+	private static int OffsetOf<TField>(ref GpuDrawBatchLodData data, ref TField field)
+	{
+		return (int)System.Runtime.CompilerServices.Unsafe.ByteOffset(
+			ref System.Runtime.CompilerServices.Unsafe.As<GpuDrawBatchLodData, byte>(ref data),
+			ref System.Runtime.CompilerServices.Unsafe.As<TField, byte>(ref field));
+	}
+
+	private static Mesh CreateMeshWithLevels(out Mesh levelOne, out Mesh levelTwo)
+	{
+		var mesh = CreateMesh();
+		levelOne = CreateMesh();
+		levelTwo = CreateMesh();
+		mesh.SetLodLevels([levelOne, levelTwo]);
+
+		return mesh;
+	}
+
 	private static GpuDrawHandle Instance(int index, ushort generation = 1) => GpuDrawHandle.Create(index, generation);
 
 	private static Mesh CreateMesh() =>

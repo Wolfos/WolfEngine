@@ -197,6 +197,9 @@ public sealed class MeshAssetSummary
 	public int VertexCount { get; set; }
 	public int IndexCount { get; set; }
 	public bool IsSkinned { get; set; }
+
+	/// <summary>Number of levels of detail including this mesh, so 1 for a mesh without coarser levels.</summary>
+	public int LodLevelCount { get; set; } = 1;
 }
 
 public sealed class SkeletonAssetSummary
@@ -290,6 +293,12 @@ public sealed class ModelImportSettings
 {
 	/// <summary>Explicit rig for animation-only sources. No retargeting is performed.</summary>
 	public Guid AnimationSkeletonId { get; set; }
+
+	/// <summary>
+	/// Level of detail switch thresholds for the model's meshes and its generated <see cref="WolfEngine.LodGroup"/>,
+	/// as fractions of the screen height, one per transition, decreasing. Empty uses the defaults. See docs/mesh-lod.md.
+	/// </summary>
+	public float[] LodScreenSizes { get; set; } = [];
 	public List<string> IgnoredAnimationChannels { get; set; } = [];
 
 	/// <summary>Editor-authored timeline metadata, keyed by the persistent animation sub-asset key.</summary>
@@ -383,6 +392,18 @@ public sealed class ImportedMeshAssetFile
 	public uint[] BoneIndices { get; set; } = [];
 
 	public float[] BoneWeights { get; set; } = [];
+
+	/// <summary>
+	/// Mesh assets holding this mesh's coarser levels of detail, finest first, so entry 0 is level 1. This mesh is
+	/// level 0. Empty for a mesh without levels, which is every mesh written before artifact version 4.
+	/// </summary>
+	public Guid[] LodLevelNodeIds { get; set; } = [];
+
+	/// <summary>
+	/// Authored switch thresholds, one per coarser level, decreasing. Empty keeps the defaults; see
+	/// <see cref="Mesh.LodScreenSizes"/>. Written from version 5.
+	/// </summary>
+	public float[] LodScreenSizes { get; set; } = [];
 }
 
 public sealed class ImportedSkeletonAssetFile
@@ -434,6 +455,20 @@ public sealed class ImportedModelAssetFile
 
 	/// <summary>Animation clip sub-assets produced by this source.</summary>
 	public List<Guid> AnimationNodeIds { get; set; } = new();
+
+	/// <summary>
+	/// The <see cref="WolfEngine.LodGroup"/> placing the model adds to its root, or null. Generated when two or more of
+	/// the model's renderers have levels of detail, so they switch together. See docs/mesh-lod.md.
+	/// </summary>
+	public ImportedModelLodGroup? LodGroup { get; set; }
+}
+
+/// <summary>A generated <see cref="WolfEngine.LodGroup"/>, with its bounds in the model's space: the space of the root's parent.</summary>
+public sealed class ImportedModelLodGroup
+{
+	public float[] ScreenSizes { get; set; } = [];
+	public Vector3 BoundsCenter { get; set; }
+	public float BoundsRadius { get; set; }
 }
 
 public sealed class ImportedModelAssetNode

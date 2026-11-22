@@ -386,6 +386,45 @@ public sealed partial class EditorRemoteAutomationController
 			return $"Tight shadow-caster culling: {enabled}. Changed in memory only.";
 		}, cancellationToken);
 
+	public Task<string> SetMeshLodAsync(
+		bool? enabled,
+		float? bias,
+		float? shadowBias,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+			{
+				config = entry.First.RenderConfigAsset.Asset;
+			}
+
+			if (config is null)
+			{
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			}
+
+			var settings = config.MeshLod;
+			if (enabled.HasValue)
+			{
+				settings.Enabled = enabled.Value;
+			}
+
+			if (bias.HasValue)
+			{
+				settings.Bias = bias.Value;
+			}
+
+			if (shadowBias.HasValue)
+			{
+				settings.ShadowBias = shadowBias.Value;
+			}
+
+			config.MeshLod = settings;
+			return $"Mesh LOD enabled: {settings.Enabled}, bias: {settings.Bias}, shadow bias: {settings.ShadowBias}. Changed in memory only.";
+		}, cancellationToken);
+
 	public Task<string> SetShadowVertexWeldingAsync(bool enabled, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
@@ -563,6 +602,7 @@ public sealed partial class EditorRemoteAutomationController
 			var rootEntity = default(Entity);
 			var skinnedMeshRendererCount = 0;
 			var animatorCount = 0;
+			var meshLodLevelCounts = new List<int>();
 			foreach (var entity in EnumerateEntities(world))
 			{
 				if (existingEntities.Contains(entity))
@@ -585,6 +625,13 @@ public sealed partial class EditorRemoteAutomationController
 				{
 					animatorCount++;
 				}
+
+				if (world.HasComponent<MeshRenderer>(entity))
+				{
+					var meshRenderer = world.GetComponent<MeshRenderer>(entity);
+					meshRenderer.TryValidate();
+					meshLodLevelCounts.Add(meshRenderer.Mesh?.LodLevelCount ?? 0);
+				}
 			}
 
 			if (rootEntity.IsValid && Math.Abs(uniformScale - 1.0f) > float.Epsilon)
@@ -603,7 +650,9 @@ public sealed partial class EditorRemoteAutomationController
 				rootEntityId,
 				skinnedMeshRendererCount,
 				animatorCount,
-				_editorFrameCoordinator.CompletedSequence);
+				_editorFrameCoordinator.CompletedSequence,
+				meshLodLevelCounts.Count,
+				meshLodLevelCounts);
 		}, cancellationToken);
 
 	/// <summary>

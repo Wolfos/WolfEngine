@@ -4,10 +4,19 @@ public static class ImportedMeshSerializer
 {
 	private static ReadOnlySpan<byte> Magic => "WEMH"u8;
 
-	/// <summary>Version 3 adds shared optional shadow index streams; versions 1 and 2 use main indices.</summary>
-	public const int CurrentVersion = 3;
+	/// <summary>
+	/// Version 3 adds shared optional shadow index streams; versions 1 and 2 use main indices. Version 4 adds the
+	/// mesh assets of coarser levels of detail, and version 5 their authored switch thresholds.
+	/// </summary>
+	public const int CurrentVersion = 5;
 
 	private const int SkinnedVersion = 2;
+
+	private const int ShadowStreamsVersion = 3;
+
+	private const int LodLevelsVersion = 4;
+
+	private const int LodScreenSizesVersion = 5;
 
 	public static void Write(string path, ImportedMeshAssetFile mesh)
 	{
@@ -33,6 +42,15 @@ public static class ImportedMeshSerializer
 			writer.Write(alphaSharesOpaque);
 			AssetBinaryPrimitives.WriteUInt32Array(writer,
 				alphaSharesOpaque || alpha.AsSpan().SequenceEqual(mesh.Indices) ? [] : alpha);
+
+			var lodLevelNodeIds = mesh.LodLevelNodeIds ?? [];
+			writer.Write(lodLevelNodeIds.Length);
+			foreach (var lodLevelNodeId in lodLevelNodeIds)
+			{
+				writer.Write(lodLevelNodeId.ToByteArray());
+			}
+
+			AssetBinaryPrimitives.WriteSingleArray(writer, mesh.LodScreenSizes ?? []);
 		});
 	}
 
@@ -81,12 +99,32 @@ public static class ImportedMeshSerializer
 			mesh.BoneWeights = AssetBinaryPrimitives.ReadSingleArray(reader);
 		}
 
-		if (version >= 3)
+		if (version >= ShadowStreamsVersion)
 		{
 			mesh.ShadowOpaqueIndices = AssetBinaryPrimitives.ReadUInt32Array(reader);
 			var alphaSharesOpaque = reader.ReadBoolean();
 			mesh.ShadowAlphaTestIndices = AssetBinaryPrimitives.ReadUInt32Array(reader);
 			if (alphaSharesOpaque) mesh.ShadowAlphaTestIndices = mesh.ShadowOpaqueIndices;
+		}
+
+		if (version >= LodLevelsVersion)
+		{
+			var lodLevelCount = reader.ReadInt32();
+			if (lodLevelCount < 0)
+			{
+				throw new InvalidOperationException($"Imported mesh artifact has an invalid level count {lodLevelCount}.");
+			}
+
+			mesh.LodLevelNodeIds = new Guid[lodLevelCount];
+			for (var i = 0; i < lodLevelCount; i++)
+			{
+				mesh.LodLevelNodeIds[i] = new Guid(reader.ReadBytes(16));
+			}
+		}
+
+		if (version >= LodScreenSizesVersion)
+		{
+			mesh.LodScreenSizes = AssetBinaryPrimitives.ReadSingleArray(reader);
 		}
 
 		return mesh;

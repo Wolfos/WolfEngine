@@ -2857,6 +2857,7 @@ internal sealed class RenderGraphFrameBuilder
 			sceneData.CameraOrigin,
 			useShadowBuffers: true,
 			DrawPassParticipation.ShadowCaster,
+			MeshLodCullSettings.ForShadows(sceneData, _view.FrameResources.Config.MeshLod),
 			casterPlanes[..(shadowData.CascadeCount * FrustumCulling.MaxPlaneCount)],
 			casterPlaneCounts[..shadowData.CascadeCount]);
 
@@ -2911,7 +2912,7 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteGpuDrawCullCamera(RenderGraphContext context)
 	{
-		_gpuDrawPass.RecordCull(context, context.SceneData);
+		_gpuDrawPass.RecordCull(context, context.SceneData, _view.FrameResources.Config.MeshLod);
 		_gpuDrawPass.RecordGBufferIndirectCompaction(context);
 	}
 

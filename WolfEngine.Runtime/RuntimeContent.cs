@@ -161,8 +161,27 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 	/// </summary>
 	private Mesh CreateMesh(Guid id, Stream stream)
 	{
-		var mesh = CreateMesh(ImportedMeshSerializer.Read(stream));
+		var meshFile = ImportedMeshSerializer.Read(stream);
+		var mesh = CreateMesh(meshFile);
 		mesh.CpuGeometrySource = () => ReadMesh(id);
+
+		if (meshFile.LodLevelNodeIds.Length > 0)
+		{
+			var levels = new Mesh[meshFile.LodLevelNodeIds.Length];
+			for (var i = 0; i < levels.Length; i++)
+			{
+				var levelNodeId = meshFile.LodLevelNodeIds[i];
+				levels[i] = Load<Mesh>(levelNodeId)
+				            ?? throw new InvalidOperationException(
+					            $"Mesh '{id}' is missing its level of detail {i + 1} ('{levelNodeId}').");
+			}
+
+			mesh.SetLodLevels(levels);
+			if (meshFile.LodScreenSizes.Length > 0)
+			{
+				mesh.SetLodScreenSizes(Mesh.FitLodScreenSizes(meshFile.LodScreenSizes, levels.Length));
+			}
+		}
 
 		return mesh;
 	}
