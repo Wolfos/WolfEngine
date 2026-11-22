@@ -76,6 +76,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	private int _gpuCaptureRequested;
 	private bool _gpuCaptureActive;
 	private RayTracingSceneState _latestRayTracingSceneState = RayTracingSceneState.Empty;
+	private FoliageDrawStatsBox _latestFoliageStats = new(default);
 
 	private readonly object _resourceSync = new();
 	private readonly HashSet<Material> _pendingMaterials = new(new ReferenceComparer<Material>());
@@ -912,6 +913,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		_hardeningStats.SetDeferredReleaseBacklog(retirementStats.UnsealedCount + retirementStats.PendingCount);
 		LogGpuHardeningStatsIfNeeded();
 		PublishRayTracingSceneState();
+		Volatile.Write(ref _latestFoliageStats, new FoliageDrawStatsBox(_frameBuilder.GetFoliageStats()));
 		_renderFrameCoordinator.PublishCompletedFrame(sceneFrame);
 		FrameProfiler.Instance.EndFrame();
 	}
@@ -1207,6 +1209,11 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 	/// <summary>Returns the most recent renderer-thread RTAS snapshot without synchronizing the GPU.</summary>
 	public RayTracingSceneState GetRayTracingSceneState() => Volatile.Read(ref _latestRayTracingSceneState);
+
+	/// <summary>Returns the placed foliage in the most recent frame's draw tables. See docs/foliage.md.</summary>
+	public FoliageDrawStats GetFoliageStats() => Volatile.Read(ref _latestFoliageStats).Stats;
+
+	private sealed record FoliageDrawStatsBox(FoliageDrawStats Stats);
 
 	private void PublishRayTracingSceneState()
 	{

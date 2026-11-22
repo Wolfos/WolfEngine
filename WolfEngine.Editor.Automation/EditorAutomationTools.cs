@@ -361,6 +361,10 @@ public sealed class EditorAutomationTools
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneState(CancellationToken cancellationToken) =>
 		_controller.GetRayTracingSceneStateAsync(cancellationToken);
 
+	[McpServerTool(Name = "get_foliage_state"), Description("Return the placed foliage in the last frame's draw tables: terrain foliage sets, instances, the renderer instances they could expand into, batch reservations and reserved visible slots, the foliage expansion region's capacity, and the TLAS instance count.")]
+	public Task<FoliageStateResult> GetFoliageState(CancellationToken cancellationToken) =>
+		_controller.GetFoliageStateAsync(cancellationToken);
+
 	[McpServerTool(Name = "profile_gpu_frames"), Description("Enable the existing GPU profiler and aggregate timing statistics over multiple completed GPU frames. Results include median, p95, and maximum per render pass and nested scope.")]
 	public Task<GpuFrameProfileResult> ProfileGpuFrames(
 		[Description("Positive number of completed GPU-profile frames to aggregate.")] int frameCount,

@@ -334,6 +334,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetRayTracingSceneStateAsync(cancellationToken);
 
+	public Task<FoliageStateResult> GetFoliageStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetFoliageStateAsync(cancellationToken);
+
 	public Task<GpuFrameProfileResult> ProfileGpuFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		GetRunningEditor().ProfileGpuFramesAsync(frameCount, cancellationToken);
 

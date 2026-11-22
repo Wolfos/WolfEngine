@@ -72,32 +72,15 @@ RWStructuredBuffer<GpuDrawBatchData> g_Batches : register(u11);
 // this shader's other bindings.
 RWStructuredBuffer<GpuDrawBatchLodData> g_BatchLods : register(u2);
 
-// The fraction of the screen height the bounds' diameter covers, scaled by the bias.
+// Shared with the foliage cull through draw_data.slang, which takes the parameters explicitly.
 float GetLodScreenSize(float3 relativeCenter, float radius)
 {
-    float clipW = max(length(relativeCenter) * lodProjection.y + lodProjection.z, 1e-4f);
-    return radius * lodProjection.x / clipW * lodProjection.w;
+    return GetLodScreenSize(relativeCenter, radius, lodProjection);
 }
 
-// Steps from the level the instance had towards the one its screen size asks for. A level changes only once the
-// size passes its threshold by the hysteresis margin, so an object resting on a threshold keeps its level. Gives the
-// same answer when fed its own result, which lets shadow culls repeat the camera's choice without storing it.
 uint SelectLodLevel(GpuDrawBatchLodData lod, uint previousLevel, float screenSize)
 {
-    uint level = min(previousLevel, lod.levelCount - 1u);
-    while (level + 1u < lod.levelCount &&
-           screenSize < GetLodThreshold(lod, level) * (1.0f - lodHysteresis))
-    {
-        level++;
-    }
-
-    while (level > 0u &&
-           screenSize > GetLodThreshold(lod, level - 1u) * (1.0f + lodHysteresis))
-    {
-        level--;
-    }
-
-    return level;
+    return SelectLodLevel(lod, previousLevel, screenSize, lodHysteresis);
 }
 
 bool IsSphereVisible(uint viewIndex, float3 center, float radius)

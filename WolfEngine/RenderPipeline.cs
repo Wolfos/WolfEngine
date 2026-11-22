@@ -106,6 +106,8 @@ public class RenderPipeline : IRenderPipeline
 	private const float DdgiDebugProbeInstanceMarker = 1.0f;
 	private readonly RenderGraph _renderGraph;
 	private readonly TerrainRuntimeCache _terrainRuntimeCache = new();
+	private readonly FoliageRuntimeCache _foliageRuntimeCache = new();
+	private readonly FoliageDrawGather _foliageDrawGather = new();
 	private readonly DebugPrimitiveMeshFactory _debugPrimitiveMeshFactory = new();
 	private readonly Dictionary<GpuDrawDatabase, List<World>> _renderWorldsByDatabase = new();
 	private readonly Dictionary<GpuDrawDatabase, int> _forcedReconcileSnapshotsByDatabase = new();
@@ -577,6 +579,17 @@ public class RenderPipeline : IRenderPipeline
 							entry.First,
 							cameraOrigin,
 							gpuDrawDatabase);
+
+						if (entry.Second.Foliage.Asset is { } foliage &&
+						    _foliageRuntimeCache.Resolve(foliage, _renderGraph) is { } foliageRuntime)
+						{
+							_foliageDrawGather.Gather(
+								gpuDrawDatabase,
+								entry.Entity,
+								foliageRuntime,
+								entry.First.LocalToWorld,
+								cameraOrigin);
+						}
 					}
 				}
 
@@ -633,6 +646,7 @@ public class RenderPipeline : IRenderPipeline
 					_debugPrimitiveMeshFactory);
 			}
 
+			_foliageDrawGather.EndSync(gpuDrawDatabase);
 			gpuDrawDatabase.EndSync();
 	}
 

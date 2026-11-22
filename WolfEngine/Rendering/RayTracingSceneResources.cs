@@ -319,7 +319,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 				continue;
 			}
 
-			if (IsRayTraceable(entry.DrawKind, entry.Material, ref statsBuilder) == false)
+			if (entry.Role == GpuDrawRole.ResourcesOnly ||
+			    IsRayTraceable(entry.DrawKind, entry.Material, ref statsBuilder) == false)
 			{
 				continue;
 			}
@@ -433,7 +434,10 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 		var hasExistingRecord = _instances.TryGetValue(update.InstanceHandle.Value, out var oldRecord);
 		var material = update.Material ?? (hasExistingRecord ? oldRecord.Material : null);
-		if (update.Mesh is null || material is null || IsRayTraceable(update.DrawKind, material, ref statsBuilder) == false)
+		if (update.Mesh is null ||
+		    material is null ||
+		    update.Role == GpuDrawRole.ResourcesOnly ||
+		    IsRayTraceable(update.DrawKind, material, ref statsBuilder) == false)
 		{
 			if (RemoveInstance(update.InstanceHandle.Value, device))
 			{

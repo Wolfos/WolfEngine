@@ -473,6 +473,8 @@ internal sealed class RenderGraphFrameBuilder
 
 	public RayTracingSceneState GetRayTracingSceneState() => _rayTracingSceneResources.GetState();
 
+	public FoliageDrawStats GetFoliageStats() => _gpuDrawPass.GetFoliageStats();
+
 	/// <summary>
 	/// Single-view convenience: the shared frame setup followed by the primary view's.
 	/// </summary>

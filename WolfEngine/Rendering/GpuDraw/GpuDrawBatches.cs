@@ -168,7 +168,7 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 		return levelBatchIndices.Count > 0 ? levelBatchIndices.ToArray() : null;
 	}
 
-	private int JoinBatch(in BatchKey key, int laneIndex)
+	private int JoinBatch(in BatchKey key, int laneIndex, uint slotCount = 1)
 	{
 		if (_batchIndicesByKey.TryGetValue(key, out var batchIndex) == false)
 		{
@@ -180,11 +180,54 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 		}
 
 		ref var batch = ref _batches[batchIndex];
-		batch.Capacity++;
-		_totalCapacity++;
+		batch.Capacity += slotCount;
+		_totalCapacity += slotCount;
 		MarkDirty(batchIndex);
 		return batchIndex;
 	}
+
+	/// <summary>
+	/// Adds slots to the batch for a lane and mesh without naming the instances that fill them, for draws the GPU
+	/// writes itself, such as placed foliage. The cull appends up to that many visible instances to it in each view.
+	/// </summary>
+	/// <returns>The batch index, or zero when no lane draws the key or no batch could be created.</returns>
+	public uint Reserve(in GpuDrawExecutionKey executionKey, Mesh mesh, uint slotCount)
+	{
+		ArgumentNullException.ThrowIfNull(mesh);
+		ArgumentOutOfRangeException.ThrowIfZero(slotCount);
+
+		if (GpuDrawClassification.SupportsMeshBackedGeometry(executionKey.DrawKind) == false ||
+		    executionKey.BucketId == GpuDrawBucketId.AlphaBlend ||
+		    GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var lane) == false)
+		{
+			return NoBatch;
+		}
+
+		return (uint)JoinBatch(new BatchKey(executionKey, mesh, 0), lane.ExecutionIndex, slotCount);
+	}
+
+	/// <summary>Gives back slots taken by <see cref="Reserve"/>. Ignored when the batches were cleared since.</summary>
+	public void Release(uint batchIndex, uint slotCount, int clearGeneration)
+	{
+		if (clearGeneration != ClearGeneration ||
+		    batchIndex == NoBatch ||
+		    batchIndex >= (uint)_batches.Length)
+		{
+			return;
+		}
+
+		ref var batch = ref _batches[batchIndex];
+		if (batch.Capacity < slotCount)
+		{
+			throw new InvalidOperationException(
+				$"Batch {batchIndex} holds {batch.Capacity} slots, fewer than the {slotCount} being released.");
+		}
+
+		LeaveBatchIndex((int)batchIndex, slotCount);
+	}
+
+	/// <summary>Changes whenever every batch is emptied at once, which drops all reservations with it.</summary>
+	public int ClearGeneration { get; private set; }
 
 	/// <summary>Takes an instance out of its batch. Ignored when the slot now holds a newer instance.</summary>
 	public void Remove(in GpuDrawHandle instanceHandle)
@@ -257,6 +300,7 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 		_maxBatchIndex = 0;
 		_maxBatchIndexDirty = false;
 		_batchTableDirty = true;
+		ClearGeneration++;
 		Version++;
 	}
 
@@ -433,11 +477,11 @@ internal sealed class GpuDrawBatches : ILiveDrawSource
 		}
 	}
 
-	private void LeaveBatchIndex(int batchIndex)
+	private void LeaveBatchIndex(int batchIndex, uint slotCount = 1)
 	{
 		ref var batch = ref _batches[batchIndex];
-		batch.Capacity--;
-		_totalCapacity--;
+		batch.Capacity -= slotCount;
+		_totalCapacity -= slotCount;
 		MarkDirty(batchIndex);
 		if (batch.Capacity > 0)
 		{

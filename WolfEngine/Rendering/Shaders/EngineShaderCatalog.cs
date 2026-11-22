@@ -50,6 +50,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId IblPrefilter = Id("ibl-prefilter");
 	public static readonly ShaderProgramId GpuDrawCull = Id("gpu-draw-cull");
 	public static readonly ShaderProgramId GpuDrawCompact = Id("gpu-draw-compact");
+	public static readonly ShaderProgramId FoliageCull = Id("foliage-cull");
 	public static readonly ShaderProgramId TransparentForward = Id("transparent-forward");
 	public static readonly ShaderProgramId ShadowMap = Id("shadow-map");
 	public static readonly ShaderProgramId AmbientOcclusionVbao = Id("ao-vbao");
@@ -141,6 +142,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.IblPrefilter, "Ibl/ibl_prefilter.compute.slang"),
 			D(EngineShaderPrograms.GpuDrawCull, "GpuDraw/gpu_draw_cull.compute.slang"),
 			D(EngineShaderPrograms.GpuDrawCompact, "GpuDraw/gpu_draw_compact.compute.slang"),
+			D(EngineShaderPrograms.FoliageCull, "GpuDraw/foliage_cull.compute.slang"),
 			D(EngineShaderPrograms.TransparentForward, "Geometry/transparent_forward.slang"),
 			D(EngineShaderPrograms.ShadowMap, "Geometry/shadow_map.slang"),
 			D(EngineShaderPrograms.AmbientOcclusionVbao, "AmbientOcclusion/ao_vbao.compute.slang"),
@@ -381,6 +383,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.IblPrefilter) return ["IblPrefilterCSMain"];
 		if (id == EngineShaderPrograms.GpuDrawCull) return ["CSPrepareBatchArgs", "CSCull"];
 		if (id == EngineShaderPrograms.GpuDrawCompact) return ["CSCompact"];
+		if (id == EngineShaderPrograms.FoliageCull) return ["CSCullFoliage"];
 		if (id == EngineShaderPrograms.AmbientOcclusionVbao) return ["AmbientOcclusionVisibilityBitmaskCS"];
 		if (id == EngineShaderPrograms.AmbientOcclusionRayTraced) return ["AmbientOcclusionRayTracedCS"];
 		if (id == EngineShaderPrograms.ReflectionsScreenSpace) return ["ReflectionsScreenSpaceCS"];

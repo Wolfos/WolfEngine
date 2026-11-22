@@ -18,6 +18,7 @@ public sealed class GpuDrawDatabase
 	private readonly Dictionary<Mesh, ResourceId> _meshHandles = new(new ReferenceComparer<Mesh>());
 	private readonly Dictionary<Material, ResourceId> _materialHandles = new(new ReferenceComparer<Material>());
 	private readonly List<GpuDrawUpdate> _updates = new();
+	private readonly List<GpuFoliageSet> _foliageSets = new();
 	private readonly HashSet<DrawRecordKey> _persistentMeshKeys = new();
 	private readonly HashSet<DrawRecordKey> _transientKeys = new();
 	private readonly List<DrawRecordKey> _removeScratch = new();
@@ -48,6 +49,7 @@ public sealed class GpuDrawDatabase
 
 	public void BeginSync(bool reconcilePersistentMeshes = false)
 	{
+		_foliageSets.Clear();
 		_syncStamp++;
 		_currentWorldId = 0;
 		_reconcilePersistentMeshes = reconcilePersistentMeshes;
@@ -93,7 +95,7 @@ public sealed class GpuDrawDatabase
 
 	public void TouchMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
 	{
-		TouchMesh(entity, mesh, material, worldTransform, persistent: false, default);
+		TouchMesh(entity, mesh, material, worldTransform, persistent: false, default, GpuDrawRole.Draw, 0);
 	}
 
 	public void TouchPersistentMesh(
@@ -103,8 +105,70 @@ public sealed class GpuDrawDatabase
 		in Matrix4x4 worldTransform,
 		in GpuDrawLod lod = default)
 	{
-		TouchMesh(entity, mesh, material, worldTransform, persistent: true, lod);
+		TouchMesh(entity, mesh, material, worldTransform, persistent: true, lod, GpuDrawRole.Draw, 0);
 	}
+
+	/// <summary>
+	/// Keeps a mesh and material in the draw tables for this sync without drawing or ray tracing anything, for draws
+	/// that the GPU writes itself, such as placed foliage. Untouched next sync, it is released.
+	/// </summary>
+	/// <param name="subdrawId">Tells apart several such records on one entity. Must be negative.</param>
+	internal void TouchResourceAnchor(Entity entity, int subdrawId, Mesh mesh, Material material)
+	{
+		ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(subdrawId, 0);
+
+		TouchMesh(entity, mesh, material, Matrix4x4.Identity, persistent: false, default, GpuDrawRole.ResourcesOnly, subdrawId);
+	}
+
+	/// <summary>
+	/// Puts a mesh in the ray-tracing scene without rasterising it, for draws whose raster instances the GPU writes itself,
+	/// such as placed foliage near the camera. It stays until <see cref="RemoveRayTracingInstance"/>, like a persistent
+	/// mesh, so a caller only touches what changed. A sync that reconciles persistent meshes removes it unless it is
+	/// touched again in that sync.
+	/// </summary>
+	/// <param name="subdrawId">Tells apart several such records on one entity. Must be negative.</param>
+	internal void TouchRayTracingInstance(
+		Entity entity,
+		int subdrawId,
+		Mesh mesh,
+		Material material,
+		in Matrix4x4 worldTransform)
+	{
+		ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(subdrawId, 0);
+
+		TouchMesh(entity, mesh, material, worldTransform, persistent: true, default, GpuDrawRole.RayTracingOnly, subdrawId);
+	}
+
+	/// <summary>Removes a record added by <see cref="TouchRayTracingInstance"/> in the given world.</summary>
+	internal void RemoveRayTracingInstance(int worldId, Entity entity, int subdrawId)
+	{
+		RemoveRecord(new DrawRecordKey(worldId, entity, subdrawId));
+	}
+
+	/// <summary>The world scope that draws touched now belong to.</summary>
+	internal int CurrentWorldId => _currentWorldId;
+
+	/// <summary>Raised at the start of every sync.</summary>
+	internal int SyncStamp => _syncStamp;
+
+	/// <summary>
+	/// True when this sync's end removes persistent records nobody touched, so callers that only touch changes must touch
+	/// everything they keep.
+	/// </summary>
+	internal bool ReconcilesPersistentMeshes => _reconcilePersistentMeshes;
+
+	/// <summary>
+	/// Adds a terrain's placed foliage to this sync. The GPU cull draws its instances; nothing is recorded per instance.
+	/// </summary>
+	internal void TouchFoliage(Entity entity, TerrainFoliageRuntime foliage, in Matrix4x4 localToWorld)
+	{
+		ArgumentNullException.ThrowIfNull(foliage);
+
+		_foliageSets.Add(new GpuFoliageSet(_currentWorldId, entity, foliage, localToWorld));
+	}
+
+	/// <summary>The placed foliage touched in the last sync.</summary>
+	internal IReadOnlyList<GpuFoliageSet> FoliageSets => _foliageSets;
 
 	public void RemovePersistentMesh(Entity entity)
 	{
@@ -122,10 +186,17 @@ public sealed class GpuDrawDatabase
 		Material material,
 		in Matrix4x4 worldTransform,
 		bool persistent,
-		in GpuDrawLod lod)
+		in GpuDrawLod lod,
+		GpuDrawRole role,
+		int subdrawId)
 	{
-		var key = new DrawRecordKey(_currentWorldId, entity, 0);
-		if (_records.TryGetValue(key, out var record))
+		var key = new DrawRecordKey(_currentWorldId, entity, subdrawId);
+		if (_records.TryGetValue(key, out var record) && record.Role != role)
+		{
+			RemoveRecord(key);
+		}
+
+		if (_records.TryGetValue(key, out record))
 		{
 			SetPersistence(key, persistent);
 			ApplyChanges(key, record, GpuDrawKind.Mesh, mesh, material, worldTransform, lod);
@@ -135,6 +206,7 @@ public sealed class GpuDrawDatabase
 
 		var newRecord = CreateRecord(key, GpuDrawKind.Mesh, mesh, material, worldTransform);
 		newRecord.Lod = lod;
+		newRecord.Role = role;
 		_records.Add(key, newRecord);
 		SetPersistence(key, persistent);
 
@@ -147,7 +219,7 @@ public sealed class GpuDrawDatabase
 			newRecord.World,
 			newRecord.BoundsCenterRadius,
 			mesh,
-			material).WithLod(lod));
+			material).WithLod(lod).WithRole(role));
 	}
 
 	public void TouchDebugPrimitive(
@@ -369,7 +441,7 @@ public sealed class GpuDrawDatabase
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
-				material));
+				material).WithLod(record.Lod).WithRole(record.Role));
 		}
 	}
 
@@ -391,7 +463,8 @@ public sealed class GpuDrawDatabase
 				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
-				record.Lod));
+				record.Lod,
+				record.Role));
 		}
 	}
 
@@ -418,6 +491,19 @@ public sealed class GpuDrawDatabase
 		}
 
 		meshHandle = GpuDrawHandle.Invalid;
+		return false;
+	}
+
+	/// <summary>Gets the material's GPU handle.</summary>
+	public bool TryGetMaterialHandle(Material material, out GpuDrawHandle materialHandle)
+	{
+		if (material is not null && _materialHandles.TryGetValue(material, out var entry))
+		{
+			materialHandle = entry.Handle;
+			return true;
+		}
+
+		materialHandle = GpuDrawHandle.Invalid;
 		return false;
 	}
 
@@ -528,7 +614,7 @@ public sealed class GpuDrawDatabase
 				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
-				mesh).WithLod(record.Lod));
+				mesh).WithLod(record.Lod).WithRole(record.Role));
 		}
 
 		if (materialChanged || materialResourceChanged || windingChanged)
@@ -542,7 +628,7 @@ public sealed class GpuDrawDatabase
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
-				material).WithLod(record.Lod));
+				material).WithLod(record.Lod).WithRole(record.Role));
 		}
 
 		// Group membership lives in the instance data, which a transform update rewrites.
@@ -556,7 +642,7 @@ public sealed class GpuDrawDatabase
 				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
-				mesh: record.Mesh).WithLod(record.Lod));
+				mesh: record.Mesh).WithLod(record.Lod).WithRole(record.Role));
 		}
 
 		_transformHistory.RecordUpload(key, record.PreviousWorld, record.World);
@@ -999,6 +1085,7 @@ public sealed class GpuDrawDatabase
 		public Matrix4x4 World;
 		public Vector4 BoundsCenterRadius;
 		public GpuDrawLod Lod;
+		public GpuDrawRole Role;
 		public int LastSeenStamp;
 	}
 
@@ -1047,7 +1134,8 @@ public readonly struct GpuDrawEntry
 		Matrix4x4 previousWorld,
 		Matrix4x4 world,
 		Vector4 boundsCenterRadius,
-		GpuDrawLod lod = default)
+		GpuDrawLod lod = default,
+		GpuDrawRole role = GpuDrawRole.Draw)
 	{
 		DrawKind = drawKind;
 		InstanceHandle = instanceHandle;
@@ -1062,6 +1150,7 @@ public readonly struct GpuDrawEntry
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
 		Lod = lod;
+		Role = role;
 	}
 
 	public GpuDrawKind DrawKind { get; }
@@ -1077,6 +1166,7 @@ public readonly struct GpuDrawEntry
 	public Matrix4x4 World { get; }
 	public Vector4 BoundsCenterRadius { get; }
 	public GpuDrawLod Lod { get; }
+	public GpuDrawRole Role { get; }
 
 	public int InstanceIndex => InstanceHandle.Index;
 	public int MeshIndex => MeshHandle.Index;
@@ -1137,6 +1227,11 @@ public readonly struct GpuDrawUpdate
 	public int MaterialIndex => MaterialHandle.Index;
 
 	public GpuDrawUpdate WithLod(in GpuDrawLod lod) => this with { Lod = lod };
+
+	/// <summary>Whether the instance is rasterised, ray traced, or only keeps its mesh and material resident.</summary>
+	public GpuDrawRole Role { get; private init; }
+
+	public GpuDrawUpdate WithRole(GpuDrawRole role) => this with { Role = role };
 
 	public static GpuDrawUpdate CreateAdd(
 		GpuDrawKind drawKind,

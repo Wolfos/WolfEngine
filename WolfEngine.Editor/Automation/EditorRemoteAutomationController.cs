@@ -1273,6 +1273,21 @@ public sealed partial class EditorRemoteAutomationController
 				_renderFrameCoordinator.CompletedSequence);
 		}, cancellationToken);
 
+	public Task<FoliageStateResult> GetFoliageStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var stats = _renderGraph.GetFoliageStats();
+			return new FoliageStateResult(
+				stats.SetCount,
+				stats.InstanceCount,
+				stats.RendererInstanceCount,
+				stats.ReservationCount,
+				stats.ReservedBatchSlots,
+				stats.ExpansionCapacity,
+				_renderGraph.GetRayTracingSceneState().TopLevelInstanceCount,
+				_renderFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
+
 	public Task<GpuFrameProfileResult> ProfileGpuFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		EnqueueAsync(async () =>
 		{

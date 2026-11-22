@@ -10,6 +10,8 @@ public struct TerrainComponent : IEntityComponent
 {
 	public AssetRef<TerrainAsset> TerrainAsset;
 	public AssetRef<TerrainLayerSet> LayerSetAsset;
+	/// <summary>The terrain's placed foliage, in this entity's local space. See docs/foliage.md.</summary>
+	public AssetRef<TerrainFoliage> Foliage;
 	[JsonIgnore]
 	public Material? Material;
 	public Vector2 WorldSizeMeters;

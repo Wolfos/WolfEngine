@@ -166,6 +166,35 @@ float GetLodThreshold(GpuDrawBatchLodData lod, uint index)
     return lod.screenSizes[index / 4u][index % 4u];
 }
 
+// The fraction of the screen height a sphere's diameter covers, scaled by the bias. lodProjection is (projection
+// vertical scale, clip W per unit distance, clip W at zero distance, bias), measured from the main camera.
+float GetLodScreenSize(float3 relativeCenter, float radius, float4 lodProjection)
+{
+    float clipW = max(length(relativeCenter) * lodProjection.y + lodProjection.z, 1e-4f);
+    return radius * lodProjection.x / clipW * lodProjection.w;
+}
+
+// Steps from the level an instance had towards the one its screen size asks for. A level changes only once the size
+// passes its threshold by the hysteresis margin, so an object resting on a threshold keeps its level. Gives the same
+// answer when fed its own result, which lets shadow culls repeat the camera's choice without storing it.
+uint SelectLodLevel(GpuDrawBatchLodData lod, uint previousLevel, float screenSize, float hysteresis)
+{
+    uint level = min(previousLevel, lod.levelCount - 1u);
+    while (level + 1u < lod.levelCount &&
+           screenSize < GetLodThreshold(lod, level) * (1.0f - hysteresis))
+    {
+        level++;
+    }
+
+    while (level > 0u &&
+           screenSize > GetLodThreshold(lod, level - 1u) * (1.0f + hysteresis))
+    {
+        level--;
+    }
+
+    return level;
+}
+
 struct GpuDrawArgs
 {
     uint indexCount;

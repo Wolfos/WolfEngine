@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
@@ -74,6 +75,24 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? MaterialGenerationBuffer => _materialGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? MeshGenerationBuffer => _meshGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? DiagnosticsCounterBuffer { get; private set; }
+
+	/// <summary>
+	/// Instance slots after <see cref="InstanceCapacity"/> that the foliage cull fills each frame with the visible
+	/// placed foliage it expands, starting from <see cref="FoliageExpansionBase"/>. Zero until a scene has foliage. See
+	/// docs/foliage.md.
+	/// </summary>
+	public int FoliageExpansionCapacity { get; private set; }
+
+	/// <summary>The first instance slot of the foliage expansion region.</summary>
+	public int FoliageExpansionBase => InstanceCapacity;
+
+	/// <summary>
+	/// The foliage cull's counters, reset every frame: expanded instances so far, then instances dropped because the
+	/// expansion region was full.
+	/// </summary>
+	public IGfxBuffer? FoliageCounterBuffer { get; private set; }
+
+	public const int FoliageCounterCount = 4;
 
 	/// <summary>
 	/// Slots in the instance-indexed tables, which also bounds the batch-indexed ones: draw args, batches, and each
@@ -412,6 +431,12 @@ public sealed class GpuDrawResources : IDisposable
 			BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
+		FoliageCounterBuffer ??= device.CreateBuffer(new BufferDescriptor(
+			(ulong)(FoliageCounterCount * sizeof(uint)),
+			BufferUsage.Structured,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "FoliageCounterBuffer"));
+
 		for (var i = 0; i < MaxFramesInFlight; i++)
 		{
 			ActiveView.Camera[i] = EnsureConstantBufferCapacity(
@@ -476,12 +501,17 @@ public sealed class GpuDrawResources : IDisposable
 	/// Entries each view's visible instance list needs: the batches' total capacity. Never less than the instance
 	/// capacity.
 	/// </param>
+	/// <param name="foliageExpansionSlots">
+	/// Instance slots the foliage cull may expand visible foliage into this frame. The region never shrinks, and is
+	/// clamped so its last slot stays inside the shaders' instance index range.
+	/// </param>
 	public bool EnsureTableCapacity(
 		IGfxDevice device,
 		int instanceSlots,
 		int meshSlots,
 		int materialSlots,
-		int visibleInstanceSlots = 0)
+		int visibleInstanceSlots = 0,
+		int foliageExpansionSlots = 0)
 	{
 		ArgumentNullException.ThrowIfNull(device);
 
@@ -502,16 +532,31 @@ public sealed class GpuDrawResources : IDisposable
 			MaxMaterialCount);
 		var grew = false;
 
-		if (instanceCapacity != InstanceCapacity)
+		var foliageExpansionCapacity = FoliageExpansionCapacity;
+		if (foliageExpansionSlots > foliageExpansionCapacity)
 		{
-			InstanceCapacity = instanceCapacity;
+			foliageExpansionCapacity = (int)Math.Min(
+				BitOperations.RoundUpToPowerOf2((uint)Math.Max(foliageExpansionSlots, 4096)),
+				(uint)MaxInstanceCount);
+		}
+
+		foliageExpansionCapacity = Math.Min(foliageExpansionCapacity, MaxInstanceCount - instanceCapacity);
+		if (instanceCapacity != InstanceCapacity || foliageExpansionCapacity != FoliageExpansionCapacity)
+		{
 			InstanceBuffer = ReplaceTable(
 				device,
 				InstanceBuffer,
-				instanceCapacity,
+				instanceCapacity + foliageExpansionCapacity,
 				Marshal.SizeOf<GpuInstanceData>(),
 				BufferUsage.Structured,
 				"InstanceBuffer");
+			FoliageExpansionCapacity = foliageExpansionCapacity;
+			grew = true;
+		}
+
+		if (instanceCapacity != InstanceCapacity)
+		{
+			InstanceCapacity = instanceCapacity;
 			DrawCommandBuffer = ReplaceTable(
 				device,
 				DrawCommandBuffer,
@@ -940,6 +985,7 @@ public sealed class GpuDrawResources : IDisposable
 		(VisibleInstanceBuffer as IDisposable)?.Dispose();
 		(ShadowVisibleInstanceBuffer as IDisposable)?.Dispose();
 		(DiagnosticsCounterBuffer as IDisposable)?.Dispose();
+		(FoliageCounterBuffer as IDisposable)?.Dispose();
 		foreach (var viewBuffers in _viewFrameBuffers)
 		{
 			if (viewBuffers is null)

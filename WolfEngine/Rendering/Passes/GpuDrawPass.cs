@@ -6,7 +6,7 @@ using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
-public sealed class GpuDrawPass
+public sealed partial class GpuDrawPass
 {
 	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
@@ -478,7 +478,9 @@ public sealed class GpuDrawPass
 
 			// Every update carries the instance's batch, because the update shader rewrites the whole command.
 			var batchIndex = 0u;
-			if (update.Type == GpuDrawUpdateType.Remove || drawFlags == 0u)
+			if (update.Type == GpuDrawUpdateType.Remove ||
+			    drawFlags == 0u ||
+			    update.Role != GpuDrawRole.Draw)
 			{
 				_batches.Remove(update.InstanceHandle);
 			}
@@ -633,6 +635,8 @@ public sealed class GpuDrawPass
 		_gpuDrawResources.PackedMeshVertexBuffer = _renderer.GetPackedMeshVertexBuffer();
 		_gpuDrawResources.PackedMeshIndexBuffer = _renderer.GetPackedMeshIndexBuffer();
 
+		PrepareFoliage(sources, device, activeSlot);
+
 		_batches.PublishStructuralChanges(_records);
 		_gpuDrawResources.ActiveDrawCommandUpperBound = _batches.ActiveBatchUpperBound;
 		UploadBatchTable(activeSlot);
@@ -765,30 +769,11 @@ public sealed class GpuDrawPass
 		var commandList = context.CommandList;
 		using (FrameProfiler.Instance.Measure("GpuDraw.Cull"))
 		{
-			Span<Vector4> planes = stackalloc Vector4[6];
 			var cullParamsWriter = _cullParamsWriter
 			                       ?? throw new InvalidOperationException(
 				                       "GpuDraw cull reflection writer was not initialized.");
 			cullParamsWriter.Clear();
-			for (var viewIndex = 0; viewIndex < outputViewCount; viewIndex++)
-			{
-				scoped ReadOnlySpan<Vector4> viewPlanes;
-				if (cullingPlanes.IsEmpty)
-				{
-					FrustumCulling.ExtractPlanes(viewProjections[viewIndex], planes);
-					viewPlanes = planes;
-				}
-				else
-				{
-					viewPlanes = cullingPlanes.Slice(viewIndex * FrustumCulling.MaxPlaneCount, cullingPlaneCounts[viewIndex]);
-				}
-				cullParamsWriter.SetUInt($"planeCounts[{viewIndex}]", (uint)viewPlanes.Length);
-				for (var planeIndex = 0; planeIndex < viewPlanes.Length; planeIndex++)
-				{
-					var flattenedPlaneIndex = (viewIndex * FrustumCulling.MaxPlaneCount) + planeIndex;
-					cullParamsWriter.SetVector4($"planes[{flattenedPlaneIndex}]", viewPlanes[planeIndex]);
-				}
-			}
+			WriteCullPlanes(cullParamsWriter, viewProjections, cullingPlanes, cullingPlaneCounts);
 
 			cullParamsWriter.SetVector4(
 				"cameraPositionAndMaxDrawCount",
@@ -847,6 +832,19 @@ public sealed class GpuDrawPass
 				cullThreadGroupSize.GetDispatchGroupCount(_gpuDrawResources.ActiveInstanceUpperBound);
 			commandList.Dispatch(cullGroupCountX, cullGroupCountY, cullGroupCountZ);
 		}
+
+		RecordFoliageCull(
+			context,
+			device,
+			viewProjections,
+			cullingPlanes,
+			cullingPlaneCounts,
+			cameraOrigin,
+			useShadowBuffers,
+			participation,
+			meshLod,
+			drawArgsBuffer!,
+			visibleInstanceBuffer!);
 	}
 
 	/// <summary>Binds what both cull entry points read and write; each declares only the part it uses.</summary>
@@ -1908,7 +1906,8 @@ public sealed class GpuDrawPass
 			instanceSlots,
 			meshSlots,
 			materialSlots,
-			checked((int)_batches.TotalCapacity));
+			checked((int)_batches.TotalCapacity),
+			GetFoliageExpansionSlots(sources));
 	}
 
 	/// <summary>
@@ -2199,7 +2198,7 @@ public sealed class GpuDrawPass
 				entry.Mesh,
 				entry.Material,
 				entry.TerrainInstanceData,
-				entry.TerrainSurface).WithLod(entry.Lod));
+				entry.TerrainSurface).WithLod(entry.Lod).WithRole(entry.Role));
 		}
 
 		return destination.Count - initialCount;

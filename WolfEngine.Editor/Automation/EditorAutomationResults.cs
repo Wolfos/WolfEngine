@@ -168,6 +168,17 @@ public sealed record RayTracingSceneStateResult(
 	ulong CompletedId,
 	long RenderFrameSequence);
 
+/// <summary>Placed foliage in the last frame's draw tables, and the ray-tracing instances it added.</summary>
+public sealed record FoliageStateResult(
+	int SetCount,
+	int InstanceCount,
+	int RendererInstanceCount,
+	int ReservationCount,
+	long ReservedBatchSlots,
+	int ExpansionCapacity,
+	int TlasInstanceCount,
+	long RenderFrameSequence);
+
 public sealed record FrameCaptureResult(
 	string OutputPath,
 	int Width,
