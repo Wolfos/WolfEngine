@@ -1776,7 +1776,7 @@ public sealed class RayTracingSceneResourcesTests
 		var alphaMesh = CreateTestMesh();
 		var terrainMesh = CreateTestMesh();
 		var opaqueMaterial = new Material("opaque");
-		var alphaMaterial = new Material("alpha") { AlphaMode = AlphaMode.AlphaTest };
+		var alphaMaterial = new Material("alpha") { AlphaMode = AlphaMode.AlphaBlend };
 		var terrainMaterial = new Material("__terrain__");
 		database.BeginSync();
 		database.TouchMesh(new Entity(1, 1), opaqueMesh, opaqueMaterial, Matrix4x4.Identity);
@@ -1805,7 +1805,7 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(resources.LastStats.TopLevelRebuildCount, Is.EqualTo(1));
 		Assert.That(resources.LastStats.TopLevelRebuildReason, Is.EqualTo(RayTracingSceneRebuildReason.Bootstrap));
 		Assert.That(resources.LastStats.SkippedTerrainCount, Is.EqualTo(0));
-		Assert.That(resources.LastStats.SkippedTransparentOrAlphaCount, Is.EqualTo(1));
+		Assert.That(resources.LastStats.SkippedTransparentCount, Is.EqualTo(1));
 		Assert.That(resources.LastStats.SidecarHitShadingAvailable, Is.True);
 		Assert.That(resources.InstanceIndexToInstanceHandleBuffer, Is.Not.Null);
 		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(2));
@@ -1850,6 +1850,101 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(resources.LastStats.TopLevelRebuildReason, Is.EqualTo(RayTracingSceneRebuildReason.None));
 		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(0));
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(0));
+	}
+
+	[Test]
+	public void RecordUpdate_AlphaTestedMeshIsNonOpaqueOnItsOwnMaskBits()
+	{
+		var database = new GpuDrawDatabase();
+		var opaqueMaterial = new Material("opaque");
+		var alphaTestedMaterial = new Material("leaves") { AlphaMode = AlphaMode.AlphaTest };
+		var commandList = new TestCommandList();
+		var context = CreateContext(database, commandList);
+		var resources = new RayTracingSceneResources(new ShaderCompiler());
+
+		database.BeginSync();
+		database.TouchMesh(new Entity(1, 1), CreateTestMesh(), opaqueMaterial, Matrix4x4.Identity);
+		database.TouchMesh(new Entity(2, 1), CreateTestMesh(), alphaTestedMaterial, Matrix4x4.Identity);
+		database.EndSync();
+		var updates = new List<GpuDrawUpdate>();
+		database.CopyUpdates(updates);
+
+		resources.RecordUpdate(context, new TestRenderer(new TestDevice()), updates);
+
+		Assert.That(resources.LastStats.TopLevelInstanceCount, Is.EqualTo(2));
+		Assert.That(resources.LastStats.SkippedTransparentCount, Is.EqualTo(0));
+		var opaqueInstance = commandList.TopLevelInstances.Single(instance => instance.Opaque);
+		var alphaTestedInstance = commandList.TopLevelInstances.Single(instance => instance.Opaque == false);
+		Assert.That(opaqueInstance.Mask, Is.EqualTo(0x02u));
+		Assert.That(alphaTestedInstance.Mask, Is.EqualTo(0x08u));
+	}
+
+	[Test]
+	public void RecordUpdate_MaterialUpdateThatChangesAlphaTestingRebuildsTlas()
+	{
+		var database = new GpuDrawDatabase();
+		var mesh = CreateTestMesh();
+		var opaqueMaterial = new Material("opaque");
+		var alphaTestedMaterial = new Material("leaves") { AlphaMode = AlphaMode.AlphaTest };
+		var entity = new Entity(1, 1);
+		var commandList = new TestCommandList();
+		var context = CreateContext(database, commandList);
+		var resources = new RayTracingSceneResources(new ShaderCompiler());
+		var renderer = new TestRenderer(new TestDevice());
+
+		database.BeginSync();
+		database.TouchMesh(entity, mesh, opaqueMaterial, Matrix4x4.Identity);
+		database.EndSync();
+		var updates = new List<GpuDrawUpdate>();
+		database.CopyUpdates(updates);
+		resources.RecordUpdate(context, renderer, updates);
+		Assert.That(commandList.TopLevelInstances.Single().Opaque, Is.True);
+		database.ConsumeUpdates(updates);
+
+		database.BeginSync();
+		database.TouchMesh(entity, mesh, alphaTestedMaterial, Matrix4x4.Identity);
+		database.EndSync();
+		database.CopyUpdates(updates);
+		commandList.ResetCounts();
+
+		resources.RecordUpdate(context, renderer, updates);
+
+		Assert.That(resources.LastStats.TopLevelRebuildCount, Is.EqualTo(1));
+		Assert.That(commandList.TopLevelInstances.Single().Opaque, Is.False);
+		Assert.That(commandList.TopLevelInstances.Single().Mask, Is.EqualTo(0x08u));
+	}
+
+	[Test]
+	public void RecordUpdate_MaterialUpdateToAlphaBlendRemovesInstance()
+	{
+		var database = new GpuDrawDatabase();
+		var mesh = CreateTestMesh();
+		var alphaTestedMaterial = new Material("leaves") { AlphaMode = AlphaMode.AlphaTest };
+		var alphaBlendedMaterial = new Material("glass") { AlphaMode = AlphaMode.AlphaBlend };
+		var entity = new Entity(1, 1);
+		var commandList = new TestCommandList();
+		var context = CreateContext(database, commandList);
+		var resources = new RayTracingSceneResources(new ShaderCompiler());
+		var renderer = new TestRenderer(new TestDevice());
+
+		database.BeginSync();
+		database.TouchMesh(entity, mesh, alphaTestedMaterial, Matrix4x4.Identity);
+		database.EndSync();
+		var updates = new List<GpuDrawUpdate>();
+		database.CopyUpdates(updates);
+		resources.RecordUpdate(context, renderer, updates);
+		Assert.That(resources.LastStats.TopLevelInstanceCount, Is.EqualTo(1));
+		database.ConsumeUpdates(updates);
+
+		database.BeginSync();
+		database.TouchMesh(entity, mesh, alphaBlendedMaterial, Matrix4x4.Identity);
+		database.EndSync();
+		database.CopyUpdates(updates);
+
+		resources.RecordUpdate(context, renderer, updates);
+
+		Assert.That(resources.LastStats.TopLevelInstanceCount, Is.EqualTo(0));
+		Assert.That(resources.LastStats.TopLevelRebuildReason & RayTracingSceneRebuildReason.Remove, Is.Not.EqualTo(RayTracingSceneRebuildReason.None));
 	}
 
 	[Test]

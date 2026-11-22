@@ -5,7 +5,9 @@ import "../Common/raytracing_common.slang";
 import "ddgi_common.slang";
 import "../Common/rt_hit_surface.slang";
 
-static const uint DDGI_STATIC_GEOMETRY_MASK = 0x02u;
+// Relocation and probe classification trace opaque static geometry only. Sparse alpha-tested foliage
+// would push probes around and mark canopy probes as inside geometry without making them any better.
+static const uint DDGI_STATIC_GEOMETRY_MASK = WOLF_RT_MASK_STATIC;
 
 RaytracingAccelerationStructure sceneTlas : register(t3);
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t4);
@@ -102,7 +104,7 @@ float DdgiTraceDirectionalLightVisibility(float3 worldPosition, float3 worldNorm
     ray.TMin = 0.01f;
     ray.TMax = 10000.0f;
 
-    return WolfTraceAny(sceneTlas, ray, 0xFF).hit ? 0.0f : 1.0f;
+    return WolfTraceAnyAlphaTested(sceneTlas, ray, 0xFF, RtCreateAlphaTest(DdgiSceneTables())).hit ? 0.0f : 1.0f;
 }
 
 float3 DdgiShadeHitSurface(RtHitSurface surface)
@@ -144,7 +146,7 @@ DdgiTraceResult DdgiTraceRay(
     ray.TMin = max(normalBias, 0.001f);
     ray.TMax = maxRayDistance;
 
-    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
+    WolfRayHit hit = WolfTraceClosestAlphaTested(sceneTlas, ray, 0xFF, RtCreateAlphaTest(DdgiSceneTables()));
 
     DdgiTraceResult result;
     result.hitGeometry = false;

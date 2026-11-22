@@ -1,6 +1,25 @@
 // Cross-backend triangle traversal. Metal's hardware is designed around the intersector API;
 // Slang's portable RayQuery lowers to intersection_query there, which Apple documents as a
 // higher-scratch compatibility path. Keep that platform distinction contained in this file.
+//
+// Alpha-tested geometry is in the TLAS as non-opaque instances on their own mask bits.
+// WolfTraceClosest and WolfTraceAny take the fast opaque-only path and drop those bits from
+// the mask, so they never see alpha-tested instances at all. WolfTraceClosestAlphaTested and
+// WolfTraceAnyAlphaTested keep them and ask an IWolfRayAlphaTest to accept or reject each
+// candidate hit; they fall back to the fast path when the mask has no alpha-tested bits.
+
+// Instance mask bits. Mirrors the geometry masks in RayTracingSceneResources.cs.
+static const uint WOLF_RT_MASK_DYNAMIC = 0x01u;
+static const uint WOLF_RT_MASK_STATIC = 0x02u;
+static const uint WOLF_RT_MASK_ALPHA_TESTED_DYNAMIC = 0x04u;
+static const uint WOLF_RT_MASK_ALPHA_TESTED_STATIC = 0x08u;
+static const uint WOLF_RT_MASK_ALPHA_TESTED = WOLF_RT_MASK_ALPHA_TESTED_DYNAMIC | WOLF_RT_MASK_ALPHA_TESTED_STATIC;
+
+/// Decides whether a ray hit on a non-opaque triangle counts, such as by alpha testing the material.
+interface IWolfRayAlphaTest
+{
+    bool AcceptHit(uint instanceIndex, uint primitiveIndex, float2 barycentrics);
+};
 
 struct WolfRayHit
 {
@@ -145,11 +164,13 @@ WolfRayAnyHit WolfConvertMetalAnyHit(WolfMetalAnyHit nativeHit, float missDistan
 }
 #endif
 
+/// Closest opaque hit. Alpha-tested instances are left out of the mask.
 WolfRayHit WolfTraceClosest(
     RaytracingAccelerationStructure accelerationStructure,
     RayDesc ray,
     uint mask)
 {
+    mask &= ~WOLF_RT_MASK_ALPHA_TESTED;
 #if defined(WOLF_TARGET_METAL)
     return WolfConvertMetalHit(WolfTraceMetalClosest(
         accelerationStructure,
@@ -175,11 +196,13 @@ WolfRayHit WolfTraceClosest(
 #endif
 }
 
+/// Any opaque hit. Alpha-tested instances are left out of the mask.
 WolfRayAnyHit WolfTraceAny(
     RaytracingAccelerationStructure accelerationStructure,
     RayDesc ray,
     uint mask)
 {
+    mask &= ~WOLF_RT_MASK_ALPHA_TESTED;
 #if defined(WOLF_TARGET_METAL)
     return WolfConvertMetalAnyHit(WolfTraceMetalAny(
         accelerationStructure,
@@ -205,4 +228,87 @@ WolfRayAnyHit WolfTraceAny(
     result.distance = result.hit ? query.CommittedRayT() : ray.TMax;
     return result;
 #endif
+}
+
+/// Closest hit, counting hits on alpha-tested instances only where alphaTest accepts them.
+/// Uses RayQuery on every backend, because Metal's intersector cannot run shader code for
+/// a candidate hit without an intersection function table.
+WolfRayHit WolfTraceClosestAlphaTested<TAlphaTest : IWolfRayAlphaTest>(
+    RaytracingAccelerationStructure accelerationStructure,
+    RayDesc ray,
+    uint mask,
+    TAlphaTest alphaTest)
+{
+    if ((mask & WOLF_RT_MASK_ALPHA_TESTED) == 0u)
+    {
+        return WolfTraceClosest(accelerationStructure, ray, mask);
+    }
+
+    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+    query.TraceRayInline(accelerationStructure, RAY_FLAG_NONE, mask, ray);
+    while (query.Proceed())
+    {
+        if (query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
+        {
+            continue;
+        }
+
+        if (alphaTest.AcceptHit(
+            query.CandidateInstanceIndex(),
+            query.CandidatePrimitiveIndex(),
+            query.CandidateTriangleBarycentrics()))
+        {
+            query.CommitNonOpaqueTriangleHit();
+        }
+    }
+
+    WolfRayHit result;
+    result.hit = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    result.distance = result.hit ? query.CommittedRayT() : ray.TMax;
+    result.instanceIndex = result.hit ? query.CommittedInstanceIndex() : 0u;
+    result.primitiveIndex = result.hit ? query.CommittedPrimitiveIndex() : 0u;
+    result.barycentrics = result.hit ? query.CommittedTriangleBarycentrics() : 0.0f.xx;
+    return result;
+}
+
+/// Any hit, counting hits on alpha-tested instances only where alphaTest accepts them.
+WolfRayAnyHit WolfTraceAnyAlphaTested<TAlphaTest : IWolfRayAlphaTest>(
+    RaytracingAccelerationStructure accelerationStructure,
+    RayDesc ray,
+    uint mask,
+    TAlphaTest alphaTest)
+{
+    if ((mask & WOLF_RT_MASK_ALPHA_TESTED) == 0u)
+    {
+        return WolfTraceAny(accelerationStructure, ray, mask);
+    }
+
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+    query.TraceRayInline(
+        accelerationStructure,
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES,
+        mask,
+        ray);
+    while (query.Proceed())
+    {
+        if (query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
+        {
+            continue;
+        }
+
+        if (alphaTest.AcceptHit(
+            query.CandidateInstanceIndex(),
+            query.CandidatePrimitiveIndex(),
+            query.CandidateTriangleBarycentrics()))
+        {
+            query.CommitNonOpaqueTriangleHit();
+            // Any accepted hit answers the query, so stop rather than test more candidates.
+            query.Abort();
+        }
+    }
+
+    WolfRayAnyHit result;
+    result.hit = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    result.distance = result.hit ? query.CommittedRayT() : ray.TMax;
+    return result;
 }

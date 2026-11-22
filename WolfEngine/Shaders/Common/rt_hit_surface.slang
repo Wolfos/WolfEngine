@@ -1,6 +1,7 @@
 import "common_bindless.slang";
 import "draw_data.slang";
 import "packed_vertex.slang";
+import "rt_alpha_test.slang";
 import "../Terrain/terrain_layer_blend.slang";
 
 // Resolves a hardware ray hit into the surface a diffuse bounce needs: position, shading and
@@ -11,8 +12,6 @@ import "../Terrain/terrain_layer_blend.slang";
 // Deliberately declares no registers. Each pass binds the scene tables to its own registers and
 // hands them over as an RtSceneTables value.
 
-static const uint RT_MAX_INSTANCE_COUNT = 1048576u;
-static const uint RT_MAX_MATERIAL_COUNT = 1048576u;
 static const uint RT_DRAW_KIND_TERRAIN = 2u;
 
 struct RtSceneTables
@@ -127,15 +126,17 @@ float RtTriplanarLod(Texture2D<float4> texture, float layerScale, float coneWidt
     return max(log2(coneWidth * texelsPerWorldUnit), 0.0f);
 }
 
-uint RtResolveMaterialIndex(uint materialHandle)
+/// The alpha test for these tables, to pass to WolfTraceClosestAlphaTested and WolfTraceAnyAlphaTested.
+RtAlphaTest RtCreateAlphaTest(RtSceneTables tables)
 {
-    if (!IsPackedHandleValid(materialHandle))
-    {
-        return 0u;
-    }
-
-    uint materialIndex = GetHandleIndex(materialHandle);
-    return materialIndex > 0u && materialIndex < RT_MAX_MATERIAL_COUNT ? materialIndex : 0u;
+    RtAlphaTest alphaTest;
+    alphaTest.instances = tables.instances;
+    alphaTest.materials = tables.materials;
+    alphaTest.instanceIndexToInstanceHandle = tables.instanceIndexToInstanceHandle;
+    alphaTest.meshes = tables.meshes;
+    alphaTest.packedVertices = tables.packedVertices;
+    alphaTest.packedIndices = tables.packedIndices;
+    return alphaTest;
 }
 
 float RtTerrainCubicHermite(float a, float b, float c, float d, float t)
@@ -598,6 +599,16 @@ bool RtTryResolveHitSurface(
     uint materialIndex = RtResolveMaterialIndex(instanceData.materialHandle);
 
     GpuMaterialData material = tables.materials[materialIndex];
+
+    // Rasterisation flips the normal of a double-sided material's back face, so do the same for a ray that
+    // reaches the back. Otherwise the back reads as the inside of a closed surface: DDGI counts it as a
+    // backface hit and gives it no radiance.
+    if (IsMaterialDoubleSided(material) && dot(surface.worldGeometricNormal, rayDirection) > 0.0f)
+    {
+        surface.worldGeometricNormal = -surface.worldGeometricNormal;
+        surface.worldNormal = -surface.worldNormal;
+    }
+
     SamplerState materialSampler = GetSampler(material.samplerHandle);
     float2 materialUv = surface.uv * material.uvOffsetScale.zw + material.uvOffsetScale.xy;
     Texture2D<float4> albedoTexture = GetTexture(material.albedoHandle);

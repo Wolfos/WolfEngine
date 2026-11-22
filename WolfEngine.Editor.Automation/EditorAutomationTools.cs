@@ -139,6 +139,16 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.LoadSceneAsync(scenePath, cancellationToken);
 
+	[McpServerTool(Name = "create_project"), Description("Create a new project and switch the running editor to it, through the same path as File > New Project: initialise Assets and Library, scaffold the gameplay project and open it. Start the editor on any existing project first. Fails if the project folder already exists.")]
+	public async Task<string> CreateProject(
+		[Description("Existing folder the project folder is created in.")] string parentFolder,
+		[Description("Project name, which is also the new folder's name.")] string projectName,
+		CancellationToken cancellationToken)
+	{
+		var projectRoot = await _controller.CreateProjectAsync(parentFolder, projectName, cancellationToken).ConfigureAwait(false);
+		return $"Created and opened project '{projectRoot}'.";
+	}
+
 	[McpServerTool(Name = "build_game"), Description("Build the open project into a runnable game in the output folder, through the same path as the editor's Build menu: compile gameplay, cook content and publish the runtime. Returns the output path and cooked asset count.")]
 	public Task<global::WolfEngine.Build.GameBuildResult> BuildGame(
 		[Description("Folder to write the game to. Write builds below Artifacts/ and do not commit them.")] string outputPath,

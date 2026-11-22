@@ -811,6 +811,58 @@ public sealed partial class EditorRemoteAutomationController
 		}, cancellationToken);
 
 	/// <summary>
+	/// Creates a project and switches the editor to it through the File menu's New Project path. The switch is
+	/// queued as a scene replacement, so this waits on completed render frames until the new project is open.
+	/// A failed creation is reported to the editor's notifications and leaves the old project open, which this
+	/// reports as a timeout.
+	/// </summary>
+	public async Task<string> CreateProjectAsync(string parentFolder, string projectName, CancellationToken cancellationToken)
+	{
+		if (string.IsNullOrWhiteSpace(parentFolder))
+		{
+			throw new InvalidOperationException("parent_folder is required.");
+		}
+
+		if (string.IsNullOrWhiteSpace(projectName))
+		{
+			throw new InvalidOperationException("project_name is required.");
+		}
+
+		var fullParentFolder = Path.GetFullPath(parentFolder);
+		var expectedProjectRoot = Path.GetFullPath(Path.Combine(fullParentFolder, projectName.Trim()));
+
+		var queued = await Enqueue(
+			() => _commandService.RequestCreateProject(fullParentFolder, projectName),
+			cancellationToken).ConfigureAwait(false);
+
+		if (queued == false)
+		{
+			throw new InvalidOperationException("The editor could not queue the project switch. Stop Play mode and wait for other operations to finish.");
+		}
+
+		const int maxFramesToWait = 600;
+
+		for (var frame = 0; frame < maxFramesToWait; frame++)
+		{
+			await WaitForRenderFramesAsync(1, cancellationToken).ConfigureAwait(false);
+
+			var isOpen = await Enqueue(
+				() => string.Equals(_projectService.ProjectRootPath, expectedProjectRoot, StringComparison.Ordinal) &&
+					_commandService.LoadingSceneAssetId.HasValue == false,
+				cancellationToken).ConfigureAwait(false);
+
+			if (isOpen)
+			{
+				return expectedProjectRoot;
+			}
+		}
+
+		throw new TimeoutException(
+			$"Project '{expectedProjectRoot}' was not open after {maxFramesToWait} render frames. " +
+			"If the folder already existed or could not be written, the editor reported the error as a notification.");
+	}
+
+	/// <summary>
 	/// Builds the open project into a runnable game, as the Build menu does. Building compiles gameplay code and
 	/// publishes the runtime, which takes far longer than a frame, so like the menu it runs off the editor thread.
 	/// </summary>

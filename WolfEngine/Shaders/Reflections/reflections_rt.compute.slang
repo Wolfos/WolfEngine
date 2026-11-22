@@ -6,6 +6,7 @@ import "../Common/draw_data.slang";
 import "../Common/normal_decode.slang";
 import "../Common/packed_vertex.slang";
 import "../Common/raytracing_common.slang";
+import "../Common/rt_alpha_test.slang";
 import "reflections_common.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 1048576
@@ -61,6 +62,18 @@ StructuredBuffer<GpuMeshData> g_MeshTable : register(t7);
 StructuredBuffer<uint> g_PackedIndices : register(t9);
 
 StructuredBuffer<PackedMeshVertex> g_PackedVertices : register(t8);
+
+RtAlphaTest ReflectionAlphaTest()
+{
+    RtAlphaTest alphaTest;
+    alphaTest.instances = g_InstanceTable;
+    alphaTest.materials = g_MaterialTable;
+    alphaTest.instanceIndexToInstanceHandle = g_InstanceIndexToInstanceHandle;
+    alphaTest.meshes = g_MeshTable;
+    alphaTest.packedVertices = g_PackedVertices;
+    alphaTest.packedIndices = g_PackedIndices;
+    return alphaTest;
+}
 
 float3 ReconstructCameraRelativePosition(float2 uv, float depth)
 {
@@ -215,7 +228,7 @@ float TraceDirectionalVisibility(float3 worldPosition, float3 worldNormal, float
     shadowRay.TMin = 0.002f;
     shadowRay.TMax = max(camera.farPlane, 1.0f);
 
-    return WolfTraceAny(sceneTlas, shadowRay, 0xFF).hit ? 0.0f : 1.0f;
+    return WolfTraceAnyAlphaTested(sceneTlas, shadowRay, 0xFF, ReflectionAlphaTest()).hit ? 0.0f : 1.0f;
 }
 
 bool TryShadeHitMaterial(
@@ -275,7 +288,8 @@ bool TryShadeHitMaterial(
     float3 worldGeometricNormal = normalize(cross(
         worldPosition1 - worldPosition0,
         worldPosition2 - worldPosition0));
-    if (dot(worldGeometricNormal, -incomingRayDirection) < 0.0f)
+    bool hitBackFace = dot(worldGeometricNormal, -incomingRayDirection) < 0.0f;
+    if (hitBackFace)
     {
         worldGeometricNormal = -worldGeometricNormal;
     }
@@ -284,6 +298,15 @@ bool TryShadeHitMaterial(
         normalize(mul(float4(localTangent.xyz, 0.0f), instanceData.world).xyz);
 
     GpuMaterialData material = g_MaterialTable[GetHandleIndex(instanceData.materialHandle)];
+
+    // Rasterisation flips the interpolated normal of a double-sided material's back face and keeps the
+    // tangent (gbuffer.slang), so the bitangent built below flips with it. Match that for a ray that
+    // reaches the back.
+    if (IsMaterialDoubleSided(material) && hitBackFace)
+    {
+        worldNormal = -worldNormal;
+    }
+
     SamplerState materialSampler = GetSampler(material.samplerHandle);
     uv = uv * material.uvOffsetScale.zw + material.uvOffsetScale.xy;
     float4 albedoSample =
@@ -402,7 +425,7 @@ void ReflectionsRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     ray.Direction = reflectionDirection;
     ray.TMin = launchBias;
     ray.TMax = maxRayDistance;
-    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
+    WolfRayHit hit = WolfTraceClosestAlphaTested(sceneTlas, ray, 0xFF, ReflectionAlphaTest());
     if (!hit.hit)
     {
         return;

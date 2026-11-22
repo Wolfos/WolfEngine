@@ -64,13 +64,15 @@ public readonly struct RayTracingInstanceDescription
 		IGfxBottomLevelAccelerationStructure accelerationStructure,
 		Matrix4x4 transform,
 		uint mask = 0xFF,
-		bool active = true)
+		bool active = true,
+		bool opaque = true)
 	{
 		InstanceIndex = instanceIndex;
 		AccelerationStructure = accelerationStructure ?? throw new ArgumentNullException(nameof(accelerationStructure));
 		Transform = transform;
 		Mask = mask;
 		Active = active;
+		Opaque = opaque;
 	}
 
 	public uint InstanceIndex { get; }
@@ -78,4 +80,11 @@ public readonly struct RayTracingInstanceDescription
 	public Matrix4x4 Transform { get; }
 	public uint Mask { get; }
 	public bool Active { get; }
+
+	/// <summary>
+	/// False forces the instance's triangles to be non-opaque, so a ray query reports each hit on them as a
+	/// candidate for the shader to accept or reject, such as by alpha testing. Traversal that forces opacity
+	/// treats them as opaque regardless.
+	/// </summary>
+	public bool Opaque { get; }
 }

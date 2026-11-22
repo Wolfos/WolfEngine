@@ -1003,7 +1003,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			Column3X = transform.M41,
 			Column3Y = transform.M42,
 			Column3Z = transform.M43,
-			Options = (uint)(instance.Active
+			Options = (uint)(instance.Active && instance.Opaque
 				? MTLAccelerationStructureInstanceOptions.Opaque
 				: MTLAccelerationStructureInstanceOptions.NonOpaque),
 			Mask = instance.Active ? instance.Mask : 0u,

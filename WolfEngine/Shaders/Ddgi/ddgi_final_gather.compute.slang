@@ -388,7 +388,7 @@ float TraceDirectionalVisibility(float3 worldPosition, float3 geometricNormal, f
     ray.Direction = lightDirection;
     ray.TMin = 0.001f;
     ray.TMax = 10000.0f;
-    return WolfTraceAny(sceneTlas, ray, 0xFF).hit ? 0.0f : 1.0f;
+    return WolfTraceAnyAlphaTested(sceneTlas, ray, 0xFF, RtCreateAlphaTest(FinalGatherSceneTables())).hit ? 0.0f : 1.0f;
 }
 
 /// Outgoing diffuse radiance of a hit surface, lit the same way the DDGI probe rays light theirs:
@@ -466,7 +466,7 @@ void DdgiFinalGatherCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     ray.TMin = 0.0f;
     ray.TMax = maxRayDistance;
     float selfHitDistance = (surfaceOffset + viewOffset) * 4.0f;
-    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
+    WolfRayHit hit = WolfTraceClosestAlphaTested(sceneTlas, ray, 0xFF, RtCreateAlphaTest(FinalGatherSceneTables()));
 
     // The cone starts as wide as the trace pixel it was launched from, not the full-resolution pixel the
     // origin was reconstructed at.

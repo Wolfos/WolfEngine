@@ -34,7 +34,7 @@ public readonly struct RayTracingSceneStats
 		int topLevelRebuildCount,
 		RayTracingSceneRebuildReason topLevelRebuildReason,
 		int skippedTerrainCount,
-		int skippedTransparentOrAlphaCount,
+		int skippedTransparentCount,
 		bool sidecarHitShadingAvailable)
 	{
 		BottomLevelAccelerationStructureCount = bottomLevelAccelerationStructureCount;
@@ -43,7 +43,7 @@ public readonly struct RayTracingSceneStats
 		TopLevelRebuildCount = topLevelRebuildCount;
 		TopLevelRebuildReason = topLevelRebuildReason;
 		SkippedTerrainCount = skippedTerrainCount;
-		SkippedTransparentOrAlphaCount = skippedTransparentOrAlphaCount;
+		SkippedTransparentCount = skippedTransparentCount;
 		SidecarHitShadingAvailable = sidecarHitShadingAvailable;
 	}
 
@@ -53,7 +53,7 @@ public readonly struct RayTracingSceneStats
 	public int TopLevelRebuildCount { get; }
 	public RayTracingSceneRebuildReason TopLevelRebuildReason { get; }
 	public int SkippedTerrainCount { get; }
-	public int SkippedTransparentOrAlphaCount { get; }
+	public int SkippedTransparentCount { get; }
 	public bool SidecarHitShadingAvailable { get; }
 }
 
@@ -89,9 +89,14 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 {
 	private const uint TerrainRayTracingVertexStrideBytes = 12;
 	// Each TLAS instance belongs to one geometry category. Queries using 0xFF
-	// see both; DDGI visibility and relocation request static geometry only.
+	// see all of them; DDGI visibility and relocation request static geometry only.
+	// Alpha-tested instances are non-opaque and have their own bits, so a trace without
+	// an alpha test can leave them out rather than hit their cards as solid quads.
+	// Mirrors the WOLF_RT_MASK_ constants in raytracing_common.slang.
 	private const uint DynamicGeometryMask = 0x01;
 	private const uint StaticGeometryMask = 0x02;
+	private const uint AlphaTestedDynamicGeometryMask = 0x04;
+	private const uint AlphaTestedStaticGeometryMask = 0x08;
 	private readonly Dictionary<Mesh, MeshAccelerationStructureRecord> _meshRecords = new(new ReferenceComparer<Mesh>());
 	private readonly Dictionary<uint, InstanceRecord> _instances = new();
 	private readonly Dictionary<uint, TerrainInstanceRecord> _terrainInstances = new();
@@ -223,7 +228,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			tlasRebuildCount,
 			tlasRebuildCount > 0 ? statsBuilder.TopLevelRebuildReason : RayTracingSceneRebuildReason.None,
 			statsBuilder.SkippedTerrainCount,
-			statsBuilder.SkippedTransparentOrAlphaCount,
+			statsBuilder.SkippedTransparentCount,
 			_instanceIndexToInstanceHandleBuffer is not null);
 	}
 
@@ -327,7 +332,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 				entry.World,
 				entry.InstanceHandle.Value,
 				entry.Material,
-				entry.PreviousWorld != entry.World);
+				entry.PreviousWorld != entry.World,
+				IsAlphaTested(entry.Material));
 		}
 
 		_tlasDirty = true;
@@ -363,9 +369,16 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			if (update.DrawKind == GpuDrawKind.Terrain)
 			{
 				ApplyTerrainUpdate(update, device, ref statsBuilder);
+				return;
 			}
 
-			return;
+			// Shaders read material parameters such as the alpha cutoff from the material table, so most material
+			// changes leave the TLAS alone. Only a change that adds the instance, removes it or flips its opacity
+			// falls through to the add-or-replace path below.
+			if (MaterialUpdateChangesInstance(update, ref statsBuilder) == false)
+			{
+				return;
+			}
 		}
 
 		if (update.Type == GpuDrawUpdateType.UpdateTransform)
@@ -444,7 +457,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			update.World,
 			update.InstanceHandle.Value,
 			material,
-			(hasExistingRecord && oldRecord.HasMoved) || update.PreviousWorld != update.World);
+			(hasExistingRecord && oldRecord.HasMoved) || update.PreviousWorld != update.World,
+			IsAlphaTested(material));
 		_tlasDirty = true;
 		statsBuilder.TopLevelRebuildReason |= update.Type == GpuDrawUpdateType.UpdateMesh
 			? RayTracingSceneRebuildReason.Mesh
@@ -927,7 +941,9 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 				instanceIndex,
 				record.AccelerationStructure,
 				record.World,
-				record.HasMoved ? DynamicGeometryMask : StaticGeometryMask));
+				GetInstanceMask(record.HasMoved, record.AlphaTested),
+				active: true,
+				opaque: record.AlphaTested == false));
 			if (instanceIndex < _instanceIndexToInstanceHandle.Length)
 			{
 				_instanceIndexToInstanceHandle[instanceIndex] = record.InstanceHandle;
@@ -986,13 +1002,60 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			return false;
 		}
 
-		if (material.AlphaMode != AlphaMode.Opaque)
+		// Alpha-blended surfaces are left out: a ray has no single hit to report for partial coverage.
+		if (material.AlphaMode == AlphaMode.AlphaBlend)
 		{
-			statsBuilder.SkippedTransparentOrAlphaCount++;
+			statsBuilder.SkippedTransparentCount++;
 			return false;
 		}
 
 		return true;
+	}
+
+	private bool MaterialUpdateChangesInstance(in GpuDrawUpdate update, ref RayTracingSceneStatsBuilder statsBuilder)
+	{
+		var hasRecord = _instances.TryGetValue(update.InstanceHandle.Value, out var record);
+		var wantsRecord =
+			update.Mesh is not null &&
+			update.Material is not null &&
+			IsRayTraceable(update.DrawKind, update.Material, ref statsBuilder);
+
+		if (hasRecord != wantsRecord)
+		{
+			return true;
+		}
+
+		if (hasRecord == false)
+		{
+			return false;
+		}
+
+		if (record.AlphaTested != IsAlphaTested(update.Material!))
+		{
+			return true;
+		}
+
+		_instances[update.InstanceHandle.Value] = record with
+		{
+			Material = update.Material!
+		};
+
+		return false;
+	}
+
+	private static bool IsAlphaTested(Material material)
+	{
+		return material.AlphaMode == AlphaMode.AlphaTest;
+	}
+
+	private static uint GetInstanceMask(bool hasMoved, bool alphaTested)
+	{
+		if (alphaTested)
+		{
+			return hasMoved ? AlphaTestedDynamicGeometryMask : AlphaTestedStaticGeometryMask;
+		}
+
+		return hasMoved ? DynamicGeometryMask : StaticGeometryMask;
 	}
 
 	private static bool TerrainRayTracingVertexDataChanged(
@@ -1064,7 +1127,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	{
 		public RayTracingSceneRebuildReason TopLevelRebuildReason;
 		public int SkippedTerrainCount;
-		public int SkippedTransparentOrAlphaCount;
+		public int SkippedTransparentCount;
 	}
 
 	private readonly record struct InstanceRecord(
@@ -1073,7 +1136,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		Matrix4x4 World,
 		uint InstanceHandle,
 		Material Material,
-		bool HasMoved);
+		bool HasMoved,
+		bool AlphaTested);
 
 	private readonly record struct TerrainInstanceRecord(
 		uint InstanceHandle,

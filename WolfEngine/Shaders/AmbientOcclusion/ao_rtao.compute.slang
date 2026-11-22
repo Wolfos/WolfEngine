@@ -4,6 +4,7 @@ import "../Common/common_lighting.slang";
 import "../Common/draw_data.slang";
 import "../Common/packed_vertex.slang";
 import "../Common/raytracing_common.slang";
+import "../Common/rt_alpha_test.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 1048576
 
@@ -44,6 +45,18 @@ StructuredBuffer<uint> g_PackedIndices : register(t9);
 
 StructuredBuffer<PackedMeshVertex> g_PackedMeshVertices : register(t8);
 
+RtAlphaTest RtaoAlphaTest()
+{
+    RtAlphaTest alphaTest;
+    alphaTest.instances = g_InstanceTable;
+    alphaTest.materials = g_MaterialTable;
+    alphaTest.instanceIndexToInstanceHandle = g_InstanceIndexToInstanceHandle;
+    alphaTest.meshes = g_MeshTable;
+    alphaTest.packedVertices = g_PackedMeshVertices;
+    alphaTest.packedIndices = g_PackedIndices;
+    return alphaTest;
+}
+
 float Hash12(uint2 pixel, uint frame)
 {
     uint state = pixel.x * 747796405u + pixel.y * 2891336453u + frame * 277803737u + 0x9E3779B9u;
@@ -78,7 +91,7 @@ RtaoRayQueryResult TraceRtaoRay(float3 worldPosition, float3 normal, uint2 pixel
     ray.TMin = 0.001f;
     ray.TMax = radius;
 
-    WolfRayAnyHit hit = WolfTraceAny(sceneTlas, ray, 0xFF);
+    WolfRayAnyHit hit = WolfTraceAnyAlphaTested(sceneTlas, ray, 0xFF, RtaoAlphaTest());
 
     RtaoRayQueryResult result;
     result.hit = hit.hit;
@@ -114,7 +127,7 @@ float3 TracePrimaryAlbedo(uint2 pixel, uint2 fullSize)
     ray.TMin = 0.001f;
     ray.TMax = 100000.0f;
 
-    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
+    WolfRayHit hit = WolfTraceClosestAlphaTested(sceneTlas, ray, 0xFF, RtaoAlphaTest());
     if (!hit.hit)
     {
         return 0.0f.xxx;

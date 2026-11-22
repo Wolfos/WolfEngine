@@ -51,6 +51,7 @@ void CSUpdateMaterial(uint3 dispatchThreadId : SV_DispatchThreadID)
     materialData.normalHandle = update.normalHandle;
     materialData.emissiveHandle = update.emissiveHandle;
     materialData.samplerHandle = update.samplerHandle;
+    materialData.materialFlags = update.materialFlags;
     g_MaterialTable[materialIndex] = materialData;
     g_MaterialGenerations[materialIndex] = materialGeneration;
 }

@@ -24,6 +24,9 @@ internal struct D3D12RayTracingInstanceData
 	public uint InstanceContributionAndFlags;
 	public ulong AccelerationStructure;
 
+	// D3D12_RAYTRACING_INSTANCE_FLAG_FORCE_NON_OPAQUE, which overrides the BLAS geometry's opaque flag.
+	private const uint ForceNonOpaqueInstanceFlag = 0x8u;
+
 	public static D3D12RayTracingInstanceData Create(
 		in RayTracingInstanceDescription instance,
 		ulong accelerationStructureAddress)
@@ -38,7 +41,8 @@ internal struct D3D12RayTracingInstanceData
 			M31 = transform.M13, M32 = transform.M23, M33 = transform.M33, M34 = transform.M43,
 			InstanceIdAndMask = (instance.InstanceIndex & 0x00FF_FFFFu) |
 				((instance.Active ? instance.Mask : 0u) & 0xFFu) << 24,
-			InstanceContributionAndFlags = 0,
+			// The hit group contribution occupies the low 24 bits and the instance flags the high 8.
+			InstanceContributionAndFlags = (instance.Opaque ? 0u : ForceNonOpaqueInstanceFlag) << 24,
 			AccelerationStructure = accelerationStructureAddress
 		};
 	}

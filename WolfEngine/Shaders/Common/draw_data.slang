@@ -32,6 +32,11 @@ struct GpuInstanceData
     uint flags;
 };
 
+// Bits of GpuMaterialData.materialFlags. Mirrors GpuMaterialFlags in GpuDrawData.cs.
+static const uint GPU_MATERIAL_FLAG_DOUBLE_SIDED = 1u << 0;
+
+// metallicRoughness is (metallic, roughness, alpha cutoff, normal scale). The cutoff is zero for materials
+// that are not alpha tested.
 struct GpuMaterialData
 {
     float4 baseColor;
@@ -43,10 +48,15 @@ struct GpuMaterialData
     uint normalHandle;
     uint emissiveHandle;
     uint samplerHandle;
-    uint pad0;
+    uint materialFlags;
     uint pad1;
     uint pad2;
 };
+
+bool IsMaterialDoubleSided(GpuMaterialData material)
+{
+    return (material.materialFlags & GPU_MATERIAL_FLAG_DOUBLE_SIDED) != 0u;
+}
 
 struct GpuTerrainMaterialData
 {
@@ -172,7 +182,7 @@ struct GpuDrawMaterialUpdateData
     uint32_t normalHandle;
     uint32_t emissiveHandle;
     uint32_t samplerHandle;
-    uint32_t pad3;
+    uint32_t materialFlags;
     uint32_t pad4;
     uint32_t pad5;
 };

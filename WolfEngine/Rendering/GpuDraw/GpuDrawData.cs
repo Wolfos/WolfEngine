@@ -84,6 +84,29 @@ public readonly struct GpuInstanceData
 	public readonly uint Flags;
 }
 
+/// <summary>
+/// Bits of <see cref="GpuMaterialData.MaterialFlags"/>. Mirrors the GPU_MATERIAL_FLAG_ constants in draw_data.slang.
+/// </summary>
+public static class GpuMaterialFlags
+{
+	/// <summary>
+	/// The material renders both faces. Ray-traced hits on its back face are shaded as front faces, the way
+	/// rasterisation flips the normal, rather than being treated as the inside of a closed surface.
+	/// </summary>
+	public const uint DoubleSided = 1u << 0;
+
+	public static uint FromMaterial(Material material)
+	{
+		var flags = 0u;
+		if (material.DoubleSided)
+		{
+			flags |= DoubleSided;
+		}
+
+		return flags;
+	}
+}
+
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuMaterialData
 {
@@ -96,7 +119,8 @@ public readonly struct GpuMaterialData
 		uint ormHandle,
 		uint normalHandle,
 		uint emissiveHandle,
-		uint samplerHandle)
+		uint samplerHandle,
+		uint materialFlags = 0u)
 	{
 		BaseColor = baseColor;
 		MetallicRoughness = metallicRoughness;
@@ -107,7 +131,7 @@ public readonly struct GpuMaterialData
 		NormalHandle = normalHandle;
 		EmissiveHandle = emissiveHandle;
 		SamplerHandle = samplerHandle;
-		_pad0 = 0;
+		MaterialFlags = materialFlags;
 		_pad1 = 0;
 		_pad2 = 0;
 	}
@@ -121,7 +145,9 @@ public readonly struct GpuMaterialData
 	public readonly uint NormalHandle;
 	public readonly uint EmissiveHandle;
 	public readonly uint SamplerHandle;
-	private readonly uint _pad0;
+
+	/// <summary>Bits from <see cref="GpuMaterialFlags"/>.</summary>
+	public readonly uint MaterialFlags;
 	private readonly uint _pad1;
 	private readonly uint _pad2;
 }
@@ -387,7 +413,8 @@ public readonly struct GpuDrawMaterialUpdateData
 		uint ormHandle,
 		uint normalHandle,
 		uint emissiveHandle,
-		uint samplerHandle)
+		uint samplerHandle,
+		uint materialFlags)
 	{
 		MaterialHandle = materialHandle;
 		_pad0 = 0;
@@ -402,7 +429,7 @@ public readonly struct GpuDrawMaterialUpdateData
 		NormalHandle = normalHandle;
 		EmissiveHandle = emissiveHandle;
 		SamplerHandle = samplerHandle;
-		_pad3 = 0;
+		MaterialFlags = materialFlags;
 		_pad4 = 0;
 		_pad5 = 0;
 	}
@@ -420,7 +447,9 @@ public readonly struct GpuDrawMaterialUpdateData
 	public readonly uint NormalHandle;
 	public readonly uint EmissiveHandle;
 	public readonly uint SamplerHandle;
-	private readonly uint _pad3;
+
+	/// <summary>Bits from <see cref="GpuMaterialFlags"/>.</summary>
+	public readonly uint MaterialFlags;
 	private readonly uint _pad4;
 	private readonly uint _pad5;
 }
