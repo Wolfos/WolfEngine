@@ -92,6 +92,7 @@ public struct VolumetricFogConfig
 	private int _froxelPixelSize = 16;
 	private int _sliceCount = 64;
 	private float _historyWeight = 0.9f;
+	private float _shadowDimming;
 
 	public VolumetricFogConfig()
 	{
@@ -103,6 +104,14 @@ public struct VolumetricFogConfig
 	public float HeightFalloff { get; set; } = 0.05f;
 	public ColorRGBA Albedo { get; set; } = new(0.85f, 0.9f, 1.0f, 1.0f);
 	public float Anisotropy { get; set; } = 0.35f;
+
+	/// <summary>How much scene and cloud shadows fade fog density. Zero keeps the authored density; one clears fully shadowed fog.</summary>
+	public float ShadowDimming
+	{
+		readonly get => _shadowDimming;
+		set => _shadowDimming = float.IsFinite(value) ? Math.Clamp(value, 0.0f, 1.0f) : 0.0f;
+	}
+
 	public float MaxDistance { get; set; } = 250.0f;
 	public int FroxelPixelSize { readonly get => _froxelPixelSize; set => _froxelPixelSize = Math.Clamp(value, 4, 32); }
 	public int SliceCount { readonly get => _sliceCount; set => _sliceCount = Math.Clamp(value, 16, 128); }

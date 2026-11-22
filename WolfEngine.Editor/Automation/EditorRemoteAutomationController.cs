@@ -347,7 +347,7 @@ public sealed partial class EditorRemoteAutomationController
 		}, cancellationToken);
 
 	public Task<string> SetRenderEffectsAsync(bool ambientOcclusion, bool reflections, bool diffuseGlobalIllumination,
-		bool volumetricFog, CancellationToken cancellationToken) =>
+		bool volumetricFog, float? fogShadowDimming, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
 			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
@@ -367,6 +367,11 @@ public sealed partial class EditorRemoteAutomationController
 			config.DiffuseGlobalIllumination = gi;
 			var fog = config.VolumetricFog;
 			fog.Enabled = volumetricFog;
+			if (fogShadowDimming is { } dimming)
+			{
+				fog.ShadowDimming = dimming;
+			}
+
 			config.VolumetricFog = fog;
 			return "Render effects updated in memory only.";
 		}, cancellationToken);

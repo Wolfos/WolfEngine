@@ -267,6 +267,7 @@ public sealed class VolumetricFogPass
 		lighting.SetVector4("shadowTexelSizeEnabled", new Vector4(1.0f / resolution, 1.0f / resolution, shadow.Enabled ? 1.0f : 0.0f, shadow.Strength));
 		lighting.SetVector4("shadowDepthBiases", new Vector4(shadow.DepthBiases, 0.0f));
 		lighting.SetFloat("shadowMaxDistance", shadow.MaxDistance);
+		lighting.SetFloat("shadowDimming", fog.ShadowDimming);
 		config.Clouds.Write(lighting);
 		commandList.SetComputeConstants(lighting.RegisterIndex, lighting.AsBytes());
 		commandList.SetComputeReadOnlyBuffer(10, config.VolumeBuffer);

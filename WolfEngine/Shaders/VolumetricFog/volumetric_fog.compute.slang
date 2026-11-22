@@ -41,7 +41,7 @@ cbuffer FogLightingParams : register(b2)
     float4 shadowSplitsBlend;
     float4 shadowTexelSizeEnabled;
     float4 shadowDepthBiases;
-    float shadowMaxDistance; float _lightingPadding0; float _lightingPadding1; float _lightingPadding2;
+    float shadowMaxDistance; float shadowDimming; float _lightingPadding1; float _lightingPadding2;
     /// Only the sun shadow is read; the clouds themselves are composited by deferred lighting.
     CloudComposite cloudComposite;
 };
@@ -121,10 +121,11 @@ void VolumetricFogInjectCS(uint3 id : SV_DispatchThreadID)
     float3 sun = lightColorIntensity.rgb * lightColorIntensity.a * lightDirectionEnabled.w;
     float visibility = ShadowVisibility(relativePosition, depth, lightDirection) *
         SampleCloudShadow(cloudComposite, linearSamplerHandle, relativePosition);
+    float densityScale = lerp(1.0f, visibility, shadowDimming);
     float3 source = 0.0f.xxx;
     float totalExtinction = 0.0f;
     float heightDensity = extinction * exp(-max(worldPosition.y - baseHeight, 0.0f) * max(heightFalloff, 0.0f));
-    AddMedium(heightDensity, albedo, anisotropy, ambient, sun, visibility, phaseCosine, source, totalExtinction);
+    AddMedium(heightDensity * densityScale, albedo, anisotropy, ambient, sun, visibility, phaseCosine, source, totalExtinction);
 
     uint3 cell = id / 4u;
     uint cellIndex = cell.x + cellGridSizeX * (cell.y + cellGridSizeY * cell.z);
@@ -135,7 +136,7 @@ void VolumetricFogInjectCS(uint3 id : SV_DispatchThreadID)
         if (volumeIndex >= volumeCount) continue;
         FogVolumeData volume = g_FogVolumes[volumeIndex];
         float weight = VolumeWeight(volume, worldPosition);
-        AddMedium(volume.albedoExtinction.a * weight, volume.albedoExtinction.rgb, volume.parameters.x,
+        AddMedium(volume.albedoExtinction.a * weight * densityScale, volume.albedoExtinction.rgb, volume.parameters.x,
             ambient, sun, visibility, phaseCosine, source, totalExtinction);
     }
     GetRWTexture3D(outputHandle)[id] = float4(source, totalExtinction);

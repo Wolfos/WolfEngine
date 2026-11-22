@@ -396,8 +396,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 		GetRunningEditor().SetSceneDebugViewAsync(debugViewId, cancellationToken);
 
 	public Task<string> SetRenderEffectsAsync(bool ambientOcclusion, bool reflections, bool diffuseGlobalIllumination,
-		bool volumetricFog, CancellationToken cancellationToken) =>
-		GetRunningEditor().SetRenderEffectsAsync(ambientOcclusion, reflections, diffuseGlobalIllumination, volumetricFog, cancellationToken);
+		bool volumetricFog, float? fogShadowDimming, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetRenderEffectsAsync(
+			ambientOcclusion, reflections, diffuseGlobalIllumination, volumetricFog, fogShadowDimming, cancellationToken);
 
 	public Task<string> SetShadowCasterCullingAsync(bool enabled, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetShadowCasterCullingAsync(enabled, cancellationToken);

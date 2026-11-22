@@ -26,6 +26,7 @@ public sealed class VolumetricFogTests
 			Assert.That(config.FroxelPixelSize, Is.EqualTo(16));
 			Assert.That(config.SliceCount, Is.EqualTo(64));
 			Assert.That(config.HistoryWeight, Is.EqualTo(0.9f));
+			Assert.That(config.ShadowDimming, Is.Zero);
 			Assert.That(new RenderConfig().VolumetricFog.Enabled, Is.False);
 		});
 	}
@@ -55,6 +56,15 @@ public sealed class VolumetricFogTests
 		Assert.That(new VolumetricFogConfig { HistoryWeight = value }.HistoryWeight, Is.EqualTo(expected));
 	}
 
+	[TestCase(-0.5f, 0.0f)]
+	[TestCase(0.5f, 0.5f)]
+	[TestCase(1.5f, 1.0f)]
+	[TestCase(float.NaN, 0.0f)]
+	public void ShadowDimmingIsClamped(float value, float expected)
+	{
+		Assert.That(new VolumetricFogConfig { ShadowDimming = value }.ShadowDimming, Is.EqualTo(expected));
+	}
+
 	[Test]
 	public void RenderConfigWithoutFogKeyDeserializesToDefaults()
 	{
@@ -75,13 +85,16 @@ public sealed class VolumetricFogTests
 			Assert.That(fog.SliceCount, Is.EqualTo(128));
 			Assert.That(fog.FroxelPixelSize, Is.EqualTo(4));
 			Assert.That(fog.HistoryWeight, Is.EqualTo(0.999f));
+			Assert.That(fog.ShadowDimming, Is.Zero);
 		});
 
+		fog.ShadowDimming = 0.4f;
 		var roundTripped = JsonSerializer.Deserialize<RenderConfig>(
 			JsonSerializer.Serialize(new RenderConfig { VolumetricFog = fog }, AssetJson.SerializerOptions),
 			AssetJson.SerializerOptions)!.VolumetricFog;
 		Assert.That(roundTripped.SliceCount, Is.EqualTo(128));
 		Assert.That(roundTripped.Extinction, Is.EqualTo(0.02f));
+		Assert.That(roundTripped.ShadowDimming, Is.EqualTo(0.4f));
 	}
 
 	[Test]
