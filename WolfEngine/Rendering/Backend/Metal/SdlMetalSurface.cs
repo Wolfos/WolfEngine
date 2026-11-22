@@ -332,8 +332,19 @@ internal sealed unsafe class SdlMetalSurface : IMetalSurface
 
 		if (_window is not null)
 		{
+			// The editor automation host stays alive after shutdown_editor, with its main thread waiting for the next
+			// start instead of running the Cocoa run loop. Cocoa plays the close animation and takes the window off
+			// screen only while that run loop runs, so without this the destroyed window stayed on screen,
+			// unresponsive, until the process was killed. Close without the animation and pump once to commit it.
+			if (_nativeWindow != IntPtr.Zero)
+			{
+				new NSWindowInstance(_nativeWindow).DisableAnimations();
+				_nativeWindow = IntPtr.Zero;
+			}
+
 			_sdl.DestroyWindow(_window);
 			_window = null;
+			_sdl.PumpEvents();
 		}
 
 		_sdl.Quit();

@@ -195,6 +195,17 @@ internal sealed class NSWindowInstance
         ObjectiveC.objc_msgSend(NativePtr, "setMovableByWindowBackground:", false);
         SetTitle(string.Empty);
     }
+
+    /// <summary>
+    /// Makes ordering the window out take effect at once instead of playing the system close animation, which only
+    /// advances while the main thread runs its run loop.
+    /// </summary>
+    public void DisableAnimations()
+    {
+        ObjectiveC.objc_msgSend(NativePtr, "setAnimationBehavior:", (long)NSWindowAnimationBehaviorNone);
+    }
+
+    private const long NSWindowAnimationBehaviorNone = 2;
 }
 
 [SupportedOSPlatform("macos")]
