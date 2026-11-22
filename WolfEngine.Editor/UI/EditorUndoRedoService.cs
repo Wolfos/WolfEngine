@@ -309,6 +309,46 @@ public sealed class TerrainAssetEditUndoRedoEntry : IEditorUndoRedoEntry
 	}
 }
 
+/// <summary>
+/// Several edits made by one action, undone together in reverse order. Blocked in Play mode when any part edits the
+/// authoring scene.
+/// </summary>
+public sealed class CompositeUndoRedoEntry : IEditorUndoRedoEntry
+{
+	private readonly IReadOnlyList<IEditorUndoRedoEntry> _entries;
+
+	public CompositeUndoRedoEntry(string description, IReadOnlyList<IEditorUndoRedoEntry> entries)
+	{
+		ArgumentNullException.ThrowIfNull(entries);
+
+		Description = string.IsNullOrWhiteSpace(description) ? "Edit" : description;
+		_entries = entries.ToArray();
+		Scope = _entries.Any(entry => entry.Scope == EditorUndoRedoScope.AuthoringScene)
+			? EditorUndoRedoScope.AuthoringScene
+			: EditorUndoRedoScope.Asset;
+	}
+
+	public string Description { get; }
+
+	public EditorUndoRedoScope Scope { get; }
+
+	public void Undo(EditorUndoRedoContext context)
+	{
+		for (var i = _entries.Count - 1; i >= 0; i--)
+		{
+			_entries[i].Undo(context);
+		}
+	}
+
+	public void Redo(EditorUndoRedoContext context)
+	{
+		foreach (var entry in _entries)
+		{
+			entry.Redo(context);
+		}
+	}
+}
+
 public sealed class EditorUndoRedoService : IEditorUndoRedoService
 {
 	private readonly EditorUndoRedoContext _context;

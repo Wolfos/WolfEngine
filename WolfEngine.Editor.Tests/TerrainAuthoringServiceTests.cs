@@ -472,7 +472,7 @@ public sealed class TerrainAuthoringServiceTests
 		}
 	}
 
-	private sealed class TestTerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
+	internal sealed class TestTerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 	{
 		public TerrainGpuStrokePreviewSet CreateStrokeResources(Texture sourceTexture, TerrainAuthoringSurfaceTarget surfaceTarget)
 		{

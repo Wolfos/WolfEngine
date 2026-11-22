@@ -244,7 +244,7 @@ public class SceneWindow: EditorWindow
                 layerSet = world.GetComponent<TerrainComponent>(EditorGui.SelectedEntity).LayerSetAsset.Asset;
             }
 
-			_terrainToolSettingsOverlay.Draw(_terrainTool, _terrainToolController, layerSet, imageMin, imageMax);
+			_terrainToolSettingsOverlay.Draw(scene, _terrainTool, _terrainToolController, layerSet, imageMin, imageMax);
         }
 
 		if (_sceneToolMode != SceneToolMode.Terrain || _playSession.State != EditorPlayState.Edit)

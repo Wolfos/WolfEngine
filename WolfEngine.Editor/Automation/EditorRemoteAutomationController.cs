@@ -1243,6 +1243,86 @@ public sealed partial class EditorRemoteAutomationController
 				_renderFrameCoordinator.CompletedSequence);
 		}, cancellationToken);
 
+	public Task<TerrainSculptResult> SculptTerrainAsync(
+		string? terrainEntityId,
+		float localX,
+		float localZ,
+		float radiusMeters,
+		float strength,
+		float falloff,
+		bool invert,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.State != EditorPlayState.Edit)
+			{
+				throw new InvalidOperationException("Terrain authoring is only available outside Play mode.");
+			}
+
+			ValidateFinite(localX, nameof(localX));
+			ValidateFinite(localZ, nameof(localZ));
+			ValidateFinite(radiusMeters, nameof(radiusMeters));
+			ValidateFinite(strength, nameof(strength));
+			ValidateFinite(falloff, nameof(falloff));
+			if (radiusMeters <= 0.0f) throw new InvalidOperationException("radius_meters must be positive.");
+			if (strength < 0.0f || strength > 1.0f) throw new InvalidOperationException("strength must be between 0 and 1.");
+			if (falloff <= 0.0f) throw new InvalidOperationException("falloff must be positive.");
+
+			var scene = _sceneWorkspace.CurrentScene;
+			var (entity, persistentId) = ResolveTerrainEntity(scene, terrainEntityId);
+			var request = new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.Heightmap,
+				TerrainBrushOperation.RaiseLower,
+				new TerrainBrushSettings(radiusMeters, strength, falloff, 0, null));
+			if (_terrainAuthoringService.BeginStroke(scene, entity, request) == false)
+			{
+				throw new InvalidOperationException($"Could not begin a sculpt stroke on terrain entity '{persistentId:D}'.");
+			}
+
+			try
+			{
+				_terrainAuthoringService.AppendStamp(
+					new Vector3(localX, 0.0f, localZ),
+					1.0f,
+					new TerrainBrushModifierState(invert));
+				if (_terrainAuthoringService.EndStroke() == false)
+				{
+					throw new InvalidOperationException($"Could not end the sculpt stroke on terrain entity '{persistentId:D}'.");
+				}
+			}
+			catch
+			{
+				_terrainAuthoringService.CancelStroke();
+				throw;
+			}
+
+			return new TerrainSculptResult(
+				persistentId,
+				localX,
+				localZ,
+				radiusMeters,
+				strength,
+				invert,
+				_editorFrameCoordinator.CompletedSequence,
+				_renderFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
+
+	public Task<FoliageSnapResult> SnapFoliageToTerrainAsync(string? terrainEntityId, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.State != EditorPlayState.Edit)
+			{
+				throw new InvalidOperationException("Foliage authoring is only available outside Play mode.");
+			}
+
+			var scene = _sceneWorkspace.CurrentScene;
+			var (entity, persistentId) = ResolveTerrainEntity(scene, terrainEntityId);
+			var moved = _foliageAuthoringService.SnapToTerrain(scene, entity);
+			var total = scene.World.GetComponent<TerrainComponent>(entity).Foliage.Asset?.InstanceCount ?? 0;
+
+			return new FoliageSnapResult(persistentId, moved, total);
+		}, cancellationToken);
+
 	public Task<FoliagePaintResult> PaintFoliageAsync(
 		string? terrainEntityId,
 		float localX,

@@ -349,6 +349,32 @@ public sealed class EditorAutomationTools
 			invert,
 			cancellationToken);
 
+	[McpServerTool(Name = "sculpt_terrain"), Description("Apply one raise or lower heightmap stamp through the editor's real authoring and undo path. Placed foliage under the brush moves with the ground in the same undo step.")]
+	public Task<TerrainSculptResult> SculptTerrain(
+		[Description("Persistent terrain entity GUID. Omit when the scene contains exactly one terrain.")] string? terrainEntityId = null,
+		[Description("Terrain-local X coordinate in metres.")] float localX = 0.0f,
+		[Description("Terrain-local Z coordinate in metres.")] float localZ = 0.0f,
+		[Description("Brush radius in metres.")] float radiusMeters = 8.0f,
+		[Description("Brush strength from 0 through 1.")] float strength = 1.0f,
+		[Description("Positive brush falloff exponent.")] float falloff = 1.0f,
+		[Description("Lower the terrain instead of raising it.")] bool invert = false,
+		CancellationToken cancellationToken = default) =>
+		_controller.SculptTerrainAsync(
+			terrainEntityId,
+			localX,
+			localZ,
+			radiusMeters,
+			strength,
+			falloff,
+			invert,
+			cancellationToken);
+
+	[McpServerTool(Name = "snap_foliage_to_terrain"), Description("Put every placed-foliage instance of a terrain on its surface, as one undoable edit. Returns how many instances moved and the total.")]
+	public Task<FoliageSnapResult> SnapFoliageToTerrain(
+		[Description("Persistent terrain entity GUID. Omit when the scene contains exactly one terrain.")] string? terrainEntityId = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.SnapFoliageToTerrainAsync(terrainEntityId, cancellationToken);
+
 	[McpServerTool(Name = "paint_foliage"), Description("Apply one undoable placed-foliage stamp. Returns added, removed and total instances, plus the foliage asset GUID when assigned.")]
 	public Task<FoliagePaintResult> PaintFoliage(
 		[Description("Persistent terrain entity GUID. Omit when the scene contains exactly one terrain.")] string? terrainEntityId = null,

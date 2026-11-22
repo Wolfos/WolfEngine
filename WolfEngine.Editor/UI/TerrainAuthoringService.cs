@@ -49,6 +49,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 	private readonly ITerrainAssetPersistenceService _terrainAssetPersistenceService;
 	private readonly ITerrainTexturePreviewRegistry _terrainTexturePreviewRegistry;
 	private readonly ITerrainBrushGpuExecutor _terrainBrushGpuExecutor;
+	private readonly FoliageAuthoringService? _foliageAuthoringService;
 	private StrokeState? _activeStroke;
 
 	public TerrainAuthoringService(
@@ -56,13 +57,15 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		IEditorInteractionState interactionState,
 		ITerrainAssetPersistenceService terrainAssetPersistenceService,
 		ITerrainTexturePreviewRegistry terrainTexturePreviewRegistry,
-		ITerrainBrushGpuExecutor terrainBrushGpuExecutor)
+		ITerrainBrushGpuExecutor terrainBrushGpuExecutor,
+		FoliageAuthoringService? foliageAuthoringService = null)
 	{
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
 		_terrainAssetPersistenceService = terrainAssetPersistenceService ?? throw new ArgumentNullException(nameof(terrainAssetPersistenceService));
 		_terrainTexturePreviewRegistry = terrainTexturePreviewRegistry ?? throw new ArgumentNullException(nameof(terrainTexturePreviewRegistry));
 		_terrainBrushGpuExecutor = terrainBrushGpuExecutor ?? throw new ArgumentNullException(nameof(terrainBrushGpuExecutor));
+		_foliageAuthoringService = foliageAuthoringService;
 	}
 
 	public bool HasActiveStroke => _activeStroke is not null;
@@ -212,6 +215,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		}
 
 		ref var terrain = ref world.GetComponent<TerrainComponent>(stroke.TerrainEntity);
+		IEditorUndoRedoEntry? foliageEdit = null;
 		if (stroke.Request.SurfaceTarget == TerrainAuthoringSurfaceTarget.Heightmap)
 		{
 			var previewTexture = stroke.CurrentPreviewTexture!;
@@ -225,6 +229,12 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			if (stroke.HeightDirtyRegion.HasValue)
 			{
 				TerrainRuntimeRegistry.MarkHeightmapEdited(world, stroke.TerrainEntity, stroke.HeightDirtyRegion.Value);
+				foliageEdit = _foliageAuthoringService?.FollowHeightmapEdit(
+					stroke.Scene,
+					stroke.TerrainEntity,
+					stroke.BeforeSnapshot.Heightmap,
+					stroke.TerrainAsset.Heightmap,
+					stroke.HeightDirtyRegion.Value);
 			}
 		}
 		else
@@ -242,7 +252,13 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		var snapshots = new[] { afterSnapshot };
 		_terrainAssetPersistenceService.RecordPendingTerrainAssetState(snapshots);
 		_undoRedoService.BeginCapture("Terrain Stroke");
-		_undoRedoService.CommitCapture(new TerrainAssetEditUndoRedoEntry("Terrain Stroke", [stroke.BeforeSnapshot], snapshots));
+		IEditorUndoRedoEntry edit = new TerrainAssetEditUndoRedoEntry("Terrain Stroke", [stroke.BeforeSnapshot], snapshots);
+		if (foliageEdit is not null)
+		{
+			edit = new CompositeUndoRedoEntry("Terrain Stroke", [edit, foliageEdit]);
+		}
+
+		_undoRedoService.CommitCapture(edit);
 		_interactionState.MarkSceneDirty();
 		_activeStroke = null;
 		return true;

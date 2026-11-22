@@ -141,6 +141,27 @@ public sealed class TerrainToolController
 		}
 	}
 
+	internal void SnapFoliageToTerrain(EditorScene scene)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+
+		FinishFoliageStroke();
+		if (EditorGui.HasSelectedEntity == false)
+		{
+			return;
+		}
+
+		try
+		{
+			FoliageError = null;
+			_foliageAuthoringService.SnapToTerrain(scene, EditorGui.SelectedEntity);
+		}
+		catch (Exception exception)
+		{
+			FoliageError = exception.Message;
+		}
+	}
+
 	internal void FinishFoliageStroke()
 	{
 		_foliageAuthoringService.EndStroke();

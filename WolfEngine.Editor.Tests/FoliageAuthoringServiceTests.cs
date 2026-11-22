@@ -7,6 +7,7 @@ using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Importing;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -155,6 +156,81 @@ public sealed class FoliageAuthoringServiceTests
 		Assert.That(Pack((TerrainFoliage)fixture.Store.LoadAsset(sourcePath).Asset), Is.EqualTo(after));
 	}
 
+	[Test]
+	public void Sculpt_MovesFoliageUnderTheBrushWithTheGroundInOneUndoStep()
+	{
+		using var fixture = new Fixture();
+		var foliage = fixture.AttachFoliage();
+		foliage.Types.Add(fixture.Beech);
+		var onGround = Placed(0.0f, 0.0f, 0);
+		var sunk = Placed(0.1f, 0.05f, 0) with { Position = new Vector3(0.1f, -0.5f, 0.05f) };
+		var outside = Placed(24.0f, 24.0f, 0);
+		foliage.SetInstances([onGround, sunk, outside]);
+		var before = Pack(foliage);
+		var terrainAsset = fixture.TerrainAsset;
+		var heightsBefore = terrainAsset.Heightmap.MipLevels[0].Data.ToArray();
+		var sculpt = fixture.CreateTerrainAuthoring();
+
+		Assert.That(
+			sculpt.BeginStroke(
+				fixture.Scene,
+				fixture.TerrainEntity,
+				new TerrainBrushStrokeRequest(
+					TerrainAuthoringSurfaceTarget.Heightmap,
+					TerrainBrushOperation.RaiseLower,
+					new TerrainBrushSettings(4.0f, 1.0f, 1.0f, 0, null))),
+			Is.True);
+		sculpt.AppendStamp(Vector3.Zero, 1.0f, new TerrainBrushModifierState(false));
+		Assert.That(sculpt.EndStroke(), Is.True);
+
+		ref var terrain = ref fixture.Scene.World.GetComponent<TerrainComponent>(fixture.TerrainEntity);
+		var surface = TerrainRuntimeRegistry.GetOrCreateRuntime(fixture.Scene.World, fixture.TerrainEntity);
+		Assert.That(surface.EnsureSampling(terrain), Is.True);
+		var moved = Instances(foliage).ToArray();
+		Assert.That(surface.TrySampleLocalSurface(0.0f, 0.0f, out var centre, out _), Is.True);
+		Assert.That(surface.TrySampleLocalSurface(0.1f, 0.05f, out var nearCentre, out _), Is.True);
+		Assert.That(centre.Y, Is.GreaterThan(0.1f));
+		Assert.That(moved[0].Position.Y, Is.EqualTo(centre.Y).Within(0.001f));
+		Assert.That(moved[1].Position.Y, Is.EqualTo(nearCentre.Y - 0.5f).Within(0.001f));
+		// The outside instance shares the cell, which is quantised again, so it may drift by a fraction of a millimetre.
+		Assert.That(Vector3.Distance(moved[2].Position, outside.Position), Is.LessThan(0.0001f));
+
+		Assert.That(fixture.History.Undo(), Is.True);
+		Assert.That(fixture.History.CanUndo, Is.False);
+		Assert.That(terrainAsset.Heightmap.MipLevels[0].Data, Is.EqualTo(heightsBefore));
+		Assert.That(Pack(foliage), Is.EqualTo(before));
+
+		Assert.That(fixture.History.Redo(), Is.True);
+		Assert.That(Instances(foliage).Select(instance => instance.Position.Y), Is.EqualTo(moved.Select(instance => instance.Position.Y)));
+	}
+
+	[Test]
+	public void SnapToTerrain_PutsInstancesOnTheSurfaceAndUndoRestoresThem()
+	{
+		using var fixture = new Fixture();
+		var foliage = fixture.AttachFoliage();
+		foliage.Types.Add(fixture.Beech);
+		foliage.SetInstances([Placed(-20.0f, 3.0f, 0), Placed(5.0f, -11.0f, 0), Placed(18.0f, 22.0f, 0)]);
+		var before = Pack(foliage);
+		fixture.SetSlopedHeightmap();
+
+		var moved = fixture.Authoring.SnapToTerrain(fixture.Scene, fixture.TerrainEntity);
+
+		ref var terrain = ref fixture.Scene.World.GetComponent<TerrainComponent>(fixture.TerrainEntity);
+		var surface = TerrainRuntimeRegistry.GetOrCreateRuntime(fixture.Scene.World, fixture.TerrainEntity);
+		Assert.That(surface.EnsureSampling(terrain), Is.True);
+		Assert.That(moved, Is.EqualTo(3));
+		foreach (var instance in Instances(foliage))
+		{
+			Assert.That(surface.TrySampleLocalSurface(instance.Position.X, instance.Position.Z, out var point, out _), Is.True);
+			Assert.That(instance.Position.Y, Is.EqualTo(point.Y).Within(0.001f));
+		}
+
+		Assert.That(fixture.Authoring.SnapToTerrain(fixture.Scene, fixture.TerrainEntity), Is.Zero);
+		Assert.That(fixture.History.Undo(), Is.True);
+		Assert.That(Pack(foliage), Is.EqualTo(before));
+	}
+
 	private static FoliageInstance Placed(float x, float z, int type) =>
 		new(new Vector3(x, 0.0f, z), Quaternion.Identity, 1.0f, type);
 
@@ -201,11 +277,12 @@ public sealed class FoliageAuthoringServiceTests
 					Store.SaveAsset(Project.GetAbsoluteAssetPath(entry.Id, entry.RelativeAssetPath), typeof(TerrainFoliage), call.ArgAt<TerrainFoliage>(2));
 				});
 			pendingAssets = new TerrainFoliageAssetService(Project, _creator, metadata, snapshots);
-			var persistence = new TerrainAssetPersistenceService(
+			Persistence = new TerrainAssetPersistenceService(
 				Project,
-				new TerrainTexturePreviewRegistry(),
-				Substitute.For<ITerrainBrushGpuExecutor>(),
+				TexturePreviews,
+				GpuExecutor,
 				pendingAssets);
+			var persistence = Persistence;
 			Workspace = new EditorSceneWorkspace(
 				Substitute.For<IEditorSceneFactory>(), persistence, Substitute.For<IWorldManager>());
 			Workspace.Initialize(Scene);
@@ -244,6 +321,45 @@ public sealed class FoliageAuthoringServiceTests
 		public EditorInteractionState InteractionState { get; } = new();
 		public EditorUndoRedoService History { get; }
 		public FoliageAuthoringService Authoring { get; }
+		public TerrainAssetPersistenceService Persistence { get; }
+		public TerrainTexturePreviewRegistry TexturePreviews { get; } = new();
+		public TerrainAuthoringServiceTests.TestTerrainBrushGpuExecutor GpuExecutor { get; } = new();
+		public TerrainAsset TerrainAsset => Scene.World.GetComponent<TerrainComponent>(TerrainEntity).TerrainAsset.Asset!;
+
+		public TerrainAuthoringService CreateTerrainAuthoring()
+		{
+			return new TerrainAuthoringService(
+				History,
+				InteractionState,
+				Persistence,
+				TexturePreviews,
+				GpuExecutor,
+				Authoring);
+		}
+
+		/// <summary>Replaces the heightmap with a ramp rising along X, as if it had been sculpted.</summary>
+		public void SetSlopedHeightmap()
+		{
+			var heightmap = TerrainAsset.Heightmap;
+			var data = new byte[heightmap.Width * heightmap.Height * 2];
+			for (var y = 0; y < heightmap.Height; y++)
+			{
+				for (var x = 0; x < heightmap.Width; x++)
+				{
+					var encoded = (ushort)(x * 65535 / (heightmap.Width - 1));
+					var offset = ((y * heightmap.Width) + x) * 2;
+					data[offset] = (byte)(encoded & 0xff);
+					data[offset + 1] = (byte)(encoded >> 8);
+				}
+			}
+
+			heightmap.ApplyTextureData(
+				heightmap.Width,
+				heightmap.Height,
+				false,
+				TextureFormat.R16Unorm,
+				[new TextureMipData(heightmap.Width, heightmap.Height, data)]);
+		}
 		public Entity TerrainEntity { get; }
 		public AssetRef<FoliageType> Beech { get; }
 		public AssetRef<FoliageType> Fern { get; }

@@ -84,6 +84,21 @@ public sealed record EditorUndoResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+public sealed record TerrainSculptResult(
+	Guid TerrainEntityId,
+	float LocalX,
+	float LocalZ,
+	float RadiusMeters,
+	float Strength,
+	bool Invert,
+	long EditorFrameSequence,
+	long RenderFrameSequence);
+
+public sealed record FoliageSnapResult(
+	Guid TerrainEntityId,
+	int Moved,
+	int Total);
+
 public sealed record FoliagePaintResult(
 	Guid TerrainEntityId,
 	Guid? FoliageAssetId,

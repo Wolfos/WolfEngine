@@ -184,6 +184,7 @@ Foliage is edited in the terrain editor, which gets two new tabs.
 - **Paint brush:** a list of types with weights, density per 100 m², minimum spacing, scale range, random yaw, normal alignment, and slope and height limits. Spacing rejects candidates near existing instances, which gives an even, natural spread.
 - **Erase brush:** removes instances of the selected types, or of all types.
 - **Undo:** a stroke records the cells it changed.
+- **Following the ground:** instances store an absolute height in the terrain's local space. When a sculpt stroke ends, the instances under it move up or down by as much as the surface under each of them moved, so a deliberately sunk rock stays sunk. Their rotation is not re-aligned. That edit is part of the sculpt's undo step. **Snap to terrain** in the Foliage tool puts every instance on the surface, for foliage placed before the terrain was shaped or after its heightmap was replaced some other way.
 
 Instances are not entities, so they do not appear in the hierarchy and cannot be selected one by one in the first version.
 

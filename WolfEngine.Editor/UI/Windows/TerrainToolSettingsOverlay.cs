@@ -28,6 +28,7 @@ public sealed class TerrainToolSettingsOverlay
 	}
 
 	internal void Draw(
+		EditorScene scene,
 		TerrainTool terrainTool,
 		TerrainToolController controller,
 		TerrainLayerSet? layerSet,
@@ -70,7 +71,7 @@ public sealed class TerrainToolSettingsOverlay
 		{
 			if (terrainTool == TerrainTool.Foliage)
 			{
-				DrawFoliageSettings(controller);
+				DrawFoliageSettings(scene, controller);
 			}
 			else
 			{
@@ -93,7 +94,7 @@ public sealed class TerrainToolSettingsOverlay
 		ImGui.PopStyleVar();
 	}
 
-	private void DrawFoliageSettings(TerrainToolController controller)
+	private void DrawFoliageSettings(EditorScene scene, TerrainToolController controller)
 	{
 		var settings = controller.FoliageSettings;
 		ImGui.SeparatorText("Foliage");
@@ -109,6 +110,18 @@ public sealed class TerrainToolSettingsOverlay
 
 		ImGui.SeparatorText("Palette");
 		DrawFoliagePalette(controller.FoliagePalette);
+
+		ImGui.SeparatorText("Terrain");
+		if (ImGui.Button("Snap to terrain"))
+		{
+			controller.SnapFoliageToTerrain(scene);
+		}
+
+		if (ImGui.IsItemHovered())
+		{
+			ImGui.SetTooltip("Puts all of this terrain's foliage on its surface. Sculpting moves foliage with the ground by itself.");
+		}
+
 		if (controller.FoliageError is { } error)
 		{
 			ImGui.TextWrapped(error);
