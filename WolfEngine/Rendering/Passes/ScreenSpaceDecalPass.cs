@@ -34,18 +34,50 @@ public sealed class ScreenSpaceDecalPass
 		public Vector2 UV;
 		public Vector4 Tangent;
 	}
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public ScreenSpaceDecalPass(
 		IRenderer renderer,
 		IShaderProvider shaderCompiler,
-		BindlessResourceRegistry bindlessRegistry)
+		BindlessResourceRegistry bindlessRegistry,
+		GpuDrawResources gpuDrawResources)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_execute = Execute;
 	}
 
-	public ScreenSpaceDecalPassConfig BuildConfig(
+	/// <summary>Adds the ScreenSpaceDecal node, which projects decals from the seeded GBuffer onto the GBuffer.</summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("ScreenSpaceDecal", PassKind.Graphics)
+			.ReadTexture(resources.DecalSourceGBufferAlbedo, ResourceState.ShaderResource)
+			.ReadTexture(resources.DecalSourceGBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.DecalSourceGBufferMaterial, ResourceState.ShaderResource)
+			.ReadTexture(resources.DecalSourceGBufferEmissive, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.WriteTexture(resources.GBufferAlbedo, ResourceState.RenderTarget)
+			.WriteTexture(resources.GBufferNormal, ResourceState.RenderTarget)
+			.WriteTexture(resources.GBufferMaterial, ResourceState.RenderTarget)
+			.WriteTexture(resources.GBufferEmissive, ResourceState.RenderTarget)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var config = BuildConfig(
+			context,
+			context.ViewState.FrameResources,
+			context.Device,
+			_gpuDrawResources,
+			context.SceneData);
+		Record(context, in config, context.SceneData);
+	}
+
+	private ScreenSpaceDecalPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device,
@@ -92,7 +124,7 @@ public sealed class ScreenSpaceDecalPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in ScreenSpaceDecalPassConfig config, SceneDrawData sceneData)
+	private void Record(RenderGraphContext context, in ScreenSpaceDecalPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);

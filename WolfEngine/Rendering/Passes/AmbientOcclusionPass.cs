@@ -23,13 +23,70 @@ public sealed class AmbientOcclusionPass
 	private ShaderPropertyWriter? _rayTracedCameraWriter;
 	private ShaderPropertyWriter? _rayTracedSettingsWriter;
 	private uint _frameIndex;
-	public AmbientOcclusionPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	private readonly IRenderer _renderer;
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly RayTracingScene _rayTracingScene;
+	private readonly Action<RenderGraphContext> _execute;
+
+	internal AmbientOcclusionPass(
+		IShaderProvider shaderCompiler,
+		BindlessResourceRegistry bindlessRegistry,
+		IRenderer renderer,
+		GpuDrawResources gpuDrawResources,
+		RayTracingScene rayTracingScene)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_rayTracingScene = rayTracingScene ?? throw new ArgumentNullException(nameof(rayTracingScene));
+		_execute = Execute;
 	}
 
-	public AmbientOcclusionPassConfig BuildConfig(
+	/// <summary>
+	/// Adds the Ambient Occlusion Evaluate node, which writes raw occlusion and, when ray traced, the hit mask,
+	/// hit distance and albedo the debug views show.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		var builder = graph.AddPass("Ambient Occlusion Evaluate", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.WriteTexture(resources.AmbientOcclusionRaw, ResourceState.UnorderedAccess);
+		if (resources.RayTracingHitMask.IsValid)
+		{
+			builder.WriteTexture(resources.RayTracingHitMask, ResourceState.UnorderedAccess);
+		}
+
+		if (resources.RayTracingHitDistance.IsValid)
+		{
+			builder.WriteTexture(resources.RayTracingHitDistance, ResourceState.UnorderedAccess);
+		}
+
+		if (resources.RayTracingAlbedo.IsValid)
+		{
+			builder.WriteTexture(resources.RayTracingAlbedo, ResourceState.UnorderedAccess);
+		}
+
+		builder.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var resources = context.ViewState.FrameResources;
+		var config = BuildConfig(
+			context,
+			resources,
+			context.Device,
+			_renderer,
+			_gpuDrawResources,
+			resources.Config.AmbientOcclusion.Mode == AmbientOcclusionMode.RayTraced
+				? _rayTracingScene.Resources
+				: null);
+		Record(context, in config, context.SceneData);
+	}
+
+	private AmbientOcclusionPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device,
@@ -103,7 +160,7 @@ public sealed class AmbientOcclusionPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in AmbientOcclusionPassConfig config, SceneDrawData sceneData)
+	private void Record(RenderGraphContext context, in AmbientOcclusionPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);

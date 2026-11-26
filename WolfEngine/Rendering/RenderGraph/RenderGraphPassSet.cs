@@ -23,37 +23,37 @@ internal sealed class RenderGraphPassSet
 		ArgumentNullException.ThrowIfNull(drawRecordEncoder);
 		ArgumentNullException.ThrowIfNull(gpuDrawDiagnosticsSampler);
 
+		RayTracingScene = new RayTracingScene(shaderCompiler);
 		var batches = new GpuDrawBatches(renderer.EnsureMeshResources);
 		var stalenessInputs = new GpuDrawStalenessInputSource(gpuDrawResources, renderer);
 		var drawRecords = new IndirectDrawRecords(drawRecordEncoder, batches, stalenessInputs);
 
-		AmbientOcclusionPass = new(shaderCompiler, bindlessResourceRegistry);
+		// Built first: lighting, fog and the final gather read its shadow data when their nodes execute.
+		ShadowMapPass = new(shaderCompiler, drawRecords, gpuDrawResources);
+		AmbientOcclusionPass = new(shaderCompiler, bindlessResourceRegistry, renderer, gpuDrawResources, RayTracingScene);
 		AmbientOcclusionBlurPass = new(shaderCompiler, bindlessResourceRegistry);
 		AmbientOcclusionUpsamplePass = new(shaderCompiler, bindlessResourceRegistry);
-		DdgiPass = new(shaderCompiler, bindlessResourceRegistry);
-		ClusteredLightingPass = new(shaderCompiler);
+		DdgiPass = new(shaderCompiler, bindlessResourceRegistry, renderer, gpuDrawResources, RayTracingScene);
+		ClusteredLightingPass = new(shaderCompiler, gpuDrawResources);
 		GBufferDecalSeedPass = new(shaderCompiler, bindlessResourceRegistry);
-		ScreenSpaceDecalPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
+		ScreenSpaceDecalPass = new(renderer, shaderCompiler, bindlessResourceRegistry, gpuDrawResources);
 		SelectionOutlinePass = new(shaderCompiler, bindlessResourceRegistry);
-		DeferredLightingPass = new(shaderCompiler, bindlessResourceRegistry);
-		VolumetricFogPass = new(shaderCompiler, bindlessResourceRegistry);
+		DeferredLightingPass = new(shaderCompiler, bindlessResourceRegistry, gpuDrawResources, ShadowMapPass);
+		VolumetricFogPass = new(shaderCompiler, bindlessResourceRegistry, gpuDrawResources, ShadowMapPass);
 		CloudPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
-		ReflectionsPass = new(shaderCompiler, bindlessResourceRegistry);
+		ReflectionsPass = new(shaderCompiler, bindlessResourceRegistry, renderer, gpuDrawResources, RayTracingScene);
 		ReflectionsUpsamplePass = new(shaderCompiler, bindlessResourceRegistry);
-		DdgiFinalGatherPass = new(shaderCompiler, bindlessResourceRegistry);
+		DdgiFinalGatherPass = new(
+			shaderCompiler,
+			bindlessResourceRegistry,
+			renderer,
+			gpuDrawResources,
+			RayTracingScene,
+			ShadowMapPass);
 		DdgiFinalGatherSvgfPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalAntiAliasingPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalHistoryStorePass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3ClearPass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3PrepareInputsPass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3LumaPyramidPass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3ShadingChangePyramidPass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3ShadingChangePass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3PrepareReactivityPass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3LumaInstabilityPass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3AccumulatePass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3RcasPass = new(shaderCompiler, bindlessResourceRegistry);
-		Fsr3DebugViewPass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3Pass = new(shaderCompiler, bindlessResourceRegistry);
 		TransparentForwardPass = new(shaderCompiler, bindlessResourceRegistry, drawRecords, gpuDrawResources);
 		BloomPass = new(shaderCompiler, bindlessResourceRegistry);
 		ColorPyramidPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -61,7 +61,6 @@ internal sealed class RenderGraphPassSet
 		CasSharpenPass = new(shaderCompiler, bindlessResourceRegistry);
 		CopyToFinalPass = new(shaderCompiler, bindlessResourceRegistry);
 		MotionVectorDebugPass = new(shaderCompiler, bindlessResourceRegistry);
-		ShadowMapPass = new(shaderCompiler, drawRecords, gpuDrawResources);
 		GpuDrawPass = new(
 			shaderCompiler,
 			bindlessResourceRegistry,
@@ -78,6 +77,9 @@ internal sealed class RenderGraphPassSet
 	}
 
 	public BindlessResourceRegistry BindlessResourceRegistry { get; }
+
+	/// <summary>The scene's acceleration structures, which the ray-traced passes read when their nodes execute.</summary>
+	public RayTracingScene RayTracingScene { get; }
 
 	public AmbientOcclusionPass AmbientOcclusionPass { get; }
 	public AmbientOcclusionBlurPass AmbientOcclusionBlurPass { get; }
@@ -97,16 +99,7 @@ internal sealed class RenderGraphPassSet
 	public DdgiFinalGatherSvgfPass DdgiFinalGatherSvgfPass { get; }
 	public TemporalAntiAliasingPass TemporalAntiAliasingPass { get; }
 	public TemporalHistoryStorePass TemporalHistoryStorePass { get; }
-	public Fsr3ClearPass Fsr3ClearPass { get; }
-	public Fsr3PrepareInputsPass Fsr3PrepareInputsPass { get; }
-	public Fsr3LumaPyramidPass Fsr3LumaPyramidPass { get; }
-	public Fsr3ShadingChangePyramidPass Fsr3ShadingChangePyramidPass { get; }
-	public Fsr3ShadingChangePass Fsr3ShadingChangePass { get; }
-	public Fsr3PrepareReactivityPass Fsr3PrepareReactivityPass { get; }
-	public Fsr3LumaInstabilityPass Fsr3LumaInstabilityPass { get; }
-	public Fsr3AccumulatePass Fsr3AccumulatePass { get; }
-	public Fsr3RcasPass Fsr3RcasPass { get; }
-	public Fsr3DebugViewPass Fsr3DebugViewPass { get; }
+	public Fsr3Pass Fsr3Pass { get; }
 	public TransparentForwardPass TransparentForwardPass { get; }
 	public BloomPass BloomPass { get; }
 	public ColorPyramidPass ColorPyramidPass { get; }
@@ -125,5 +118,8 @@ internal sealed class RenderGraphPassSet
 		{
 			if (property.GetValue(this) is { } pass) ShaderPipelineInvalidation.Invalidate(pass);
 		}
+
+		// Invalidation only clears a pass's own pipeline fields, and FSR3's kernels are its own.
+		Fsr3Pass.InvalidateShaderPipelines();
 	}
 }

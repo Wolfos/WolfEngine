@@ -14,17 +14,71 @@ public sealed class AmbientOcclusionBlurPass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
+	private readonly Action<RenderGraphContext> _horizontalExecute;
+	private readonly Action<RenderGraphContext> _verticalExecute;
 
 	public AmbientOcclusionBlurPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_horizontalExecute = context => Execute(context, blurHorizontally: true);
+		_verticalExecute = context => Execute(context, blurHorizontally: false);
 	}
 
-	public AmbientOcclusionBlurPassConfig BuildConfig(
+	/// <summary>The view's intermediate between the two blur directions; only this pass reads or writes it.</summary>
+	private sealed class ViewHandles
+	{
+		public RenderGraphResourceHandle Temporary;
+	}
+
+	/// <summary>
+	/// Adds the separable blur's two nodes, through an intermediate of the raw occlusion's size. At half
+	/// resolution the vertical blur writes back into the raw target for the upsample to read; at full resolution
+	/// it writes the final occlusion directly.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, RenderViewState view)
+	{
+		var resources = view.FrameResources;
+		// The intermediate has the raw occlusion's shape: the same size, format and clear value.
+		var temporary = graph.Resources.CreateTransientTexture(
+			graph.Resources.GetTextureDescriptor(resources.AmbientOcclusionRaw));
+		view.GetPassState<ViewHandles>().Temporary = temporary;
+
+		graph.AddPass("Ambient Occlusion Blur X", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.AmbientOcclusionRaw, ResourceState.ShaderResource)
+			.WriteTexture(temporary, ResourceState.UnorderedAccess)
+			.SetExecute(_horizontalExecute);
+
+		var output = resources.Config.AmbientOcclusion.Resolution == AmbientOcclusionResolution.Half
+			? resources.AmbientOcclusionRaw
+			: resources.AmbientOcclusionFinal;
+		graph.AddPass("Ambient Occlusion Blur Y", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(temporary, ResourceState.ShaderResource)
+			.WriteTexture(output, ResourceState.UnorderedAccess)
+			.SetExecute(_verticalExecute);
+	}
+
+	private void Execute(RenderGraphContext context, bool blurHorizontally)
+	{
+		var view = context.ViewState;
+		var config = BuildConfig(
+			context,
+			view.FrameResources,
+			context.Device,
+			view.GetPassState<ViewHandles>().Temporary,
+			blurHorizontally);
+		Record(context, in config, context.SceneData);
+	}
+
+	private AmbientOcclusionBlurPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device,
+		RenderGraphResourceHandle temporary,
 		bool blurHorizontally)
 	{
 		ArgumentNullException.ThrowIfNull(context);
@@ -35,9 +89,9 @@ public sealed class AmbientOcclusionBlurPass
 
 		var depth = context.GetTexture(resources.GBufferDepth);
 		var normal = context.GetTexture(resources.GBufferNormal);
-		var source = context.GetTexture(blurHorizontally ? resources.AmbientOcclusionRaw : resources.AmbientOcclusionTemp);
+		var source = context.GetTexture(blurHorizontally ? resources.AmbientOcclusionRaw : temporary);
 		var destinationHandle = blurHorizontally
-			? resources.AmbientOcclusionTemp
+			? temporary
 			: resources.Config.AmbientOcclusion.Resolution == AmbientOcclusionResolution.Half
 				? resources.AmbientOcclusionRaw
 				: resources.AmbientOcclusionFinal;
@@ -61,7 +115,7 @@ public sealed class AmbientOcclusionBlurPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in AmbientOcclusionBlurPassConfig config, SceneDrawData sceneData)
+	private void Record(RenderGraphContext context, in AmbientOcclusionBlurPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

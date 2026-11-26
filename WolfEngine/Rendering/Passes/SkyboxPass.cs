@@ -68,6 +68,10 @@ public sealed class SkyboxPass
 	private IGfxTexture? _brdfLut;
 	private bool _brdfLutValid;
 	private bool _hasGeneratedBrdfLut;
+	private readonly Action<RenderGraphContext> _environmentExecute;
+	private readonly Action<RenderGraphContext> _irradianceExecute;
+	private readonly Action<RenderGraphContext> _prefilterExecute;
+	private readonly Action<RenderGraphContext> _brdfLutExecute;
 
 	public SkyboxPass(IRenderer renderer, IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -75,6 +79,57 @@ public sealed class SkyboxPass
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		Atmosphere = new AtmospherePass(renderer, shaderCompiler, bindlessRegistry);
+		_environmentExecute = context => RecordEnvironment(context, context.ViewState.Sky);
+		_irradianceExecute = context => RecordIrradiance(context, context.ViewState.Sky, context.ViewState.FrameResources.SkyEnvironment);
+		_prefilterExecute = context => RecordPrefilter(context, context.ViewState.Sky, context.ViewState.FrameResources.SkyEnvironment);
+		_brdfLutExecute = RecordBrdfLut;
+	}
+
+	/// <summary>Adds the Skybox BRDF LUT node, shared by every view because the LUT depends on nothing about the sky.</summary>
+	internal void AddBrdfLutNodes(RenderGraph graph, in RenderFrameSharedResources sharedResources)
+	{
+		graph.AddPass("Skybox BRDF LUT", PassKind.Compute)
+			.WriteTexture(sharedResources.SkyboxBrdfLut, ResourceState.UnorderedAccess)
+			.SetExecute(_brdfLutExecute);
+	}
+
+	/// <summary>Adds the Skybox Environment node, which draws the view's sky into its environment texture.</summary>
+	internal void AddEnvironmentNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		var builder = graph.AddPass("Skybox Environment", PassKind.Compute);
+		if (resources.Atmosphere.SkyView.IsValid)
+		{
+			builder.ReadTexture(resources.Atmosphere.SkyView, ResourceState.ShaderResource);
+		}
+
+		builder
+			.WriteTexture(resources.SkyEnvironment.ViewEnvironment, ResourceState.UnorderedAccess)
+			.SetExecute(_environmentExecute);
+	}
+
+	/// <summary>Adds the image-based lighting built from the view's environment: irradiance and the prefiltered radiance.</summary>
+	internal void AddImageLightingNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		var environment = resources.SkyEnvironment.ViewEnvironment;
+		var irradianceBuilder = graph.AddPass("Skybox Irradiance", PassKind.Compute);
+		if (environment.IsValid)
+		{
+			irradianceBuilder.ReadTexture(environment, ResourceState.ShaderResource);
+		}
+
+		irradianceBuilder
+			.WriteTexture(resources.SkyboxIrradiance, ResourceState.UnorderedAccess)
+			.SetExecute(_irradianceExecute);
+
+		var prefilterBuilder = graph.AddPass("Skybox Prefilter", PassKind.Compute);
+		if (environment.IsValid)
+		{
+			prefilterBuilder.ReadTexture(environment, ResourceState.ShaderResource);
+		}
+
+		prefilterBuilder
+			.WriteTexture(resources.SkyboxPrefilter, ResourceState.UnorderedAccess)
+			.SetExecute(_prefilterExecute);
 	}
 
 	/// <summary>The Procedural sky's atmosphere LUTs and environment.</summary>

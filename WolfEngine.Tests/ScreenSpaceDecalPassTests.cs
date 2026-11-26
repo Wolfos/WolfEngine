@@ -175,7 +175,8 @@ public sealed class ScreenSpaceDecalPassTests
 	}
 
 	internal static (RenderGraph Graph, RenderGraphFrameBuilder FrameBuilder) CreateSchedulingFixture(
-		RenderGraphResourceRegistry registry)
+		RenderGraphResourceRegistry registry,
+		bool supportsRayTracing = false)
 	{
 		var texture = new Mock<IGfxTexture>();
 		texture.SetupGet(value => value.Descriptor).Returns(new TextureDescriptor(
@@ -185,8 +186,16 @@ public sealed class ScreenSpaceDecalPassTests
 			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
 		var device = new Mock<IGfxDevice>();
 		device.Setup(value => value.CreateTexture(in It.Ref<TextureDescriptor>.IsAny)).Returns(texture.Object);
+		device.SetupGet(value => value.SupportsRayTracing).Returns(supportsRayTracing);
+		var buffer = new Mock<IGfxBuffer>();
+		device.Setup(value => value.CreateBuffer(in It.Ref<BufferDescriptor>.IsAny)).Returns(buffer.Object);
 		var renderer = new Mock<IRenderer>();
 		renderer.Setup(value => value.GetGfxDevice()).Returns(device.Object);
+		if (supportsRayTracing)
+		{
+			renderer.Setup(value => value.GetPackedMeshIndexBuffer()).Returns(buffer.Object);
+		}
+
 		var shaderProvider = new Mock<IShaderProvider>();
 		var drawRecordEncoder = new Mock<IDrawRecordEncoder>();
 		var gpuDrawDiagnosticsSampler = new Mock<IGpuDrawDiagnosticsSampler>();

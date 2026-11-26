@@ -29,7 +29,38 @@ public sealed class ColorPyramidPass
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
-	public ColorPyramidPassConfig BuildConfig(
+	/// <summary>
+	/// Adds a node per pyramid level: level 0 copies the finished HDR scene colour, and each later level
+	/// downsamples the one before. Next frame's reflections sample the result as shaded, pre-filtered radiance.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		var levels = resources.ColorPyramidLevels ?? [];
+		for (var level = 0; level < levels.Length; level++)
+		{
+			var stage = level == 0 ? Stage.Copy : Stage.Downsample;
+			var source = level == 0
+				? resources.LightingBuffer
+				: levels[level - 1];
+			var output = levels[level];
+			graph.AddPass($"Color Pyramid {level}", PassKind.Compute)
+				.ReadTexture(source, ResourceState.ShaderResource)
+				.WriteTexture(output, ResourceState.UnorderedAccess)
+				.SetExecute(context => Execute(context, stage, source, output));
+		}
+	}
+
+	private void Execute(
+		RenderGraphContext context,
+		Stage stage,
+		RenderGraphResourceHandle source,
+		RenderGraphResourceHandle output)
+	{
+		var config = BuildConfig(context, context.Device, stage, source, output);
+		Record(context, stage, in config);
+	}
+
+	private ColorPyramidPassConfig BuildConfig(
 		RenderGraphContext context,
 		IGfxDevice device,
 		Stage stage,
@@ -60,7 +91,7 @@ public sealed class ColorPyramidPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, Stage stage, in ColorPyramidPassConfig config)
+	private void Record(RenderGraphContext context, Stage stage, in ColorPyramidPassConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

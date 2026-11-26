@@ -1,0 +1,59 @@
+Skybox BRDF LUT [Compute] view=shared
+  write R0 (imported texture 1x1 Rgba16Float) UnorderedAccess
+GpuDraw Update [Compute] view=shared
+Skybox Environment [Compute] view=0
+  write R1 (imported texture 1x1 Rgba16Float) UnorderedAccess
+Skybox Irradiance [Compute] view=0
+  read  R1 (imported texture 1x1 Rgba16Float) ShaderResource
+  write R2 (imported texture 1x1 Rgba16Float) UnorderedAccess
+Skybox Prefilter [Compute] view=0
+  read  R1 (imported texture 1x1 Rgba16Float) ShaderResource
+  write R3 (imported texture 1x1 Rgba16Float) UnorderedAccess
+GpuDraw View Update [Compute] view=0
+GpuDraw Cull (Camera View) [Compute] view=0
+GBuffer [Graphics] view=0
+  write R4 (transient texture 64x32 Bgra8Unorm) RenderTarget
+  write R5 (transient texture 64x32 Rgba16Float) RenderTarget
+  write R6 (transient texture 64x32 Rgba8Unorm) RenderTarget
+  write R7 (transient texture 64x32 Rgba16Float) RenderTarget
+  write R8 (transient texture 64x32 Rgba16Float) RenderTarget
+  write R9 (transient texture 64x32 D32Float) DepthWrite
+Clustered Lighting Build [Compute] view=0
+Clustered Lighting Write [Compute] view=0
+Deferred Lighting [Compute] view=0
+  read  R4 (transient texture 64x32 Bgra8Unorm) ShaderResource
+  read  R5 (transient texture 64x32 Rgba16Float) ShaderResource
+  read  R6 (transient texture 64x32 Rgba8Unorm) ShaderResource
+  read  R7 (transient texture 64x32 Rgba16Float) ShaderResource
+  read  R9 (transient texture 64x32 D32Float) ShaderResource
+  read  R10 (transient texture 1x1 D32Float) ShaderResource
+  read  R10 (transient texture 1x1 D32Float) ShaderResource
+  read  R10 (transient texture 1x1 D32Float) ShaderResource
+  read  R1 (imported texture 1x1 Rgba16Float) ShaderResource
+  read  R2 (imported texture 1x1 Rgba16Float) ShaderResource
+  read  R3 (imported texture 1x1 Rgba16Float) ShaderResource
+  read  R0 (imported texture 1x1 Rgba16Float) ShaderResource
+  write R11 (transient texture 64x32 Rgba16Float) UnorderedAccess
+Transparent Forward [Graphics] view=0
+  read  R9 (transient texture 64x32 D32Float) DepthWrite
+  read  R10 (transient texture 1x1 D32Float) ShaderResource
+  read  R10 (transient texture 1x1 D32Float) ShaderResource
+  read  R10 (transient texture 1x1 D32Float) ShaderResource
+  write R11 (transient texture 64x32 Rgba16Float) RenderTarget
+  write R12 (transient texture 64x32 Rgba8Unorm) RenderTarget
+  read  R1 (imported texture 1x1 Rgba16Float) ShaderResource
+  read  R2 (imported texture 1x1 Rgba16Float) ShaderResource
+  read  R3 (imported texture 1x1 Rgba16Float) ShaderResource
+  read  R0 (imported texture 1x1 Rgba16Float) ShaderResource
+Tonemapping [Compute] view=0
+  read  R11 (transient texture 64x32 Rgba16Float) ShaderResource
+  write R13 (transient texture 64x32 Rgba16Float) UnorderedAccess
+Copy To Final [Compute] view=0
+  read  R13 (transient texture 64x32 Rgba16Float) ShaderResource
+  write R14 (imported texture 1x1 Rgba16Float) UnorderedAccess
+Selection Outline [Graphics] view=0
+  read  R9 (transient texture 64x32 D32Float) ShaderResource
+  write R14 (imported texture 1x1 Rgba16Float) RenderTarget
+UI Handoff [Graphics] view=shared
+  write R15 (imported texture 1x1 Rgba16Float) RenderTarget
+  read  R14 (imported texture 1x1 Rgba16Float) ShaderResource

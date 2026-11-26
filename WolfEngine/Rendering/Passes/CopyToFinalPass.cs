@@ -13,14 +13,50 @@ public sealed class CopyToFinalPass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public CopyToFinalPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_execute = Execute;
 	}
 
-	public CopyToFinalPassConfig BuildConfig(
+	/// <summary>
+	/// Adds the Copy To Final node: display colour into the view's encoded scene colour and, for a view presented
+	/// straight to the window, into the shared final colour as well.
+	/// </summary>
+	internal void AddNodes(
+		RenderGraph graph,
+		in RenderViewResources resources,
+		in RenderFrameSharedResources sharedResources,
+		RenderViewOutput output)
+	{
+		var builder = graph.AddPass("Copy To Final", PassKind.Compute)
+			.ReadTexture(resources.DisplayLinearSceneColor, ResourceState.ShaderResource)
+			.WriteTexture(resources.EncodedSceneColor, ResourceState.UnorderedAccess);
+		// Only a backbuffer view copies directly into the window. Editor views are
+		// displayed by ImGui from their independently sized encoded scene texture.
+		if (output == RenderViewOutput.Backbuffer)
+		{
+			builder.WriteTexture(sharedResources.FinalColor, ResourceState.UnorderedAccess);
+		}
+
+		builder.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var config = BuildConfig(
+			context,
+			context.ViewState.FrameResources,
+			context.SharedResources,
+			context.Device,
+			context.ViewState.Output == RenderViewOutput.Backbuffer);
+		Record(context, in config);
+	}
+
+	private CopyToFinalPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		RenderFrameSharedResources sharedResources,
@@ -50,7 +86,7 @@ public sealed class CopyToFinalPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in CopyToFinalPassConfig config)
+	private void Record(RenderGraphContext context, in CopyToFinalPassConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

@@ -150,7 +150,7 @@ public sealed class TemporalAntiAliasingTests
 		int expectedWidth,
 		int expectedHeight)
 	{
-		var size = RenderGraphFrameBuilder.GetFsr3ShadingChangeSize(
+		var size = Fsr3Pass.GetShadingChangeSize(
 			new Int2(renderWidth, renderHeight));
 
 		Assert.That(size, Is.EqualTo(new Int2(expectedWidth, expectedHeight)));

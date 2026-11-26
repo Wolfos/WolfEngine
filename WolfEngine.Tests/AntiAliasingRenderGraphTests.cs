@@ -86,10 +86,10 @@ public sealed class AntiAliasingRenderGraphTests
 		{
 			Assert.That(history.Shape, Is.EqualTo(new Fsr3HistoryShape(renderSize, displaySize)));
 			Assert.That(Size(registry, resources.ResolvedSceneColor), Is.EqualTo(displaySize));
-			Assert.That(Size(registry, resources.Fsr3.NewLocks), Is.EqualTo(displaySize));
-			Assert.That(Size(registry, resources.Fsr3.DilatedMotionVectors), Is.EqualTo(renderSize));
-			Assert.That(Size(registry, resources.Fsr3.DilatedReactiveMasks), Is.EqualTo(renderSize));
-			Assert.That(Size(registry, resources.Fsr3.LumaInstability), Is.EqualTo(renderSize));
+			Assert.That(Size(registry, Written(graph, "FSR3 Clear New Locks", 0)), Is.EqualTo(displaySize));
+			Assert.That(Size(registry, Written(graph, "FSR3 Prepare Inputs", 0)), Is.EqualTo(renderSize));
+			Assert.That(Size(registry, Written(graph, "FSR3 Prepare Reactivity", 1)), Is.EqualTo(renderSize));
+			Assert.That(Size(registry, Written(graph, "FSR3 Luma Instability", 1)), Is.EqualTo(renderSize));
 			Assert.That(Size(registry, resources.LightingBuffer), Is.EqualTo(renderSize));
 			Assert.That(Size(registry, resources.TonemappedLinearSceneColor), Is.EqualTo(displaySize));
 		});
@@ -302,6 +302,12 @@ public sealed class AntiAliasingRenderGraphTests
 			Vector3.One,
 			config,
 			Vector3.Zero);
+	}
+
+	/// <summary>The resource a node declares as its write at <paramref name="index"/>, in declaration order.</summary>
+	private static RenderGraphResourceHandle Written(RenderGraph graph, string nodeName, int index)
+	{
+		return graph.Passes.Single(pass => pass.Name == nodeName).Writes[index];
 	}
 
 	private static Int2 Size(RenderGraphResourceRegistry registry, RenderGraphResourceHandle handle)

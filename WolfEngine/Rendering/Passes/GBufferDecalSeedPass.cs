@@ -13,14 +13,40 @@ public sealed class GBufferDecalSeedPass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public GBufferDecalSeedPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_execute = Execute;
 	}
 
-	public GBufferDecalSeedPassConfig BuildConfig(
+	/// <summary>
+	/// Adds the GBuffer Decal Seed node, which copies the GBuffer the scene was drawn into over the targets decals
+	/// are projected onto.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("GBuffer Decal Seed", PassKind.Compute)
+			.ReadTexture(resources.DecalSourceGBufferAlbedo, ResourceState.ShaderResource)
+			.ReadTexture(resources.DecalSourceGBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.DecalSourceGBufferMaterial, ResourceState.ShaderResource)
+			.ReadTexture(resources.DecalSourceGBufferEmissive, ResourceState.ShaderResource)
+			.WriteTexture(resources.GBufferAlbedo, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.GBufferNormal, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.GBufferMaterial, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.GBufferEmissive, ResourceState.UnorderedAccess)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var config = BuildConfig(context, context.ViewState.FrameResources, context.Device);
+		Record(context, in config);
+	}
+
+	private GBufferDecalSeedPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device)
@@ -54,7 +80,7 @@ public sealed class GBufferDecalSeedPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in GBufferDecalSeedPassConfig config)
+	private void Record(RenderGraphContext context, in GBufferDecalSeedPassConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

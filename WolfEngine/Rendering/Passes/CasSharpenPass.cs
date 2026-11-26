@@ -13,14 +13,31 @@ public sealed class CasSharpenPass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public CasSharpenPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_execute = Execute;
 	}
 
-	public CasSharpenPassConfig BuildConfig(
+	/// <summary>Adds the CAS Sharpen node: tonemapped scene colour in, sharpened display colour out.</summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("CAS Sharpen", PassKind.Compute)
+			.ReadTexture(resources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
+			.WriteTexture(resources.DisplayLinearSceneColor, ResourceState.UnorderedAccess)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var config = BuildConfig(context, context.ViewState.FrameResources, context.Device);
+		Record(context, in config);
+	}
+
+	private CasSharpenPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device)
@@ -44,7 +61,7 @@ public sealed class CasSharpenPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in CasSharpenPassConfig config)
+	private void Record(RenderGraphContext context, in CasSharpenPassConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

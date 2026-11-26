@@ -101,6 +101,12 @@ public sealed class RenderGraphPass
 		_resourceUsages.Add(new ResourceUsage(handle, ResourceAccessMode.Write, state));
 	}
 
+	/// <summary>Whether this node declared <paramref name="handle"/> as a read or a write.</summary>
+	internal bool Declares(RenderGraphResourceHandle handle)
+	{
+		return _reads.Contains(handle) || _writes.Contains(handle);
+	}
+
 	internal void AddBarrier(ResourceBarrierDescription barrier)
 	{
 		_barriers.Add(barrier);

@@ -32,14 +32,70 @@ public sealed class ReflectionsPass
 	private ShaderPropertyWriter? _rayTracedCameraWriter;
 	private ShaderPropertyWriter? _rayTracedSettingsWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
+	private readonly IRenderer _renderer;
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly RayTracingScene _rayTracingScene;
+	private readonly Action<RenderGraphContext> _execute;
 
-	public ReflectionsPass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	internal ReflectionsPass(
+		IShaderProvider shaderProvider,
+		BindlessResourceRegistry bindlessRegistry,
+		IRenderer renderer,
+		GpuDrawResources gpuDrawResources,
+		RayTracingScene rayTracingScene)
 	{
 		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_rayTracingScene = rayTracingScene ?? throw new ArgumentNullException(nameof(rayTracingScene));
+		_execute = Execute;
 	}
 
-	public ReflectionsPassConfig BuildConfig(
+	/// <summary>
+	/// Adds the reflection trace. It runs before deferred lighting so its radiance can feed the specular term
+	/// directly, which is why shaded hit colour comes from the previous frame's colour pyramid.
+	/// </summary>
+	internal void AddNodes(
+		RenderGraph graph,
+		in RenderViewResources resources,
+		in RenderFrameSharedResources sharedResources)
+	{
+		var reflectionsBuilder = graph.AddPass(
+				resources.Config.Reflections.Mode == ReflectionMode.RayTraced
+					? "Reflections (Ray Traced)"
+					: "Reflections (Screen Space)",
+				PassKind.Compute)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferMaterial, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferEmissive, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferVelocity, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.WriteTexture(resources.ReflectionsTrace, ResourceState.UnorderedAccess);
+		foreach (var colorPyramidLevel in resources.ColorPyramidLevels)
+		{
+			reflectionsBuilder.ReadTexture(colorPyramidLevel, ResourceState.ShaderResource);
+		}
+		reflectionsBuilder.ReadSkyLighting(resources, sharedResources);
+		reflectionsBuilder.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var resources = context.ViewState.FrameResources;
+		var isRayTraced = resources.Config.Reflections.Mode == ReflectionMode.RayTraced;
+		var config = BuildConfig(
+			context,
+			resources,
+			context.SharedResources,
+			context.Device,
+			_renderer,
+			_gpuDrawResources,
+			isRayTraced ? _rayTracingScene.Resources : null);
+		Record(context, in config, context.SceneData);
+	}
+
+	private ReflectionsPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		RenderFrameSharedResources sharedResources,
@@ -143,7 +199,7 @@ public sealed class ReflectionsPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in ReflectionsPassConfig config, SceneDrawData sceneData)
+	private void Record(RenderGraphContext context, in ReflectionsPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);

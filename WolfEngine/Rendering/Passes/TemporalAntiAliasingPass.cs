@@ -15,14 +15,43 @@ public sealed class TemporalAntiAliasingPass
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public TemporalAntiAliasingPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_execute = Execute;
 	}
 
-	public TemporalAntiAliasingPassConfig BuildConfig(
+	/// <summary>Adds the TAA Resolve node: this frame's lighting, reprojected against last frame's history.</summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("TAA Resolve", PassKind.Compute)
+			.ReadTexture(resources.LightingBuffer, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferVelocity, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferMaterial, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.HistoryColorRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.HistoryDepthRead, ResourceState.ShaderResource)
+			.WriteTexture(resources.ResolvedSceneColor, ResourceState.UnorderedAccess)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var view = context.ViewState;
+		var config = BuildConfig(
+			context,
+			view.FrameResources,
+			context.Device,
+			view.TemporalHistory.IsValid,
+			view.ResetTaaHistoryThisFrame || context.SceneData.ResetHistory);
+		Record(context, in config);
+	}
+
+	private TemporalAntiAliasingPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device,
@@ -82,7 +111,7 @@ public sealed class TemporalAntiAliasingPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in TemporalAntiAliasingPassConfig config)
+	private void Record(RenderGraphContext context, in TemporalAntiAliasingPassConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

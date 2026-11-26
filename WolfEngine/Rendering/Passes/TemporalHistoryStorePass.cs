@@ -13,14 +13,33 @@ public sealed class TemporalHistoryStorePass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public TemporalHistoryStorePass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_execute = Execute;
 	}
 
-	public TemporalHistoryStorePassConfig BuildConfig(
+	/// <summary>Adds the TAA History Store node, which keeps the resolved colour and depth for next frame.</summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("TAA History Store", PassKind.Compute)
+			.ReadTexture(resources.ResolvedSceneColor, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.WriteTexture(resources.HistoryColorWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.HistoryDepthWrite, ResourceState.UnorderedAccess)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var config = BuildConfig(context, context.ViewState.FrameResources, context.Device);
+		Record(context, in config);
+	}
+
+	private TemporalHistoryStorePassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device)
@@ -49,7 +68,7 @@ public sealed class TemporalHistoryStorePass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in TemporalHistoryStorePassConfig config)
+	private void Record(RenderGraphContext context, in TemporalHistoryStorePassConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

@@ -18,14 +18,62 @@ public sealed class ReflectionsUpsamplePass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
+	private readonly Action<RenderGraphContext> _reflectionExecute;
+	private readonly Action<RenderGraphContext> _finalGatherExecute;
 
 	public ReflectionsUpsamplePass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_reflectionExecute = ExecuteReflection;
+		_finalGatherExecute = ExecuteFinalGather;
 	}
 
-	public ReflectionsUpsamplePassConfig BuildConfig(
+	/// <summary>Adds the Reflections Upsample node: the reduced-resolution trace to full-resolution radiance.</summary>
+	internal void AddReflectionNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("Reflections Upsample", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.ReflectionsTrace, ResourceState.ShaderResource)
+			.WriteTexture(resources.ReflectionsRadiance, ResourceState.UnorderedAccess)
+			.SetExecute(_reflectionExecute);
+	}
+
+	/// <summary>
+	/// Adds the DDGI Final Gather Upsample node. The reflection upsample's depth- and normal-aware reconstruction
+	/// suits any one-sample-per-trace-pixel signal, so the final gather shares its pipeline; only the handles differ.
+	/// </summary>
+	internal void AddFinalGatherNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("DDGI Final Gather Upsample", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiFinalGatherDenoised, ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiFinalGatherIrradiance, ResourceState.UnorderedAccess)
+			.SetExecute(_finalGatherExecute);
+	}
+
+	private void ExecuteReflection(RenderGraphContext context)
+	{
+		var config = BuildConfig(context, context.ViewState.FrameResources, context.Device);
+		Record(context, in config, context.SceneData);
+	}
+
+	private void ExecuteFinalGather(RenderGraphContext context)
+	{
+		var resources = context.ViewState.FrameResources;
+		var config = BuildConfig(
+			context,
+			resources,
+			context.Device,
+			resources.DdgiFinalGatherDenoised,
+			resources.DdgiFinalGatherIrradiance,
+			resources.Config.DiffuseGlobalIllumination.FinalGather.UpsampleSharpness);
+		Record(context, in config, context.SceneData);
+	}
+
+	private ReflectionsUpsamplePassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device)
@@ -44,7 +92,7 @@ public sealed class ReflectionsUpsamplePass
 	/// pixel, taken at the full-resolution pixel nearest that trace pixel's center. The DDGI final gather reuses
 	/// it this way.
 	/// </summary>
-	public ReflectionsUpsamplePassConfig BuildConfig(
+	private ReflectionsUpsamplePassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device,
@@ -72,7 +120,7 @@ public sealed class ReflectionsUpsamplePass
 		};
 	}
 
-	public void Record(
+	private void Record(
 		RenderGraphContext context,
 		in ReflectionsUpsamplePassConfig config,
 		SceneDrawData sceneData)

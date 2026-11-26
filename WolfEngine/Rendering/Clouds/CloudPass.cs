@@ -39,12 +39,100 @@ internal sealed class CloudPass
 	private IGfxTexture? _detail;
 	private IGfxDevice? _noiseDevice;
 	private bool _noiseGenerated;
+	private readonly Action<RenderGraphContext> _noiseExecute;
+	private readonly Action<RenderGraphContext> _shadowMapExecute;
+	private readonly Action<RenderGraphContext> _marchExecute;
+	private readonly Action<RenderGraphContext> _temporalExecute;
+	private readonly Action<RenderGraphContext> _environmentMarchExecute;
+	private readonly Action<RenderGraphContext> _environmentCompositeExecute;
 
 	public CloudPass(IRenderer renderer, IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_noiseExecute = RecordNoise;
+		_shadowMapExecute = context => RecordShadowMap(context, context.ViewState.FrameResources);
+		_marchExecute = context => RecordMarch(context, context.ViewState.FrameResources);
+		_temporalExecute = context => RecordTemporal(context, context.ViewState.FrameResources);
+		_environmentMarchExecute = context => RecordEnvironmentMarch(context, context.ViewState.FrameResources);
+		_environmentCompositeExecute = context => RecordEnvironmentComposite(context, context.ViewState.FrameResources);
+	}
+
+	/// <summary>Adds the Cloud Noise node, which generates the noise every view's clouds share.</summary>
+	internal void AddNoiseNodes(RenderGraph graph, in CloudViewResources clouds)
+	{
+		graph.AddPass("Cloud Noise", PassKind.Compute)
+			.WriteTexture(clouds.Weather, ResourceState.UnorderedAccess)
+			.WriteTexture(clouds.Shape, ResourceState.UnorderedAccess)
+			.WriteTexture(clouds.Detail, ResourceState.UnorderedAccess)
+			.SetExecute(_noiseExecute);
+	}
+
+	/// <summary>Adds the nodes that draw the clouds into the view's sky environment, before image-based lighting is built from it.</summary>
+	internal void AddEnvironmentNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		var clouds = resources.Clouds;
+		var marchBuilder = graph.AddPass("Cloud Environment", PassKind.Compute);
+		ReadInputs(marchBuilder, resources);
+		marchBuilder
+			.WriteTexture(clouds.Environment, ResourceState.UnorderedAccess)
+			.SetExecute(_environmentMarchExecute);
+
+		var compositeBuilder = graph.AddPass("Cloud Environment Composite", PassKind.Compute);
+		ReadInputs(compositeBuilder, resources);
+		compositeBuilder
+			.ReadTexture(clouds.Environment, ResourceState.ShaderResource)
+			.WriteTexture(resources.SkyEnvironment.ViewEnvironment, ResourceState.UnorderedAccess)
+			.SetExecute(_environmentCompositeExecute);
+	}
+
+	/// <summary>Adds the view's cloud shadow map, march and temporal accumulation, ahead of fog and lighting.</summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		var clouds = resources.Clouds;
+		if (clouds.CastsShadows)
+		{
+			var shadowBuilder = graph.AddPass("Cloud Shadow Map", PassKind.Compute);
+			ReadInputs(shadowBuilder, resources);
+			shadowBuilder
+				.WriteTexture(clouds.ShadowMap, ResourceState.UnorderedAccess)
+				.SetExecute(_shadowMapExecute);
+		}
+
+		var marchBuilder = graph.AddPass("Cloud March", PassKind.Compute);
+		ReadInputs(marchBuilder, resources);
+		marchBuilder
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.WriteTexture(clouds.CurrentColor, ResourceState.UnorderedAccess)
+			.WriteTexture(clouds.CurrentDepth, ResourceState.UnorderedAccess)
+			.SetExecute(_marchExecute);
+
+		var temporalBuilder = graph.AddPass("Cloud Temporal", PassKind.Compute);
+		ReadInputs(temporalBuilder, resources);
+		temporalBuilder
+			.ReadTexture(clouds.CurrentColor, ResourceState.ShaderResource)
+			.ReadTexture(clouds.CurrentDepth, ResourceState.ShaderResource)
+			.ReadTexture(clouds.HistoryColorRead, ResourceState.ShaderResource)
+			.ReadTexture(clouds.HistoryDepthRead, ResourceState.ShaderResource)
+			.WriteTexture(clouds.HistoryColorWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(clouds.HistoryDepthWrite, ResourceState.UnorderedAccess)
+			.SetExecute(_temporalExecute);
+	}
+
+	/// <summary>What every cloud kernel binds: the noise, the atmosphere's LUTs and the sky's irradiance.</summary>
+	private static void ReadInputs(RenderGraphBuilder builder, in RenderViewResources resources)
+	{
+		var clouds = resources.Clouds;
+		var atmosphere = resources.Atmosphere;
+		builder
+			.ReadTexture(clouds.Weather, ResourceState.ShaderResource)
+			.ReadTexture(clouds.Shape, ResourceState.ShaderResource)
+			.ReadTexture(clouds.Detail, ResourceState.ShaderResource)
+			.ReadTexture(atmosphere.Transmittance, ResourceState.ShaderResource)
+			.ReadTexture(atmosphere.SkyView, ResourceState.ShaderResource)
+			.ReadTexture(atmosphere.AerialPerspective, ResourceState.ShaderResource)
+			.ReadTexture(resources.SkyboxIrradiance, ResourceState.ShaderResource);
 	}
 
 	public IGfxTexture Weather => _weather ?? throw new InvalidOperationException("Cloud noise was not created.");

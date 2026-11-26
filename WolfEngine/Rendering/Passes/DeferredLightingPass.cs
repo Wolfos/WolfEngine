@@ -22,14 +22,120 @@ public sealed class DeferredLightingPass
 	private ShaderPropertyWriter? _lightingWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly ShadowMapPass _shadowMapPass;
+	private readonly Action<RenderGraphContext> _execute;
 
-	public DeferredLightingPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public DeferredLightingPass(
+		IShaderProvider shaderCompiler,
+		BindlessResourceRegistry bindlessRegistry,
+		GpuDrawResources gpuDrawResources,
+		ShadowMapPass shadowMapPass)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_shadowMapPass = shadowMapPass ?? throw new ArgumentNullException(nameof(shadowMapPass));
+		_execute = Execute;
 	}
 
-	public DeferredLightingPassConfig BuildConfig(
+	/// <summary>
+	/// Adds the Deferred Lighting node, which shades the GBuffer into the lighting buffer from the sun's shadow
+	/// maps, the clustered lights, the sky, and whichever of occlusion, reflections, DDGI and fog this frame has.
+	/// </summary>
+	internal void AddNodes(
+		RenderGraph graph,
+		in RenderViewResources resources,
+		in RenderFrameSharedResources sharedResources)
+	{
+		var builder = graph.AddPass("Deferred Lighting", PassKind.Compute)
+			.ReadTexture(resources.GBufferAlbedo, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferMaterial, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferEmissive, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.ShadowMapDepth0, ResourceState.ShaderResource)
+			.ReadTexture(resources.ShadowMapDepth1, ResourceState.ShaderResource)
+			.ReadTexture(resources.ShadowMapDepth2, ResourceState.ShaderResource);
+		if (resources.AmbientOcclusionFinal.IsValid)
+		{
+			builder.ReadTexture(resources.AmbientOcclusionFinal, ResourceState.ShaderResource);
+		}
+		if (resources.ReflectionsRadiance.IsValid)
+		{
+			builder.ReadTexture(resources.ReflectionsRadiance, ResourceState.ShaderResource);
+		}
+		if (resources.DdgiFinalGatherIrradiance.IsValid)
+		{
+			builder.ReadTexture(resources.DdgiFinalGatherIrradiance, ResourceState.ShaderResource);
+		}
+		if (resources.FogIntegrated.IsValid)
+		{
+			builder.ReadTexture(resources.FogIntegrated, ResourceState.ShaderResource);
+		}
+		if (resources.DdgiIrradianceL0HistoryWrite.IsValid &&
+		    resources.DdgiIrradianceLyHistoryWrite.IsValid &&
+		    resources.DdgiIrradianceLzHistoryWrite.IsValid &&
+		    resources.DdgiIrradianceLxHistoryWrite.IsValid &&
+		    resources.DdgiVisibilityHistoryWrite.IsValid &&
+		    resources.DdgiProbeStateWrite.IsValid &&
+		    resources.DdgiProbeActivity.IsValid &&
+		    resources.DdgiProbeRelocationDecision.IsValid)
+		{
+			builder
+				.ReadTexture(resources.DdgiIrradianceL0HistoryWrite, ResourceState.ShaderResource)
+				.ReadTexture(resources.DdgiIrradianceLyHistoryWrite, ResourceState.ShaderResource)
+				.ReadTexture(resources.DdgiIrradianceLzHistoryWrite, ResourceState.ShaderResource)
+				.ReadTexture(resources.DdgiIrradianceLxHistoryWrite, ResourceState.ShaderResource)
+				.ReadTexture(resources.DdgiVisibilityHistoryWrite, ResourceState.ShaderResource)
+				.ReadTexture(resources.DdgiProbeStateWrite, ResourceState.ShaderResource)
+				.ReadTexture(resources.DdgiProbeActivity, ResourceState.ShaderResource)
+				.ReadTexture(resources.DdgiProbeRelocationDecision, ResourceState.ShaderResource);
+			if (resources.WriteDdgiFinalContributionDebug)
+			{
+				builder.WriteTexture(resources.DdgiFinalContribution, ResourceState.UnorderedAccess);
+			}
+			if (resources.WriteDdgiProbeDebug)
+			{
+				builder
+					.WriteTexture(resources.DdgiProbeBaseWeightDebug, ResourceState.UnorderedAccess)
+					.WriteTexture(resources.DdgiWeightedVisibilityDebug, ResourceState.UnorderedAccess)
+					.WriteTexture(resources.DdgiDominantProbeDebug, ResourceState.UnorderedAccess)
+					.WriteTexture(resources.DdgiDominantProbeCoordDebug, ResourceState.UnorderedAccess)
+					.WriteTexture(resources.DdgiProbeRelocationDebug, ResourceState.UnorderedAccess)
+					.WriteTexture(resources.DdgiProbeRelocationDecisionDebug, ResourceState.UnorderedAccess);
+			}
+		}
+		
+		builder.ReadSkyLighting(resources, sharedResources);
+		builder.ReadCloudShadow(resources);
+		if (resources.Clouds.Enabled)
+		{
+			builder
+				.ReadTexture(resources.Clouds.HistoryColorWrite, ResourceState.ShaderResource)
+				.ReadTexture(resources.Clouds.HistoryDepthWrite, ResourceState.ShaderResource);
+		}
+
+		builder
+			.WriteTexture(resources.LightingBuffer, ResourceState.UnorderedAccess)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var resources = context.ViewState.FrameResources;
+		var config = BuildConfig(
+			context,
+			resources,
+			context.SharedResources,
+			context.Device,
+			_gpuDrawResources,
+			_shadowMapPass.GetFrameData(resources.Config.ShadowMaps),
+			context.SceneData);
+		Record(context, ref config, context.SceneData);
+	}
+
+	private DeferredLightingPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		RenderFrameSharedResources sharedResources,
@@ -255,7 +361,7 @@ public sealed class DeferredLightingPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, ref DeferredLightingPassConfig config, SceneDrawData sceneData)
+	private void Record(RenderGraphContext context, ref DeferredLightingPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

@@ -244,6 +244,28 @@ public sealed class RenderGraphResourceRegistry
 		DisposeAvailableTransientTextures();
 	}
 
+	/// <summary>
+	/// Describes a handle registered this frame: whether it is a texture or a buffer, whether it is transient or
+	/// imported, and its shape. For diagnostics and tests; resources carry no names of their own.
+	/// </summary>
+	internal string Describe(RenderGraphResourceHandle handle)
+	{
+		if (_textures.TryGetValue(handle.Id, out var texture))
+		{
+			var lifetime = texture.IsTransient ? "transient" : "imported";
+			var descriptor = texture.Descriptor;
+
+			return $"{lifetime} texture {descriptor.Width}x{descriptor.Height} {descriptor.Format}";
+		}
+
+		if (_buffers.TryGetValue(handle.Id, out var buffer))
+		{
+			return $"buffer {buffer.Descriptor.SizeInBytes} bytes";
+		}
+
+		return "unregistered handle";
+	}
+
 	/// <summary>The descriptor a texture handle was created or imported with; available before allocation.</summary>
 	internal TextureDescriptor GetTextureDescriptor(RenderGraphResourceHandle handle) =>
 		_textures.TryGetValue(handle.Id, out var record)

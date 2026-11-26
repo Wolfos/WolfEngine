@@ -27,12 +27,52 @@ internal sealed class AtmospherePass
 	private readonly ComputeKernel _aerialPerspective = new(EngineShaderPrograms.AtmosphereAerialPerspective, "AtmosphereAerialPerspectiveCSMain");
 	private readonly ComputeKernel _environment = new(EngineShaderPrograms.AtmosphereEnvironment, "AtmosphereEnvironmentCSMain");
 	private DescriptorHandle _linearClampSampler = DescriptorHandle.Invalid;
+	private readonly Action<RenderGraphContext> _transmittanceExecute;
+	private readonly Action<RenderGraphContext> _multipleScatteringExecute;
+	private readonly Action<RenderGraphContext> _skyViewExecute;
+	private readonly Action<RenderGraphContext> _aerialPerspectiveExecute;
 
 	public AtmospherePass(IRenderer renderer, IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_transmittanceExecute = context => RecordTransmittance(context, context.ViewState.Sky);
+		_multipleScatteringExecute = context => RecordMultipleScattering(context, context.ViewState.Sky);
+		_skyViewExecute = context => RecordSkyView(context, context.ViewState.Sky);
+		_aerialPerspectiveExecute = context => RecordAerialPerspective(context, context.ViewState.Sky);
+	}
+
+	/// <summary>
+	/// Adds the atmosphere's nodes: the transmittance and multiple-scattering LUTs when the atmosphere changed, then
+	/// the Sky View LUT and aerial perspective volume, which follow the camera and sun every frame.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, RenderViewState view)
+	{
+		var atmosphere = view.FrameResources.Atmosphere;
+		if (view.Sky.ShouldRecordAtmosphereLuts)
+		{
+			graph.AddPass("Atmosphere Transmittance", PassKind.Compute)
+				.WriteTexture(atmosphere.Transmittance, ResourceState.UnorderedAccess)
+				.SetExecute(_transmittanceExecute);
+
+			graph.AddPass("Atmosphere Multiple Scattering", PassKind.Compute)
+				.ReadTexture(atmosphere.Transmittance, ResourceState.ShaderResource)
+				.WriteTexture(atmosphere.MultipleScattering, ResourceState.UnorderedAccess)
+				.SetExecute(_multipleScatteringExecute);
+		}
+
+		graph.AddPass("Atmosphere Sky View", PassKind.Compute)
+			.ReadTexture(atmosphere.Transmittance, ResourceState.ShaderResource)
+			.ReadTexture(atmosphere.MultipleScattering, ResourceState.ShaderResource)
+			.WriteTexture(atmosphere.SkyView, ResourceState.UnorderedAccess)
+			.SetExecute(_skyViewExecute);
+
+		graph.AddPass("Atmosphere Aerial Perspective", PassKind.Compute)
+			.ReadTexture(atmosphere.Transmittance, ResourceState.ShaderResource)
+			.ReadTexture(atmosphere.MultipleScattering, ResourceState.ShaderResource)
+			.WriteTexture(atmosphere.AerialPerspective, ResourceState.UnorderedAccess)
+			.SetExecute(_aerialPerspectiveExecute);
 	}
 
 	/// <summary>Creates the view's LUT textures on first use. Returns whether any were created.</summary>

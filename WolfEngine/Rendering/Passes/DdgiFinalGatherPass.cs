@@ -23,14 +23,74 @@ public sealed class DdgiFinalGatherPass
 	private ShaderPropertyWriter? _settingsWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private uint _frameIndex;
+	private readonly IRenderer _renderer;
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly RayTracingScene _rayTracingScene;
+	private readonly ShadowMapPass _shadowMapPass;
+	private readonly Action<RenderGraphContext> _execute;
 
-	public DdgiFinalGatherPass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	internal DdgiFinalGatherPass(
+		IShaderProvider shaderProvider,
+		BindlessResourceRegistry bindlessRegistry,
+		IRenderer renderer,
+		GpuDrawResources gpuDrawResources,
+		RayTracingScene rayTracingScene,
+		ShadowMapPass shadowMapPass)
 	{
 		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_rayTracingScene = rayTracingScene ?? throw new ArgumentNullException(nameof(rayTracingScene));
+		_shadowMapPass = shadowMapPass ?? throw new ArgumentNullException(nameof(shadowMapPass));
+		_execute = Execute;
 	}
 
-	public DdgiFinalGatherPassConfig BuildConfig(
+	/// <summary>
+	/// Adds the DDGI Final Gather node, which traces one diffuse sample per trace pixel and shades misses from the
+	/// probe volume this frame's update wrote.
+	/// </summary>
+	internal void AddNodes(
+		RenderGraph graph,
+		in RenderViewResources resources,
+		in RenderFrameSharedResources sharedResources)
+	{
+		var finalGatherBuilder = graph.AddPass("DDGI Final Gather", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferEmissive, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceL0HistoryWrite, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLyHistoryWrite, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLzHistoryWrite, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLxHistoryWrite, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiVisibilityHistoryWrite, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeStateWrite, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeActivity, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeRelocationDecision, ResourceState.ShaderResource)
+			.ReadTexture(resources.ShadowMapDepth0, ResourceState.ShaderResource)
+			.ReadTexture(resources.ShadowMapDepth1, ResourceState.ShaderResource)
+			.ReadTexture(resources.ShadowMapDepth2, ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiFinalGatherTrace, ResourceState.UnorderedAccess);
+		finalGatherBuilder.ReadSkyLighting(resources, sharedResources);
+		finalGatherBuilder.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var resources = context.ViewState.FrameResources;
+		var config = BuildConfig(
+			context,
+			resources,
+			context.Device,
+			_renderer,
+			_gpuDrawResources,
+			_rayTracingScene.Resources,
+			context.SceneData,
+			_shadowMapPass.GetFrameData(resources.Config.ShadowMaps));
+		Record(context, in config, context.SceneData);
+	}
+
+	private DdgiFinalGatherPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device,
@@ -129,7 +189,7 @@ public sealed class DdgiFinalGatherPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in DdgiFinalGatherPassConfig config, SceneDrawData sceneData)
+	private void Record(RenderGraphContext context, in DdgiFinalGatherPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);

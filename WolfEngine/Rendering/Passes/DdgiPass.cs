@@ -62,14 +62,177 @@ public sealed class DdgiPass
 		LastFirstProbeRelocationDiagnostic;
 	public IReadOnlyList<DdgiFirstProbeRelocationDiagnostic> LastProbeRelocationDiagnostics =>
 		LastFirstProbeRelocationDiagnostics;
+	private readonly IRenderer _renderer;
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly RayTracingScene _rayTracingScene;
+	private readonly Action<RenderGraphContext> _classifyExecute;
+	private readonly Action<RenderGraphContext> _relocationTraceExecute;
+	private readonly Action<RenderGraphContext> _relocateExecute;
+	private readonly Action<RenderGraphContext> _traceExecute;
+	private readonly Action<RenderGraphContext> _irradianceIntegrateExecute;
+	private readonly Action<RenderGraphContext> _visibilityIntegrateExecute;
 
-	public DdgiPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	internal DdgiPass(
+		IShaderProvider shaderCompiler,
+		BindlessResourceRegistry bindlessRegistry,
+		IRenderer renderer,
+		GpuDrawResources gpuDrawResources,
+		RayTracingScene rayTracingScene)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_rayTracingScene = rayTracingScene ?? throw new ArgumentNullException(nameof(rayTracingScene));
+		_classifyExecute = ExecuteClassify;
+		_relocationTraceExecute = context => RecordRelocationTrace(context, in GetBuiltConfig(context, "relocation trace"), 0);
+		_relocateExecute = context => RecordRelocate(context, in GetBuiltConfig(context, "relocation solve"), 0);
+		_traceExecute = context => RecordTrace(context, in GetBuiltConfig(context, "trace"));
+		_irradianceIntegrateExecute = context => RecordIrradianceIntegrate(context, in GetBuiltConfig(context, "irradiance integrate"));
+		_visibilityIntegrateExecute = context => RecordVisibilityIntegrate(context, in GetBuiltConfig(context, "visibility integrate"));
 	}
 
-	public DdgiPassConfig BuildConfig(
+	/// <summary>
+	/// The view's config for this frame. Classify builds it, and every later probe stage binds the resources it
+	/// resolved.
+	/// </summary>
+	private sealed class ViewConfig
+	{
+		public DdgiPassConfig Config;
+		public bool Valid;
+	}
+
+	/// <summary>
+	/// Adds the probe update's nodes: classify, the optional relocation trace, relocation solve, the probe trace,
+	/// and the irradiance and visibility integration into this frame's history.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, RenderViewState view)
+	{
+		var resources = view.FrameResources;
+		view.GetPassState<ViewConfig>().Valid = false;
+
+		// Classify builds the config every later DDGI stage reuses, so it resolves, and declares, every
+		// resource those stages bind: a read where the config holds a read handle, a write where it
+		// registers a read-write one.
+		var classifyBuilder = graph.AddPass("DDGI Probe Classify", PassKind.Compute)
+			.ReadTexture(resources.DdgiIrradianceL0HistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLyHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLzHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLxHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeStateRead, ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiTraceIrradiance, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiTraceVisibility, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiIrradianceL0HistoryWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiIrradianceLyHistoryWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiIrradianceLzHistoryWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiIrradianceLxHistoryWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiVisibilityHistoryWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiProbeStateWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiProbeRelocationDecision, ResourceState.UnorderedAccess)
+			.WriteBuffer(resources.DdgiIrradianceEstimator, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiProbeActivityMarks, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiProbeActivity, ResourceState.UnorderedAccess);
+		if (resources.SkyEnvironment.ViewEnvironment.IsValid)
+		{
+			classifyBuilder.ReadTexture(resources.SkyEnvironment.ViewEnvironment, ResourceState.ShaderResource);
+		}
+		classifyBuilder.SetExecute(_classifyExecute);
+
+		if (DdgiUtilities.IsRelocationTraceEnabled(resources.Config))
+		{
+			graph.AddPass("DDGI Relocation Trace", PassKind.Compute)
+				.ReadTexture(resources.DdgiProbeActivity, ResourceState.ShaderResource)
+				.ReadTexture(resources.DdgiProbeStateRead, ResourceState.ShaderResource)
+				.WriteTexture(resources.DdgiTraceVisibility, ResourceState.UnorderedAccess)
+				.SetExecute(_relocationTraceExecute);
+		}
+
+		var relocationSolveBuilder = graph.AddPass("DDGI Relocation Solve", PassKind.Compute)
+			.ReadTexture(resources.DdgiProbeActivity, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeStateRead, ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiProbeStateWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiProbeRelocationDecision, ResourceState.UnorderedAccess);
+		if (DdgiUtilities.IsRelocationTraceEnabled(resources.Config))
+		{
+			relocationSolveBuilder.ReadTexture(
+				resources.DdgiTraceVisibility,
+				ResourceState.ShaderResource);
+		}
+		relocationSolveBuilder.SetExecute(_relocateExecute);
+
+		var ddgiTraceBuilder = graph.AddPass("DDGI Probe Trace", PassKind.Compute)
+			.ReadTexture(resources.DdgiProbeActivity, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeStateRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeStateWrite, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceL0HistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLyHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLzHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLxHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiTraceIrradiance, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiTraceVisibility, ResourceState.UnorderedAccess);
+		if (resources.SkyEnvironment.ViewEnvironment.IsValid)
+		{
+			ddgiTraceBuilder.ReadTexture(resources.SkyEnvironment.ViewEnvironment, ResourceState.ShaderResource);
+		}
+		ddgiTraceBuilder.SetExecute(_traceExecute);
+
+		graph.AddPass("DDGI Irradiance Integrate", PassKind.Compute)
+			.ReadTexture(resources.DdgiProbeActivity, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeStateRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeStateWrite, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiTraceIrradiance, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceL0HistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLyHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLzHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiIrradianceLxHistoryRead, ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiIrradianceL0HistoryWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiIrradianceLyHistoryWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiIrradianceLzHistoryWrite, ResourceState.UnorderedAccess)
+			.WriteTexture(resources.DdgiIrradianceLxHistoryWrite, ResourceState.UnorderedAccess)
+			.WriteBuffer(resources.DdgiIrradianceEstimator, ResourceState.UnorderedAccess)
+			.SetExecute(_irradianceIntegrateExecute);
+
+		graph.AddPass("DDGI Visibility Integrate", PassKind.Compute)
+			.ReadTexture(resources.DdgiProbeActivity, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeStateRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiProbeStateWrite, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiTraceVisibility, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiVisibilityHistoryWrite, ResourceState.UnorderedAccess)
+			.SetExecute(_visibilityIntegrateExecute);
+	}
+
+	private void ExecuteClassify(RenderGraphContext context)
+	{
+		var view = context.ViewState;
+		var state = view.GetPassState<ViewConfig>();
+		state.Config = BuildConfig(
+			context,
+			view.FrameResources,
+			context.Device,
+			_renderer,
+			_gpuDrawResources,
+			_rayTracingScene.Resources,
+			context.SceneData,
+			view.DdgiHistory.IsValid);
+		state.Valid = true;
+		RecordClassify(context, in state.Config);
+	}
+
+	private static ref DdgiPassConfig GetBuiltConfig(RenderGraphContext context, string stage)
+	{
+		var state = context.ViewState.GetPassState<ViewConfig>();
+		if (state.Valid == false)
+		{
+			throw new InvalidOperationException($"DDGI {stage} executed before DDGI probe classification config was built.");
+		}
+
+		return ref state.Config;
+	}
+
+	private DdgiPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device,

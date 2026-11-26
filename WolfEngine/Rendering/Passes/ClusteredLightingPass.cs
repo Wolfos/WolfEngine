@@ -21,13 +21,40 @@ public sealed class ClusteredLightingPass
 	private ComputeThreadGroupSize? _writeLightIndicesThreadGroupSize;
 	private ShaderPropertyWriter? _cameraWriter;
 	private ShaderPropertyWriter? _clusterWriter;
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly Action<RenderGraphContext> _buildExecute;
+	private readonly Action<RenderGraphContext> _writeExecute;
 
-	public ClusteredLightingPass(IShaderProvider shaderCompiler)
+	public ClusteredLightingPass(IShaderProvider shaderCompiler, GpuDrawResources gpuDrawResources)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_buildExecute = context => Execute(context, Stage.BuildClusters);
+		_writeExecute = context => Execute(context, Stage.WriteLightIndices);
 	}
 
-	public ClusteredLightingPassConfig BuildConfig(
+	/// <summary>
+	/// Adds the cluster build and the light index write. Their buffers live in the draw resources, outside the
+	/// graph's tracking, so neither node declares anything.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph)
+	{
+		graph.AddPass("Clustered Lighting Build", PassKind.Compute)
+			.SetExecute(_buildExecute);
+		graph.AddPass("Clustered Lighting Write", PassKind.Compute)
+			.SetExecute(_writeExecute);
+	}
+
+	private void Execute(RenderGraphContext context, Stage stage)
+	{
+		var config = BuildConfig(
+			context.Device,
+			_gpuDrawResources,
+			context.ViewState.FrameResources.SceneFramebufferSize);
+		Record(context, in config, context.SceneData, stage);
+	}
+
+	private ClusteredLightingPassConfig BuildConfig(
 		IGfxDevice device,
 		GpuDrawResources gpuDrawResources,
 		Int2 framebufferSize)
@@ -55,7 +82,7 @@ public sealed class ClusteredLightingPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in ClusteredLightingPassConfig config, SceneDrawData sceneData, Stage stage)
+	private void Record(RenderGraphContext context, in ClusteredLightingPassConfig config, SceneDrawData sceneData, Stage stage)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);

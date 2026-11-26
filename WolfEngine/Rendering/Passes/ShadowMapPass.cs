@@ -109,6 +109,17 @@ public sealed class ShadowMapPass
 			receiverDepth, filterPadding, destination);
 	}
 
+	/// <summary>
+	/// The shadow data lighting reads this frame: the cascades the shadow cull prepared, or neutral data when
+	/// shadow maps are off.
+	/// </summary>
+	internal ShadowFrameData GetFrameData(in ShadowMapConfig config)
+	{
+		return config.Enabled
+			? GetCurrentFrameData()
+			: GetDisabledFrameData(config);
+	}
+
 	internal static ShadowFrameData GetDisabledFrameData(in ShadowMapConfig config) =>
 		CreateDisabledFrameData(ResolvedShadowMapConfig.From(config));
 

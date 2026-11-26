@@ -44,6 +44,24 @@ internal sealed class RenderViewState
 	/// <summary>Changes whenever this slot is bound to a new view, even if the same world is rebound.</summary>
 	public long BindingGeneration;
 
+	private readonly Dictionary<Type, object> _passStates = new();
+
+	/// <summary>
+	/// A pass's own state for this view, created on first use: typically the handles of its private
+	/// intermediates, which the pass creates when it adds its graph nodes and reads again when they execute.
+	/// One pass records nodes for several views, so the state is kept per view rather than in the pass.
+	/// </summary>
+	public T GetPassState<T>() where T : class, new()
+	{
+		if (_passStates.TryGetValue(typeof(T), out var state) == false)
+		{
+			state = new T();
+			_passStates.Add(typeof(T), state);
+		}
+
+		return (T)state;
+	}
+
 	/// <summary>
 	/// The binding generation this view's temporal history was built for. Render thread only: when it differs
 	/// from <see cref="BindingGeneration"/> the view was rebound to another world, and history accumulated
@@ -233,8 +251,6 @@ internal sealed class RenderViewState
 	public Vector3 DdgiCommittedRuntimeOrigin;
 	public Int3 DdgiCommittedStorageOffset;
 	public bool DdgiCommittedPlacementValid;
-	public DdgiPassConfig CurrentDdgiConfig;
-	public bool CurrentDdgiConfigValid;
 
 	/// <summary>
 	/// Ping-pong history of the DDGI final gather's SVGF denoiser at its trace resolution, one slot per

@@ -31,11 +31,154 @@ public sealed class DdgiFinalGatherSvgfPass
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly StagePipeline?[] _stagePipelines = new StagePipeline?[3];
 	private GraphicsBackendKind? _compiledBackendKind;
+	private readonly Action<RenderGraphContext> _temporalExecute;
+	private readonly Action<RenderGraphContext> _varianceExecute;
+	private readonly Action<RenderGraphContext>[] _filterExecutes;
 
 	public DdgiFinalGatherSvgfPass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_temporalExecute = context => Execute(context, Stage.Temporal, 0);
+		_varianceExecute = context => Execute(context, Stage.Variance, 0);
+		_filterExecutes = new Action<RenderGraphContext>[DdgiUtilities.MaxFinalGatherFilterIterations];
+		for (var iteration = 0; iteration < _filterExecutes.Length; iteration++)
+		{
+			var capturedIteration = iteration;
+			_filterExecutes[iteration] = context => Execute(context, Stage.Filter, capturedIteration);
+		}
+	}
+
+	/// <summary>
+	/// The view's intermediates: the variance pass's output, which the first a-trous level filters, and the two
+	/// targets the levels between the first and the last ping-pong between. Only this pass reads or writes them.
+	/// </summary>
+	private sealed class ViewHandles
+	{
+		public RenderGraphResourceHandle FilterInput;
+		public RenderGraphResourceHandle FilterA;
+		public RenderGraphResourceHandle FilterB;
+	}
+
+	/// <summary>
+	/// Adds the denoiser's nodes: temporal accumulation against last frame's history, the variance estimate, and
+	/// one a-trous filter level per iteration.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, RenderViewState view)
+	{
+		var resources = view.FrameResources;
+		var historyRead = resources.DdgiFinalGatherHistoryRead
+			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
+		var historyWrite = resources.DdgiFinalGatherHistoryWrite
+			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
+		var guide = historyWrite[DdgiFinalGatherHistorySlot.Guide];
+		var moments = historyWrite[DdgiFinalGatherHistorySlot.Moments];
+
+		// The intermediates have the raw trace's shape.
+		var traceDescriptor = graph.Resources.GetTextureDescriptor(resources.DdgiFinalGatherTrace);
+		var handles = view.GetPassState<ViewHandles>();
+		handles.FilterInput = graph.Resources.CreateTransientTexture(traceDescriptor);
+		handles.FilterA = resources.DdgiFinalGatherFilterIterations >= 3
+			? graph.Resources.CreateTransientTexture(traceDescriptor)
+			: default;
+		handles.FilterB = resources.DdgiFinalGatherFilterIterations >= 4
+			? graph.Resources.CreateTransientTexture(traceDescriptor)
+			: default;
+
+		graph.AddPass("DDGI Final Gather SVGF Temporal", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferVelocity, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiFinalGatherTrace, ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Color], ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Moments], ResourceState.ShaderResource)
+			.ReadTexture(historyRead[DdgiFinalGatherHistorySlot.Guide], ResourceState.ShaderResource)
+			.WriteTexture(resources.DdgiFinalGatherIntegrated, ResourceState.UnorderedAccess)
+			.WriteTexture(moments, ResourceState.UnorderedAccess)
+			.WriteTexture(guide, ResourceState.UnorderedAccess)
+			.SetExecute(_temporalExecute);
+
+		graph.AddPass("DDGI Final Gather SVGF Variance", PassKind.Compute)
+			.ReadTexture(resources.DdgiFinalGatherTrace, ResourceState.ShaderResource)
+			.ReadTexture(resources.DdgiFinalGatherIntegrated, ResourceState.ShaderResource)
+			.ReadTexture(moments, ResourceState.ShaderResource)
+			.ReadTexture(guide, ResourceState.ShaderResource)
+			.WriteTexture(handles.FilterInput, ResourceState.UnorderedAccess)
+			.SetExecute(_varianceExecute);
+
+		for (var iteration = 0; iteration < resources.DdgiFinalGatherFilterIterations; iteration++)
+		{
+			var (source, output) = GetFilterTargets(resources, handles, iteration);
+			graph.AddPass($"DDGI Final Gather SVGF Filter {iteration}", PassKind.Compute)
+				.ReadTexture(resources.DdgiFinalGatherTrace, ResourceState.ShaderResource)
+				.ReadTexture(guide, ResourceState.ShaderResource)
+				.ReadTexture(source, ResourceState.ShaderResource)
+				.WriteTexture(output, ResourceState.UnorderedAccess)
+				.SetExecute(_filterExecutes[iteration]);
+		}
+	}
+
+	private void Execute(RenderGraphContext context, Stage stage, int iteration)
+	{
+		var view = context.ViewState;
+		var resources = view.FrameResources;
+		var handles = view.GetPassState<ViewHandles>();
+		var source = default(RenderGraphResourceHandle);
+		var output = default(RenderGraphResourceHandle);
+		if (stage == Stage.Variance)
+		{
+			output = handles.FilterInput;
+		}
+		else if (stage == Stage.Filter)
+		{
+			(source, output) = GetFilterTargets(resources, handles, iteration);
+		}
+
+		var config = BuildConfig(
+			context,
+			resources,
+			context.Device,
+			stage,
+			source,
+			output,
+			iteration);
+		Record(context, in config, context.SceneData);
+	}
+
+	/// <summary>
+	/// The first a-trous level reads the variance pass's output and writes the color history the next frame
+	/// accumulates into; the last writes the finished target; the ones between alternate over two intermediates.
+	/// </summary>
+	private static (RenderGraphResourceHandle Source, RenderGraphResourceHandle Output) GetFilterTargets(
+		in RenderViewResources resources,
+		ViewHandles handles,
+		int iteration)
+	{
+		var historyWrite = resources.DdgiFinalGatherHistoryWrite
+			?? throw new InvalidOperationException("DDGI final gather history was not imported.");
+		var colorHistory = historyWrite[DdgiFinalGatherHistorySlot.Color];
+		var lastIteration = resources.DdgiFinalGatherFilterIterations - 1;
+
+		var source = iteration == 0
+			? handles.FilterInput
+			: iteration == 1
+				? colorHistory
+				: GetFilterIntermediate(handles, iteration - 1);
+		var output = iteration == 0
+			? colorHistory
+			: iteration == lastIteration
+				? resources.DdgiFinalGatherDenoised
+				: GetFilterIntermediate(handles, iteration);
+
+		return (source, output);
+	}
+
+	/// <summary>Level 1 writes A, level 2 writes B, level 3 writes A again, and so on.</summary>
+	private static RenderGraphResourceHandle GetFilterIntermediate(ViewHandles handles, int iteration)
+	{
+		return iteration % 2 == 1
+			? handles.FilterA
+			: handles.FilterB;
 	}
 
 	/// <summary>
@@ -43,7 +186,7 @@ public sealed class DdgiFinalGatherSvgfPass
 	/// <paramref name="iteration"/> only apply to <see cref="Stage.Filter"/>; the variance stage writes
 	/// <paramref name="output"/> too.
 	/// </summary>
-	public DdgiFinalGatherSvgfPassConfig BuildConfig(
+	private DdgiFinalGatherSvgfPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device,
@@ -104,7 +247,7 @@ public sealed class DdgiFinalGatherSvgfPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in DdgiFinalGatherSvgfPassConfig config, SceneDrawData sceneData)
+	private void Record(RenderGraphContext context, in DdgiFinalGatherSvgfPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);

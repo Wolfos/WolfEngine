@@ -14,14 +14,33 @@ public sealed class AmbientOcclusionUpsamplePass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public AmbientOcclusionUpsamplePass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_execute = Execute;
 	}
 
-	public AmbientOcclusionUpsamplePassConfig BuildConfig(
+	/// <summary>Adds the Ambient Occlusion Upsample node: half-resolution occlusion to the final, full-resolution target.</summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("Ambient Occlusion Upsample", PassKind.Compute)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(resources.GBufferNormal, ResourceState.ShaderResource)
+			.ReadTexture(resources.AmbientOcclusionRaw, ResourceState.ShaderResource)
+			.WriteTexture(resources.AmbientOcclusionFinal, ResourceState.UnorderedAccess)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var config = BuildConfig(context, context.ViewState.FrameResources, context.Device);
+		Record(context, in config, context.SceneData);
+	}
+
+	private AmbientOcclusionUpsamplePassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device)
@@ -54,7 +73,7 @@ public sealed class AmbientOcclusionUpsamplePass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in AmbientOcclusionUpsamplePassConfig config, SceneDrawData sceneData)
+	private void Record(RenderGraphContext context, in AmbientOcclusionUpsamplePassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

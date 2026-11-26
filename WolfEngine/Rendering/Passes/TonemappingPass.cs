@@ -17,11 +17,30 @@ public sealed class TonemappingPass
 	private readonly ShaderPropertyWriter?[] _settingsWriters = new ShaderPropertyWriter?[ModeCount];
 	private GraphicsBackendKind? _compiledBackendKind;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public TonemappingPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_execute = Execute;
+	}
+
+	/// <summary>Adds the Tonemapping node: the bloom composite, or the resolved scene colour without bloom, to display range.</summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("Tonemapping", PassKind.Compute)
+			.ReadTexture(
+				resources.BloomCompositeSceneColor.IsValid ? resources.BloomCompositeSceneColor : resources.ResolvedSceneColor,
+				ResourceState.ShaderResource)
+			.WriteTexture(resources.TonemappedLinearSceneColor, ResourceState.UnorderedAccess)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var config = BuildConfig(context, context.ViewState.FrameResources, context.Device);
+		Record(context, in config);
 	}
 
 	public static string GetEntryPoint(TonemappingMode mode) => mode switch
@@ -32,7 +51,7 @@ public sealed class TonemappingPass
 		_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown tonemapping mode.")
 	};
 
-	public TonemappingPassConfig BuildConfig(
+	private TonemappingPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device)
@@ -84,7 +103,7 @@ public sealed class TonemappingPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in TonemappingPassConfig config)
+	private void Record(RenderGraphContext context, in TonemappingPassConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

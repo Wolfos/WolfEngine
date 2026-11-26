@@ -18,14 +18,38 @@ public sealed class MotionVectorDebugPass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public MotionVectorDebugPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_execute = Execute;
 	}
 
-	public MotionVectorDebugPassConfig BuildConfig(
+	/// <summary>Adds the Motion Vector Debug node, which encodes the GBuffer's velocity as a flow-field colour.</summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("Motion Vector Debug", PassKind.Compute)
+			.ReadTexture(resources.GBufferVelocity, ResourceState.ShaderResource)
+			.WriteTexture(resources.MotionVectorDebugColor, ResourceState.UnorderedAccess)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var resources = context.ViewState.FrameResources;
+		var config = BuildConfig(
+			context,
+			context.Device,
+			resources.GBufferVelocity,
+			resources.MotionVectorDebugColor,
+			resources.SceneFramebufferSize,
+			resources.Config.MotionVectorDebug);
+		Record(context, in config);
+	}
+
+	private MotionVectorDebugPassConfig BuildConfig(
 		RenderGraphContext context,
 		IGfxDevice device,
 		RenderGraphResourceHandle velocity,
@@ -49,7 +73,7 @@ public sealed class MotionVectorDebugPass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in MotionVectorDebugPassConfig config)
+	private void Record(RenderGraphContext context, in MotionVectorDebugPassConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 

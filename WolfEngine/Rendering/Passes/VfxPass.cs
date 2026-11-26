@@ -64,11 +64,57 @@ public sealed class VfxPass
 	private IGfxBuffer? _quadIndexBuffer;
 	private IGfxBuffer? _stripIndexBuffer;
 	private DescriptorHandle _sampler = DescriptorHandle.Invalid;
+	private readonly Action<RenderGraphContext> _simulateExecute;
+	private readonly Action<RenderGraphContext> _drawExecute;
 
 	public VfxPass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_simulateExecute = ExecuteSimulate;
+		_drawExecute = ExecuteDraw;
+	}
+
+	/// <summary>
+	/// Adds the simulation and the draw into the lighting buffer. The particle buffers are outside the graph's
+	/// tracking; the pass orders its own particle writes and reads.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("VFX Simulate", PassKind.Compute)
+			.SetExecute(_simulateExecute);
+
+		graph.AddPass("VFX", PassKind.Graphics)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.WriteTexture(resources.LightingBuffer, ResourceState.RenderTarget)
+			.SetExecute(_drawExecute);
+	}
+
+	private void ExecuteSimulate(RenderGraphContext context)
+	{
+		if (context.ViewSnapshot.VfxFrame is not { } frame)
+		{
+			return;
+		}
+
+		Simulate(context, context.Device, frame);
+	}
+
+	private void ExecuteDraw(RenderGraphContext context)
+	{
+		if (context.ViewSnapshot.VfxFrame is not { } frame)
+		{
+			return;
+		}
+
+		var resources = context.ViewState.FrameResources;
+		Draw(
+			context,
+			context.Device,
+			frame,
+			context.GetTexture(resources.LightingBuffer),
+			context.GetTexture(resources.GBufferDepth),
+			resources.SceneFramebufferSize);
 	}
 
 	/// <summary>Whether a view's frame has anything to simulate or draw.</summary>

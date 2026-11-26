@@ -183,6 +183,9 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 	internal IReadOnlyList<RenderGraphPass> Passes => _passes;
 
+	/// <summary>The frame's resources, for a pass that creates its own transient intermediates as it adds its nodes.</summary>
+	internal RenderGraphResourceRegistry Resources => _resourceRegistry;
+
 	/// <summary>The view state shared with the frame builder; exposed so tests can build a builder over it.</summary>
 	internal RenderViewRegistry ViewRegistry => _viewRegistry;
 
@@ -303,24 +306,22 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 				// A view pass runs against its own view's state, because pass callbacks read it when they execute.
 				// Shared passes run against the bound view, not whichever view happened to execute last.
+				var passView = pass.View.IsValid ? pass.View : boundView;
 				var passSnapshot = snapshot;
 				var passSceneData = sceneData;
 				if (pass.View.IsValid)
 				{
-					_frameBuilder.BindView(pass.View);
 					passSnapshot = frameSnapshot.GetOrCreateView(pass.View);
 					passSceneData = _sceneDataByView[pass.View];
 				}
-				else
-				{
-					_frameBuilder.BindView(boundView);
-				}
+
+				_frameBuilder.BindView(passView);
 
 				// The buffers the CPU fills for this pass are the pass's own view's.
 				_gpuDrawResources.ActiveViewIndex = passSnapshot.View.Index;
 
 				// Execute the pass with the command list and scene data
-				var context = new RenderGraphContext(_resourceRegistry, pass.Name)
+				var context = new RenderGraphContext(_resourceRegistry, pass)
 				{
 					CommandList = commandList,
 					// Null on frames with no valid scene camera; the guard above excludes view passes,
@@ -328,7 +329,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 					SceneData = passSceneData!,
 					GpuDrawDatabase = passSnapshot.GpuDrawDatabase,
 					FrameSnapshot = frameSnapshot,
-					ViewSnapshot = passSnapshot
+					ViewSnapshot = passSnapshot,
+					ViewState = _viewRegistry.GetOrCreate(passView),
+					Device = device,
+					SharedResources = _frameBuilder.SharedResources
 				};
 				pass.Execute(context);
 				commandList.EndEvent();

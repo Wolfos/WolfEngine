@@ -27,14 +27,35 @@ public sealed class SelectionOutlinePass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _viewWriter;
 	private ShaderPropertyWriter? _drawWriter;
+	private readonly Action<RenderGraphContext> _execute;
 
 	public SelectionOutlinePass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_execute = Execute;
 	}
 
-	public SelectionOutlinePassConfig BuildConfig(
+	/// <summary>
+	/// Adds the Selection Outline node. It draws after tonemapping and upscaling so the outline colour reaches the
+	/// viewport exactly as authored, and only into the encoded scene colour, so the presented game image and Play
+	/// mode stay clean. capture_frame reads that target, which is what makes the outline verifiable.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		graph.AddPass("Selection Outline", PassKind.Graphics)
+			.ReadTexture(resources.GBufferDepth, ResourceState.ShaderResource)
+			.WriteTexture(resources.EncodedSceneColor, ResourceState.RenderTarget)
+			.SetExecute(_execute);
+	}
+
+	private void Execute(RenderGraphContext context)
+	{
+		var config = BuildConfig(context, context.ViewState.FrameResources, context.Device);
+		Record(context, in config, context.SceneData);
+	}
+
+	private SelectionOutlinePassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device)
@@ -57,7 +78,7 @@ public sealed class SelectionOutlinePass
 		};
 	}
 
-	public void Record(RenderGraphContext context, in SelectionOutlinePassConfig config, SceneDrawData sceneData)
+	private void Record(RenderGraphContext context, in SelectionOutlinePassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);

@@ -71,11 +71,86 @@ public sealed class VolumetricFogPass
 		Vector4 LightDirectionEnabled,
 		ShadowFrameData ShadowData,
 		VolumetricFogConfig Settings);
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly ShadowMapPass _shadowMapPass;
+	private readonly Action<RenderGraphContext> _injectExecute;
+	private readonly Action<RenderGraphContext> _temporalExecute;
+	private readonly Action<RenderGraphContext> _integrateExecute;
 
-	public VolumetricFogPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public VolumetricFogPass(
+		IShaderProvider shaderCompiler,
+		BindlessResourceRegistry bindlessRegistry,
+		GpuDrawResources gpuDrawResources,
+		ShadowMapPass shadowMapPass)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
+		_shadowMapPass = shadowMapPass ?? throw new ArgumentNullException(nameof(shadowMapPass));
+		_injectExecute = context => Execute(context, VolumetricFogStage.Inject);
+		_temporalExecute = context => Execute(context, VolumetricFogStage.Temporal);
+		_integrateExecute = context => Execute(context, VolumetricFogStage.Integrate);
+	}
+
+	/// <summary>
+	/// Adds the fog's three nodes: Inject lights the froxel grid, Temporal blends it with last frame's history, and
+	/// Integrate accumulates the filtered grid along each view ray.
+	/// </summary>
+	internal void AddNodes(RenderGraph graph, in RenderViewResources resources)
+	{
+		var fogInjectBuilder = graph.AddPass("Volumetric Fog Inject", PassKind.Compute);
+		ReadStageInputs(fogInjectBuilder, resources);
+		fogInjectBuilder
+			.WriteTexture(resources.FogCurrent, ResourceState.UnorderedAccess)
+			.SetExecute(_injectExecute);
+		var fogTemporalBuilder = graph.AddPass("Volumetric Fog Temporal", PassKind.Compute)
+			.ReadTexture(resources.FogCurrent, ResourceState.ShaderResource);
+		ReadStageInputs(fogTemporalBuilder, resources);
+		fogTemporalBuilder
+			.WriteTexture(resources.FogHistoryWrite, ResourceState.UnorderedAccess)
+			.SetExecute(_temporalExecute);
+		var fogIntegrateBuilder = graph.AddPass("Volumetric Fog Integrate", PassKind.Compute)
+			.ReadTexture(resources.FogHistoryWrite, ResourceState.ShaderResource);
+		ReadStageInputs(fogIntegrateBuilder, resources);
+		fogIntegrateBuilder
+			.WriteTexture(resources.FogIntegrated, ResourceState.UnorderedAccess)
+			.SetExecute(_integrateExecute);
+	}
+
+	/// <summary>What every fog stage binds: the history, the sky irradiance and the shadow maps.</summary>
+	private static void ReadStageInputs(RenderGraphBuilder builder, in RenderViewResources resources)
+	{
+		builder
+			.ReadCloudShadow(resources)
+			.ReadTexture(resources.FogHistoryRead, ResourceState.ShaderResource)
+			.ReadTexture(resources.SkyboxIrradiance, ResourceState.ShaderResource)
+			.ReadTexture(resources.ShadowMapDepth0, ResourceState.ShaderResource)
+			.ReadTexture(resources.ShadowMapDepth1, ResourceState.ShaderResource)
+			.ReadTexture(resources.ShadowMapDepth2, ResourceState.ShaderResource);
+	}
+
+	private void Execute(RenderGraphContext context, VolumetricFogStage stage)
+	{
+		var resources = context.ViewState.FrameResources;
+		var device = context.Device;
+		if (stage == VolumetricFogStage.Inject)
+		{
+			PrepareFrame(
+				context,
+				resources,
+				device,
+				_gpuDrawResources,
+				_shadowMapPass.GetFrameData(resources.Config.ShadowMaps),
+				resources.FogHistoryValid);
+		}
+
+		var config = BuildConfig(
+			context,
+			resources,
+			device,
+			_gpuDrawResources,
+			stage);
+		Record(context, stage, in config);
 	}
 
 	public static Int3 ComputeGrid(Int2 framebufferSize, in VolumetricFogConfig settings)
@@ -123,7 +198,7 @@ public sealed class VolumetricFogPass
 		_framePrepared = true;
 	}
 
-	public VolumetricFogPassConfig BuildConfig(
+	private VolumetricFogPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderViewResources resources,
 		IGfxDevice device,
@@ -209,7 +284,7 @@ public sealed class VolumetricFogPass
 		return (Vector4.Zero, Vector4.Zero);
 	}
 
-	public void Record(RenderGraphContext context, VolumetricFogStage stage, in VolumetricFogPassConfig config)
+	private void Record(RenderGraphContext context, VolumetricFogStage stage, in VolumetricFogPassConfig config)
 	{
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
