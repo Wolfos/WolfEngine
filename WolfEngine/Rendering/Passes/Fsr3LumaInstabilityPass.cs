@@ -7,20 +7,16 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class Fsr3LumaInstabilityPass
 {
 	private const int ThreadGroupDim = 8;
-	private readonly IShaderProvider _shaderProvider;
+	private readonly ComputeKernel _kernel;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline? _pipeline;
-	private ReadOnlyMemory<byte> _shader;
-	private ComputeThreadGroupSize? _threadGroupSize;
-	private GraphicsBackendKind? _backend;
-	private ShaderPropertyWriter? _bindlessWriter;
-	private ShaderPropertyWriter? _constantsWriter;
 	private DescriptorHandle _pointSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 
-	public Fsr3LumaInstabilityPass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	public Fsr3LumaInstabilityPass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernel = new ComputeKernel(shaderSource, EngineShaderPrograms.Fsr3LumaInstability, "Fsr3LumaInstabilityCS");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
@@ -33,7 +29,7 @@ public sealed class Fsr3LumaInstabilityPass
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
-		var pipeline = EnsurePipeline(device);
+		var pipeline = _kernel.GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 		EnsureSamplers();
 		var historyRead = context.GetTexture(lumaHistoryRead);
@@ -59,7 +55,7 @@ public sealed class Fsr3LumaInstabilityPass
 	{
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
-		var handles = _bindlessWriter ?? throw new InvalidOperationException("FSR3 luma-instability handles were not initialized.");
+		var handles = _kernel.Writer("Fsr3BindlessHandles");
 		handles.Clear();
 		handles.SetUInt("exposureHandle", config.ExposureHandle.Value);
 		handles.SetUInt("dilatedReactiveMasksHandle", config.DilatedReactiveMasksHandle.Value);
@@ -73,7 +69,7 @@ public sealed class Fsr3LumaInstabilityPass
 		handles.SetUInt("linearSamplerHandle", config.LinearSampler.Value);
 		commandList.SetComputeConstants(handles.RegisterIndex, handles.AsBytes());
 
-		var constants = _constantsWriter ?? throw new InvalidOperationException("FSR3 constants were not initialized.");
+		var constants = _kernel.Writer("cbFSR3Upscaler");
 		Fsr3Constants.Write(constants, config.Constants);
 		commandList.SetComputeConstants(constants.RegisterIndex, constants.AsBytes());
 		commandList.Dispatch((uint)Math.Max((config.Constants.RenderSize.X + 7) / ThreadGroupDim, 1),
@@ -86,33 +82,5 @@ public sealed class Fsr3LumaInstabilityPass
 			FilterMode.Point, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp));
 		if (!_linearSampler.IsValid) _linearSampler = _bindlessRegistry.GetSamplerHandle(new SamplerDescriptor(
 			FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp));
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device)
-	{
-		if (_pipeline is not null)
-		{
-			if (_backend != device.BackendKind) throw new InvalidOperationException("FSR3 luma-instability backend changed.");
-			return _pipeline;
-		}
-		var compiled = _shaderProvider.GetComputeShaderWithReflection(
-			EngineShaderPrograms.Fsr3LumaInstability, "Fsr3LumaInstabilityCS", device.BackendKind);
-		_shader = compiled.Bytecode;
-		_threadGroupSize = compiled.ThreadGroupSize;
-		_bindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Fsr3BindlessHandles"));
-		_constantsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("cbFSR3Upscaler"));
-		_backend = device.BackendKind;
-		var key = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "Fsr3LumaInstabilityCS",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: "fsr3_luma_instability.compute.slang");
-		_pipeline = device.GetOrCreatePipeline(key,
-			new ShaderBytecodeSet(compute: _shader, computeThreadGroupSize: _threadGroupSize));
-		return _pipeline;
 	}
 }

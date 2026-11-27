@@ -10,20 +10,16 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 public sealed class ReflectionsUpsamplePass
 {
-	private readonly IShaderProvider _shaderProvider;
+	private readonly ComputeKernel _kernel;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline? _pipeline;
-	private ReadOnlyMemory<byte> _computeShader;
-	private ComputeThreadGroupSize? _threadGroupSize;
-	private GraphicsBackendKind? _compiledBackendKind;
-	private ShaderPropertyWriter? _bindlessWriter;
-	private ShaderPropertyWriter? _settingsWriter;
 	private readonly Action<RenderGraphContext> _reflectionExecute;
 	private readonly Action<RenderGraphContext> _finalGatherExecute;
 
-	public ReflectionsUpsamplePass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	public ReflectionsUpsamplePass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernel = new ComputeKernel(shaderSource, EngineShaderPrograms.ReflectionsUpsample, "ReflectionsUpsampleCS");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_reflectionExecute = ExecuteReflection;
 		_finalGatherExecute = ExecuteFinalGather;
@@ -103,7 +99,7 @@ public sealed class ReflectionsUpsamplePass
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
 
-		var pipeline = EnsurePipeline(device);
+		var pipeline = _kernel.GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 		var source = context.GetTexture(sourceHandle);
 		var output = context.GetTexture(outputHandle);
@@ -130,8 +126,7 @@ public sealed class ReflectionsUpsamplePass
 
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
-		var bindlessWriter = _bindlessWriter
-			?? throw new InvalidOperationException("Reflections upsample bindless writer was not initialized.");
+		var bindlessWriter = _kernel.Writer("BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("depthHandle", config.DepthHandle.Value);
 		bindlessWriter.SetUInt("normalHandle", config.NormalHandle.Value);
@@ -144,8 +139,7 @@ public sealed class ReflectionsUpsamplePass
 			throw new InvalidOperationException("Reflections upsample projection parameters could not be reconstructed.");
 		}
 
-		var settingsWriter = _settingsWriter
-			?? throw new InvalidOperationException("Reflections upsample settings writer was not initialized.");
+		var settingsWriter = _kernel.Writer("UpsampleSettings");
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("fullResolutionX", (uint)Math.Max(config.FullResolution.X, 1));
 		settingsWriter.SetUInt("fullResolutionY", (uint)Math.Max(config.FullResolution.Y, 1));
@@ -156,49 +150,10 @@ public sealed class ReflectionsUpsamplePass
 		settingsWriter.SetFloat("projZScale", projectionMatrix.M43);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
-		var threadGroupSize = _threadGroupSize
-			?? throw new InvalidOperationException("Reflections upsample threadgroup size was not initialized.");
+		var threadGroupSize = _kernel.ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)Math.Max(config.FullResolution.X, 1),
 			(uint)Math.Max(config.FullResolution.Y, 1));
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device)
-	{
-		if (_pipeline is not null)
-		{
-			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
-			{
-				throw new InvalidOperationException(
-					$"ReflectionsUpsamplePass is already compiled for backend '{_compiledBackendKind.Value}', " +
-					$"but was requested for '{device.BackendKind}'.");
-			}
-			return _pipeline;
-		}
-
-		var compiled = _shaderProvider.GetComputeShaderWithReflection(
-			EngineShaderPrograms.ReflectionsUpsample,
-			"ReflectionsUpsampleCS",
-			device.BackendKind);
-		_computeShader = compiled.Bytecode;
-		_threadGroupSize = compiled.ThreadGroupSize;
-		_bindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		_settingsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("UpsampleSettings"));
-		_compiledBackendKind = device.BackendKind;
-
-		var key = new PipelineKey(
-			PassKind.Compute,
-			null,
-			null,
-			"ReflectionsUpsampleCS",
-			default,
-			default,
-			default,
-			shaderVariant: "reflections_upsample.compute.slang");
-		_pipeline = device.GetOrCreatePipeline(
-			key,
-			new ShaderBytecodeSet(compute: _computeShader, computeThreadGroupSize: _threadGroupSize));
-		return _pipeline;
 	}
 }

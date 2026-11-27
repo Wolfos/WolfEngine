@@ -397,6 +397,10 @@ public sealed class EditorAutomationTools
 			seed,
 			cancellationToken);
 
+	[McpServerTool(Name = "reload_engine_shaders"), Description("Reload the engine shaders the way the editor's Reload Engine Shaders command does, and return how many shader artifacts were replaced, any compile failures, and the new shader revision. The renderer switches to the new shaders at the start of its next frame, so wait for render frames before capturing.")]
+	public Task<EngineShaderReloadResult> ReloadEngineShaders(CancellationToken cancellationToken) =>
+		_controller.ReloadEngineShadersAsync(cancellationToken);
+
 	[McpServerTool(Name = "undo"), Description("Undo the most recent editor authoring action, including a terrain stroke.")]
 	public Task<EditorUndoResult> Undo(CancellationToken cancellationToken) =>
 		_controller.UndoAsync(cancellationToken);

@@ -13,19 +13,19 @@ public sealed class ColorPyramidPass
 {
 	public enum Stage { Copy, Downsample }
 
-	private readonly IShaderProvider _shaderProvider;
+	private readonly ComputeKernel[] _kernels;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly IGfxPipeline?[] _pipelines = new IGfxPipeline[2];
-	private readonly ReadOnlyMemory<byte>[] _shaders = new ReadOnlyMemory<byte>[2];
-	private readonly ComputeThreadGroupSize?[] _threadGroupSizes = new ComputeThreadGroupSize?[2];
-	private readonly ShaderPropertyWriter?[] _bindlessWriters = new ShaderPropertyWriter?[2];
-	private readonly ShaderPropertyWriter?[] _settingsWriters = new ShaderPropertyWriter?[2];
-	private GraphicsBackendKind? _compiledBackendKind;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 
-	public ColorPyramidPass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	public ColorPyramidPass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernels =
+		[
+			new ComputeKernel(shaderSource, EngineShaderPrograms.ColorPyramid, "ColorPyramidCopyCS"),
+			new ComputeKernel(shaderSource, EngineShaderPrograms.ColorPyramid, "ColorPyramidDownsampleCS")
+		];
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
@@ -70,7 +70,7 @@ public sealed class ColorPyramidPass
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
 
-		var pipeline = EnsurePipeline(device, stage);
+		var pipeline = _kernels[(int)stage].GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 		if (_linearSampler.IsValid == false)
 		{
@@ -99,16 +99,14 @@ public sealed class ColorPyramidPass
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
 
-		var bindlessWriter = _bindlessWriters[index]
-			?? throw new InvalidOperationException("Color pyramid bindless writer was not initialized.");
+		var bindlessWriter = _kernels[index].Writer("BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("sourceHandle", config.SourceHandle.Value);
 		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
 		bindlessWriter.SetUInt("samplerHandle", config.LinearSampler.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		var settingsWriter = _settingsWriters[index]
-			?? throw new InvalidOperationException("Color pyramid settings writer was not initialized.");
+		var settingsWriter = _kernels[index].Writer("ColorPyramidSettings");
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("sourceSizeX", (uint)Math.Max(config.SourceSize.X, 1));
 		settingsWriter.SetUInt("sourceSizeY", (uint)Math.Max(config.SourceSize.Y, 1));
@@ -116,48 +114,10 @@ public sealed class ColorPyramidPass
 		settingsWriter.SetUInt("outputSizeY", (uint)Math.Max(config.OutputSize.Y, 1));
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
-		var threadGroupSize = _threadGroupSizes[index]
-			?? throw new InvalidOperationException("Color pyramid threadgroup size was not initialized.");
+		var threadGroupSize = _kernels[index].ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)Math.Max(config.OutputSize.X, 1),
 			(uint)Math.Max(config.OutputSize.Y, 1));
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device, Stage stage)
-	{
-		var index = (int)stage;
-		if (_pipelines[index] is not null)
-		{
-			if (_compiledBackendKind != device.BackendKind)
-			{
-				throw new InvalidOperationException("ColorPyramidPass cannot be shared across graphics backends.");
-			}
-
-			return _pipelines[index]!;
-		}
-
-		var entryPoint = stage == Stage.Copy ? "ColorPyramidCopyCS" : "ColorPyramidDownsampleCS";
-		var compiled = _shaderProvider.GetComputeShaderWithReflection(
-			EngineShaderPrograms.ColorPyramid,
-			entryPoint,
-			device.BackendKind);
-		_shaders[index] = compiled.Bytecode;
-		_threadGroupSizes[index] = compiled.ThreadGroupSize;
-		_bindlessWriters[index] = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		_settingsWriters[index] = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("ColorPyramidSettings"));
-		_compiledBackendKind = device.BackendKind;
-		_pipelines[index] = device.GetOrCreatePipeline(
-			new PipelineKey(
-				PassKind.Compute,
-				vertexEntryPoint: null,
-				pixelEntryPoint: null,
-				computeEntryPoint: entryPoint,
-				renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-				depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-				renderState: default,
-				shaderVariant: "color_pyramid.compute.slang"),
-			new ShaderBytecodeSet(compute: _shaders[index], computeThreadGroupSize: _threadGroupSizes[index]));
-		return _pipelines[index]!;
 	}
 }

@@ -39,37 +39,33 @@ public sealed class VfxPass
 
 	private static readonly ushort[] QuadIndices = [0, 1, 2, 2, 1, 3];
 
-	private readonly IShaderProvider _shaderProvider;
+	private static readonly GraphicsPipelineState SpriteAlphaState = CreatePipelineState(BlendMode.AlphaBlend, "VfxSprite");
+	private static readonly GraphicsPipelineState SpriteAdditiveState = CreatePipelineState(BlendMode.Additive, "VfxSprite");
+	private static readonly GraphicsPipelineState RibbonAlphaState = CreatePipelineState(BlendMode.AlphaBlend, "VfxRibbon");
+	private static readonly GraphicsPipelineState RibbonAdditiveState = CreatePipelineState(BlendMode.Additive, "VfxRibbon");
+
+	private readonly ComputeKernel _simulate;
+	private readonly ComputeKernel _emit;
+	private readonly GraphicsShader _sprite;
+	private readonly GraphicsShader _ribbon;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly Dictionary<World, WorldResources> _worlds = new(ReferenceEqualityComparer.Instance);
 	private readonly List<World> _releaseScratch = new();
 	private readonly List<VfxDrawPacket> _sortedDraws = new();
-	private IGfxPipeline? _simulatePipeline;
-	private IGfxPipeline? _emitPipeline;
-	private IGfxPipeline? _spriteAlphaPipeline;
-	private IGfxPipeline? _spriteAdditivePipeline;
-	private IGfxPipeline? _ribbonAlphaPipeline;
-	private IGfxPipeline? _ribbonAdditivePipeline;
-	private ComputeThreadGroupSize _simulateGroupSize;
-	private ComputeThreadGroupSize _emitGroupSize;
-	private ShaderPropertyWriter? _simulateWriter;
-	private ShaderPropertyWriter? _spriteViewWriter;
-	private ShaderPropertyWriter? _spriteDrawWriter;
-	private ShaderPropertyWriter? _ribbonViewWriter;
-	private ShaderPropertyWriter? _ribbonDrawWriter;
-	private uint _spriteParticlesRegister;
-	private uint _spriteEmittersRegister;
-	private uint _ribbonEmittersRegister;
-	private uint _ribbonPointsRegister;
 	private IGfxBuffer? _quadIndexBuffer;
 	private IGfxBuffer? _stripIndexBuffer;
 	private DescriptorHandle _sampler = DescriptorHandle.Invalid;
 	private readonly Action<RenderGraphContext> _simulateExecute;
 	private readonly Action<RenderGraphContext> _drawExecute;
 
-	public VfxPass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	public VfxPass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_simulate = new ComputeKernel(shaderSource, EngineShaderPrograms.VfxSimulate, "VfxSimulateCS");
+		_emit = new ComputeKernel(shaderSource, EngineShaderPrograms.VfxSimulate, "VfxEmitCS");
+		_sprite = new GraphicsShader(shaderSource, EngineShaderPrograms.VfxSprite, "vertexShader", "fragmentShader");
+		_ribbon = new GraphicsShader(shaderSource, EngineShaderPrograms.VfxRibbon, "vertexShader", "fragmentShader");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_simulateExecute = ExecuteSimulate;
 		_drawExecute = ExecuteDraw;
@@ -153,8 +149,10 @@ public sealed class VfxPass
 			return;
 		}
 
-		EnsureComputePipelines(device);
-		var writer = _simulateWriter!;
+		var simulatePipeline = _simulate.GetPipeline(device);
+		var emitPipeline = _emit.GetPipeline(device);
+		// Simulate and emit share the parameter block, so one write serves both dispatches.
+		var writer = _simulate.Writer("VfxSimulateParams");
 		var commandList = context.CommandList;
 		var slot = resources.FrameSlot;
 		writer.Clear();
@@ -166,24 +164,24 @@ public sealed class VfxPass
 
 		if (frame.DeltaTime > 0.0f)
 		{
-			commandList.BindPipeline(_simulatePipeline!);
+			commandList.BindPipeline(simulatePipeline);
 			commandList.SetComputeBuffer(0, resources.Particles);
 			commandList.SetComputeReadOnlyBuffer(2, resources.Emitters[slot]!);
 			commandList.SetComputeReadOnlyBuffer(3, resources.Spawns[slot]!);
 			commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
-			var (groups, _, _) = _simulateGroupSize.GetDispatchGroupCount((uint)VfxLimits.ParticlePoolCapacity);
+			var (groups, _, _) = _simulate.ThreadGroupSize.GetDispatchGroupCount((uint)VfxLimits.ParticlePoolCapacity);
 			commandList.Dispatch(groups, 1, 1);
 			commandList.SynchronizeUnorderedAccess(resources.Particles);
 		}
 
 		if (frame.SpawnedParticleCount > 0)
 		{
-			commandList.BindPipeline(_emitPipeline!);
+			commandList.BindPipeline(emitPipeline);
 			commandList.SetComputeBuffer(0, resources.Particles);
 			commandList.SetComputeReadOnlyBuffer(2, resources.Emitters[slot]!);
 			commandList.SetComputeReadOnlyBuffer(3, resources.Spawns[slot]!);
 			commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
-			var (groups, _, _) = _emitGroupSize.GetDispatchGroupCount((uint)frame.SpawnedParticleCount);
+			var (groups, _, _) = _emit.ThreadGroupSize.GetDispatchGroupCount((uint)frame.SpawnedParticleCount);
 			commandList.Dispatch(groups, 1, 1);
 			commandList.SynchronizeUnorderedAccess(resources.Particles);
 		}
@@ -217,12 +215,23 @@ public sealed class VfxPass
 				return;
 			}
 
-			EnsureGraphicsPipelines(device);
+			var spriteAlphaPipeline = _sprite.GetPipeline(device, SpriteAlphaState);
+			var spriteAdditivePipeline = _sprite.GetPipeline(device, SpriteAdditiveState);
+			var ribbonAlphaPipeline = _ribbon.GetPipeline(device, RibbonAlphaState);
+			var ribbonAdditivePipeline = _ribbon.GetPipeline(device, RibbonAdditiveState);
+			var spriteViewWriter = _sprite.Writer("VfxViewParams");
+			var spriteDrawWriter = _sprite.Writer("VfxDrawParams");
+			var ribbonViewWriter = _ribbon.Writer("VfxViewParams");
+			var ribbonDrawWriter = _ribbon.Writer("VfxDrawParams");
+			var spriteParticlesRegister = GetRegister(_sprite.ReflectionLayout, "g_Particles");
+			var spriteEmittersRegister = GetRegister(_sprite.ReflectionLayout, "g_Emitters");
+			var ribbonEmittersRegister = GetRegister(_ribbon.ReflectionLayout, "g_Emitters");
+			var ribbonPointsRegister = GetRegister(_ribbon.ReflectionLayout, "g_RibbonPoints");
 			EnsureIndexBuffers(device);
 			var sceneData = context.SceneData;
 			var depthHandle = _bindlessRegistry.RegisterDepthTexture(depthTexture).Value;
-			WriteViewParams(_spriteViewWriter!, sceneData, depthHandle);
-			WriteViewParams(_ribbonViewWriter!, sceneData, depthHandle);
+			WriteViewParams(spriteViewWriter, sceneData, depthHandle);
+			WriteViewParams(ribbonViewWriter, sceneData, depthHandle);
 			SortDraws(frame, sceneData.CameraOrigin);
 
 			var slot = resources.FrameSlot;
@@ -233,10 +242,10 @@ public sealed class VfxPass
 				var ribbon = draw.Kind == VfxEmitterKind.Ribbon;
 				var additive = draw.Blend == VfxBlendMode.Additive;
 				var pipeline = ribbon
-					? additive ? _ribbonAdditivePipeline! : _ribbonAlphaPipeline!
-					: additive ? _spriteAdditivePipeline! : _spriteAlphaPipeline!;
-				var viewWriter = ribbon ? _ribbonViewWriter! : _spriteViewWriter!;
-				var drawWriter = ribbon ? _ribbonDrawWriter! : _spriteDrawWriter!;
+					? additive ? ribbonAdditivePipeline : ribbonAlphaPipeline
+					: additive ? spriteAdditivePipeline : spriteAlphaPipeline;
+				var viewWriter = ribbon ? ribbonViewWriter : spriteViewWriter;
+				var drawWriter = ribbon ? ribbonDrawWriter : spriteDrawWriter;
 
 				if (ReferenceEquals(pipeline, boundPipeline) == false)
 				{
@@ -246,14 +255,14 @@ public sealed class VfxPass
 					if (ribbon)
 					{
 						commandList.SetIndexBuffer(new IndexBufferView(_stripIndexBuffer!, IndexFormat.UInt32, 0));
-						commandList.BindConstantBuffer(_ribbonEmittersRegister, resources.Emitters[slot]!);
-						commandList.BindConstantBuffer(_ribbonPointsRegister, resources.RibbonPoints[slot]!);
+						commandList.BindConstantBuffer(ribbonEmittersRegister, resources.Emitters[slot]!);
+						commandList.BindConstantBuffer(ribbonPointsRegister, resources.RibbonPoints[slot]!);
 					}
 					else
 					{
 						commandList.SetIndexBuffer(new IndexBufferView(_quadIndexBuffer!, IndexFormat.UInt16, 0));
-						commandList.BindConstantBuffer(_spriteParticlesRegister, resources.Particles);
-						commandList.BindConstantBuffer(_spriteEmittersRegister, resources.Emitters[slot]!);
+						commandList.BindConstantBuffer(spriteParticlesRegister, resources.Particles);
+						commandList.BindConstantBuffer(spriteEmittersRegister, resources.Emitters[slot]!);
 					}
 
 					commandList.SetGraphicsConstants(viewWriter.RegisterIndex, viewWriter.AsBytes());
@@ -417,68 +426,7 @@ public sealed class VfxPass
 		}
 	}
 
-	private void EnsureComputePipelines(IGfxDevice device)
-	{
-		if (_simulatePipeline is not null && _emitPipeline is not null)
-		{
-			return;
-		}
-
-		var simulate = _shaderProvider.GetComputeShaderWithReflection(EngineShaderPrograms.VfxSimulate, "VfxSimulateCS", device.BackendKind);
-		var emit = _shaderProvider.GetComputeShaderWithReflection(EngineShaderPrograms.VfxSimulate, "VfxEmitCS", device.BackendKind);
-		_simulateGroupSize = simulate.ThreadGroupSize;
-		_emitGroupSize = emit.ThreadGroupSize;
-		_simulateWriter = new ShaderPropertyWriter(simulate.ReflectionLayout.GetConstantBuffer("VfxSimulateParams"));
-		_simulatePipeline = device.GetOrCreatePipeline(
-			new PipelineKey(PassKind.Compute, null, null, "VfxSimulateCS", default, default, default, shaderVariant: "vfx_simulate.compute.slang"),
-			new ShaderBytecodeSet(compute: simulate.Bytecode, computeThreadGroupSize: simulate.ThreadGroupSize));
-		_emitPipeline = device.GetOrCreatePipeline(
-			new PipelineKey(PassKind.Compute, null, null, "VfxEmitCS", default, default, default, shaderVariant: "vfx_simulate.compute.slang"),
-			new ShaderBytecodeSet(compute: emit.Bytecode, computeThreadGroupSize: emit.ThreadGroupSize));
-	}
-
-	private void EnsureGraphicsPipelines(IGfxDevice device)
-	{
-		if (_spriteAlphaPipeline is null || _spriteAdditivePipeline is null)
-		{
-			var sprite = GraphicsShaderCompiler.CompileWithReflection(
-				_shaderProvider,
-				device.BackendKind,
-				EngineShaderPrograms.VfxSprite,
-				"vertexShader",
-				"fragmentShader");
-			_spriteAlphaPipeline = CreateGraphicsPipeline(device, sprite, BlendMode.AlphaBlend, "VfxSprite");
-			_spriteAdditivePipeline = CreateGraphicsPipeline(device, sprite, BlendMode.Additive, "VfxSprite");
-			var reflection = sprite.ReflectionLayout;
-			_spriteViewWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("VfxViewParams"));
-			_spriteDrawWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("VfxDrawParams"));
-			_spriteParticlesRegister = GetRegister(reflection, "g_Particles");
-			_spriteEmittersRegister = GetRegister(reflection, "g_Emitters");
-		}
-
-		if (_ribbonAlphaPipeline is null || _ribbonAdditivePipeline is null)
-		{
-			var ribbon = GraphicsShaderCompiler.CompileWithReflection(
-				_shaderProvider,
-				device.BackendKind,
-				EngineShaderPrograms.VfxRibbon,
-				"vertexShader",
-				"fragmentShader");
-			_ribbonAlphaPipeline = CreateGraphicsPipeline(device, ribbon, BlendMode.AlphaBlend, "VfxRibbon");
-			_ribbonAdditivePipeline = CreateGraphicsPipeline(device, ribbon, BlendMode.Additive, "VfxRibbon");
-			var reflection = ribbon.ReflectionLayout;
-			_ribbonViewWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("VfxViewParams"));
-			_ribbonDrawWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("VfxDrawParams"));
-			_ribbonEmittersRegister = GetRegister(reflection, "g_Emitters");
-			_ribbonPointsRegister = GetRegister(reflection, "g_RibbonPoints");
-		}
-	}
-
-	private static IGfxPipeline CreateGraphicsPipeline(
-		IGfxDevice device,
-		CompiledGraphicsShaderWithReflection compiled,
-		BlendMode blend,
-		string variant)
+	private static GraphicsPipelineState CreatePipelineState(BlendMode blend, string variant)
 	{
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
@@ -486,20 +434,15 @@ public sealed class VfxPass
 			depthTestEnabled: false,
 			depthWriteEnabled: false,
 			blend);
-		var key = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
-			computeEntryPoint: null,
-			renderTargets: new(new[]
+
+		return new GraphicsPipelineState(
+			new RenderTargetFormats(new[]
 			{
 				TextureFormat.Rgba16Float
 			}),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: renderState,
-			shaderVariant: $"{variant}:{blend}");
-
-		return device.GetOrCreatePipeline(key, compiled.Bytecode);
+			new DepthStencilFormat(TextureFormat.Unknown),
+			renderState,
+			Variant: $"{variant}:{blend}");
 	}
 
 	private static uint GetRegister(ShaderReflectionLayout reflection, string name)

@@ -7,20 +7,16 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class Fsr3DebugViewPass
 {
 	private const int ThreadGroupDim = 8;
-	private readonly IShaderProvider _shaderProvider;
+	private readonly ComputeKernel _kernel;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline? _pipeline;
-	private ReadOnlyMemory<byte> _shader;
-	private ComputeThreadGroupSize? _threadGroupSize;
-	private GraphicsBackendKind? _backend;
-	private ShaderPropertyWriter? _bindlessWriter;
-	private ShaderPropertyWriter? _constantsWriter;
 	private DescriptorHandle _pointSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 
-	public Fsr3DebugViewPass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	public Fsr3DebugViewPass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernel = new ComputeKernel(shaderSource, EngineShaderPrograms.Fsr3DebugView, "Fsr3DebugViewCS");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
@@ -32,7 +28,7 @@ public sealed class Fsr3DebugViewPass
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
-		var pipeline = EnsurePipeline(device);
+		var pipeline = _kernel.GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 		EnsureSamplers();
 		return new Fsr3DebugViewPassConfig
@@ -56,7 +52,7 @@ public sealed class Fsr3DebugViewPass
 	{
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
-		var handles = _bindlessWriter ?? throw new InvalidOperationException("FSR3 debug handles were not initialized.");
+		var handles = _kernel.Writer("Fsr3BindlessHandles");
 		handles.Clear();
 		handles.SetUInt("dilatedReactiveMasksHandle", config.DilatedReactiveMasksHandle.Value);
 		handles.SetUInt("dilatedMotionVectorsReadHandle", config.DilatedMotionVectorsHandle.Value);
@@ -70,7 +66,7 @@ public sealed class Fsr3DebugViewPass
 		handles.SetUInt("linearSamplerHandle", config.LinearSampler.Value);
 		commandList.SetComputeConstants(handles.RegisterIndex, handles.AsBytes());
 
-		var constants = _constantsWriter ?? throw new InvalidOperationException("FSR3 constants were not initialized.");
+		var constants = _kernel.Writer("cbFSR3Upscaler");
 		Fsr3Constants.Write(constants, config.Constants);
 		commandList.SetComputeConstants(constants.RegisterIndex, constants.AsBytes());
 		commandList.Dispatch((uint)Math.Max((config.Constants.UpscaleSize.X + 7) / ThreadGroupDim, 1),
@@ -83,33 +79,5 @@ public sealed class Fsr3DebugViewPass
 			FilterMode.Point, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp));
 		if (!_linearSampler.IsValid) _linearSampler = _bindlessRegistry.GetSamplerHandle(new SamplerDescriptor(
 			FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp));
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device)
-	{
-		if (_pipeline is not null)
-		{
-			if (_backend != device.BackendKind) throw new InvalidOperationException("FSR3 debug pass backend changed.");
-			return _pipeline;
-		}
-		var compiled = _shaderProvider.GetComputeShaderWithReflection(
-			EngineShaderPrograms.Fsr3DebugView, "Fsr3DebugViewCS", device.BackendKind);
-		_shader = compiled.Bytecode;
-		_threadGroupSize = compiled.ThreadGroupSize;
-		_bindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Fsr3BindlessHandles"));
-		_constantsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("cbFSR3Upscaler"));
-		_backend = device.BackendKind;
-		var key = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "Fsr3DebugViewCS",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: "fsr3_debug_view.compute.slang");
-		_pipeline = device.GetOrCreatePipeline(key,
-			new ShaderBytecodeSet(compute: _shader, computeThreadGroupSize: _threadGroupSize));
-		return _pipeline;
 	}
 }

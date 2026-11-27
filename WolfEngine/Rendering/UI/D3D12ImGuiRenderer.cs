@@ -32,11 +32,10 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 
 	private ComPtr<ID3D12Device> _device;
 	private IGfxDevice? _gfxDevice;
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly ShaderSource _shaderSource;
+	private readonly GraphicsShader _shader;
 	private D3D12DescriptorTable? _bindlessTable;
 	private uint _fallbackTextureHandleValue = InvalidDescriptorValue;
-	private ShaderPropertyWriter? _projectionWriter;
-	private ShaderPropertyWriter? _drawWriter;
 	private readonly bool _sampleTexture;
 
 	private ComPtr<ID3D12DescriptorHeap> _srvHeap;
@@ -44,6 +43,9 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 	private ComPtr<ID3D12Resource> _fontTexture;
 	private ComPtr<ID3D12PipelineState> _pipelineState;
 	private ComPtr<ID3D12RootSignature> _rootSignature;
+	// This renderer builds its pipeline state itself rather than through the device's pipeline cache, so it rebuilds
+	// it when the applied shader revision moves past the one it was built at.
+	private long _pipelineRevision;
 	private readonly List<UiBufferSet> _availableBuffers = new();
 	private UiBufferSet? _recordingBuffers;
 	private int _fontTextureWidth;
@@ -52,10 +54,11 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 	private readonly string _pixelEntryPoint;
 	private bool _disposed;
 
-	public D3D12UiRenderer(IShaderProvider shaderCompiler, bool sampleTexture = true)
+	public D3D12UiRenderer(ShaderSource shaderSource, bool sampleTexture = true)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_shaderSource = shaderSource ?? throw new ArgumentNullException(nameof(shaderSource));
 		_pixelEntryPoint = "fragmentShader";
+		_shader = new GraphicsShader(shaderSource, EngineShaderPrograms.ImGui, "vertexShader", _pixelEntryPoint);
 		_sampleTexture = sampleTexture;
 	}
 
@@ -74,9 +77,12 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 			_fallbackTextureHandleValue = _bindlessTable.GetOrCreateFallbackHandles().ShaderResourceView.Value;
 		}
 
-		if (_pipelineState.Handle is null)
+		_shader.EnsureCurrent(device);
+		if (_pipelineState.Handle is null || _pipelineRevision != _shaderSource.AppliedRevision)
 		{
+			DisposePipeline();
 			CreatePipeline();
+			_pipelineRevision = _shaderSource.AppliedRevision;
 		}
 
 		if (frame.HasFontAtlas)
@@ -100,10 +106,18 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 		}
 	}
 
-	public void InvalidateShaderPipeline()
+	private void DisposePipeline()
 	{
-		if (_pipelineState.Handle is not null) _pipelineState.Dispose();
-		if (_rootSignature.Handle is not null) _rootSignature.Dispose();
+		if (_pipelineState.Handle is not null)
+		{
+			_pipelineState.Dispose();
+		}
+
+		if (_rootSignature.Handle is not null)
+		{
+			_rootSignature.Dispose();
+		}
+
 		_pipelineState = default;
 		_rootSignature = default;
 	}
@@ -202,8 +216,7 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 		var T = frame.DisplayPos.Y;
 		var B = frame.DisplayPos.Y + frame.DisplaySize.Y;
 
-		var projectionWriter = _projectionWriter
-			?? throw new InvalidOperationException("D3D12 ImGui projection writer was not initialized.");
+		var projectionWriter = _shader.Writer("Projection");
 		projectionWriter.Clear();
 		projectionWriter.SetMatrix4x4(
 			"ProjectionMatrix",
@@ -251,7 +264,7 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 				activeTextureId = textureId;
 				hasActiveTexture = true;
 			}
-			var draw = _drawWriter!;
+			var draw = _shader.Writer("UiDraw");
 			draw.Clear();
 			draw.SetUInt("sampleTexture", cmd.ResolveSampleMode(_sampleTexture));
 			draw.SetFloat("distanceRange", cmd.DistanceRange);
@@ -640,17 +653,12 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 			OffsetInDescriptorsFromTableStart = 0
 		};
 
-		var compiled = _shaderCompiler.GetGraphicsShaderWithReflection(
-			EngineShaderPrograms.ImGui,
-			"vertexShader",
-			_pixelEntryPoint,
-			GraphicsBackendKind.D3D12);
-		_projectionWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Projection"));
-		_drawWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("UiDraw"));
-		if (_projectionWriter.RegisterIndex != 0)
+		var projectionWriter = _shader.Writer("Projection");
+		var drawWriter = _shader.Writer("UiDraw");
+		if (projectionWriter.RegisterIndex != 0)
 		{
 			throw new InvalidOperationException(
-				$"Expected ImGui projection constants at b0, but reflection returned b{_projectionWriter.RegisterIndex}.");
+				$"Expected ImGui projection constants at b0, but reflection returned b{projectionWriter.RegisterIndex}.");
 		}
 
 		var rootParameters = stackalloc RootParameter[3];
@@ -669,13 +677,13 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 		{
 			ShaderRegister = 0,
 			RegisterSpace = 0,
-			Num32BitValues = (uint)_projectionWriter.AsBytes().Length / 4
+			Num32BitValues = (uint)projectionWriter.AsBytes().Length / 4
 		};
 		rootParameters[1].ShaderVisibility = ShaderVisibility.Vertex;
 		rootParameters[2] = default;
 		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
 		rootParameters[2].Anonymous.Constants = new() { ShaderRegister = 1, RegisterSpace = 0,
-			Num32BitValues = (uint)_drawWriter.AsBytes().Length / 4 };
+			Num32BitValues = (uint)drawWriter.AsBytes().Length / 4 };
 		rootParameters[2].ShaderVisibility = ShaderVisibility.Pixel;
 
 		var rootSignatureDesc = new RootSignatureDesc
@@ -720,9 +728,9 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 			}
 		}
 
-		var vertexShader = (compiled.Bytecode.Vertex
+		var vertexShader = (_shader.Bytecode.Vertex
 			?? throw new InvalidOperationException("ImGui D3D12 vertex bytecode was missing from reflection compile result.")).ToArray();
-		var pixelShader = (compiled.Bytecode.Pixel
+		var pixelShader = (_shader.Bytecode.Pixel
 			?? throw new InvalidOperationException("ImGui D3D12 pixel bytecode was missing from reflection compile result.")).ToArray();
 
 		Span<byte> positionSemantic = stackalloc byte["POSITION".Length + 1];

@@ -2,6 +2,7 @@ using Moq;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Tests;
 
@@ -13,8 +14,8 @@ internal static class DrawRecordFakes
 
 	public static ShadowMapPass CreateShadowMapPass()
 	{
-		var shaderCompiler = new ShaderCompiler();
-		return new ShadowMapPass(shaderCompiler, CreateRecords(), new GpuDrawResources(shaderCompiler));
+		var shaderSource = new ShaderSource(new ShaderCompiler());
+		return new ShadowMapPass(shaderSource, CreateRecords(), new GpuDrawResources(shaderSource));
 	}
 }
 

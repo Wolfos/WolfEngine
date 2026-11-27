@@ -1390,6 +1390,23 @@ public sealed partial class EditorRemoteAutomationController
 		return new FoliagePaletteEntry(new AssetRef<FoliageType> { NodeId = asset.Id });
 	}
 
+	public Task<EngineShaderReloadResult> ReloadEngineShadersAsync(CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var result = _commandService.ReloadEngineShaders();
+			var failures = result?.Failures
+				.Select(failure => $"{failure.Request}: {failure.Error}")
+				.ToArray() ?? [];
+
+			return new EngineShaderReloadResult(
+				result is not null,
+				result?.AppliedArtifactCount ?? 0,
+				failures,
+				_shaderProvider.Revision,
+				_editorFrameCoordinator.CompletedSequence,
+				_renderFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
+
 	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
 		Enqueue(() => new EditorUndoResult(
 			_commandService.SceneDocument.Undo(),

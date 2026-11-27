@@ -325,6 +325,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 			invert,
 			cancellationToken);
 
+	public Task<EngineShaderReloadResult> ReloadEngineShadersAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().ReloadEngineShadersAsync(cancellationToken);
+
 	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().UndoAsync(cancellationToken);
 

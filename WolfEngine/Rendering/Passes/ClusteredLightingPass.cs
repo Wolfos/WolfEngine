@@ -13,21 +13,18 @@ public sealed class ClusteredLightingPass
 		WriteLightIndices
 	}
 
-	private readonly IShaderProvider _shaderCompiler;
-	private GraphicsBackendKind? _compiledBackendKind;
-	private IGfxPipeline? _buildClustersPipeline;
-	private IGfxPipeline? _writeLightIndicesPipeline;
-	private ComputeThreadGroupSize? _buildClustersThreadGroupSize;
-	private ComputeThreadGroupSize? _writeLightIndicesThreadGroupSize;
-	private ShaderPropertyWriter? _cameraWriter;
-	private ShaderPropertyWriter? _clusterWriter;
+	private readonly ComputeKernel _buildClusters;
+	private readonly ComputeKernel _writeLightIndices;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly Action<RenderGraphContext> _buildExecute;
 	private readonly Action<RenderGraphContext> _writeExecute;
 
-	public ClusteredLightingPass(IShaderProvider shaderCompiler, GpuDrawResources gpuDrawResources)
+	public ClusteredLightingPass(ShaderSource shaderSource, GpuDrawResources gpuDrawResources)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_buildClusters = new ComputeKernel(shaderSource, EngineShaderPrograms.ClusteredLighting, "CSBuildClusters");
+		_writeLightIndices = new ComputeKernel(shaderSource, EngineShaderPrograms.ClusteredLighting, "CSWriteLightIndices");
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_buildExecute = context => Execute(context, Stage.BuildClusters);
 		_writeExecute = context => Execute(context, Stage.WriteLightIndices);
@@ -64,12 +61,11 @@ public sealed class ClusteredLightingPass
 
 		gpuDrawResources.EnsureCreated(device);
 		gpuDrawResources.EnsureClusteredLightingCapacity(device, framebufferSize);
-		EnsurePipelines(device);
 
 		return new ClusteredLightingPassConfig
 		{
-			BuildClustersPipeline = _buildClustersPipeline ?? throw new InvalidOperationException("Cluster build pipeline missing."),
-			WriteLightIndicesPipeline = _writeLightIndicesPipeline ?? throw new InvalidOperationException("Cluster write pipeline missing."),
+			BuildClustersPipeline = _buildClusters.GetPipeline(device),
+			WriteLightIndicesPipeline = _writeLightIndices.GetPipeline(device),
 			PointLightBuffer = gpuDrawResources.ClusterPointLightBuffer ?? throw new InvalidOperationException("Cluster point-light buffer missing."),
 			ClusterAabbBuffer = gpuDrawResources.ClusterAabbBuffer ?? throw new InvalidOperationException("Cluster AABB buffer missing."),
 			ClusterHeaderBuffer = gpuDrawResources.ClusterHeaderBuffer ?? throw new InvalidOperationException("Cluster header buffer missing."),
@@ -87,15 +83,19 @@ public sealed class ClusteredLightingPass
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);
 
+		var kernel = stage switch
+		{
+			Stage.BuildClusters => _buildClusters,
+			Stage.WriteLightIndices => _writeLightIndices,
+			_ => throw new ArgumentOutOfRangeException(nameof(stage), stage, null)
+		};
 		var commandList = context.CommandList;
-		var cameraWriter = _cameraWriter
-			?? throw new InvalidOperationException("Clustered lighting camera writer was not initialized.");
+		var cameraWriter = kernel.Writer("CameraParams");
 		cameraWriter.Clear();
 		cameraWriter.SetMatrix4x4("invProjection", sceneData.InverseProjection);
 		cameraWriter.SetMatrix4x4("viewMatrix", sceneData.ViewMatrix);
 
-		var clusterWriter = _clusterWriter
-			?? throw new InvalidOperationException("Clustered lighting params writer was not initialized.");
+		var clusterWriter = kernel.Writer("ClusterParams");
 		clusterWriter.Clear();
 		clusterWriter.SetUInt("clusterCountX", (uint)config.Grid.X);
 		clusterWriter.SetUInt("clusterCountY", (uint)config.Grid.Y);
@@ -122,58 +122,10 @@ public sealed class ClusteredLightingPass
 		commandList.SetComputeConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
 		commandList.SetComputeConstants(clusterWriter.RegisterIndex, clusterWriter.AsBytes());
 		BindComputeBuffers(commandList, config);
-		var threadGroupSize = GetThreadGroupSize(stage);
+		var threadGroupSize = kernel.ThreadGroupSize;
 		var workItemCount = (uint)Math.Max(config.ClusterCount, 1);
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(workItemCount);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
-	}
-
-	private void EnsurePipelines(IGfxDevice device)
-	{
-		var backendKind = device.BackendKind;
-		if (_compiledBackendKind == backendKind &&
-		    _buildClustersPipeline is not null &&
-		    _writeLightIndicesPipeline is not null &&
-		    _buildClustersThreadGroupSize.HasValue &&
-		    _writeLightIndicesThreadGroupSize.HasValue &&
-		    _cameraWriter is not null &&
-		    _clusterWriter is not null)
-		{
-			return;
-		}
-
-		var build = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.ClusteredLighting,
-			"CSBuildClusters",
-			backendKind);
-		var write = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.ClusteredLighting,
-			"CSWriteLightIndices",
-			backendKind);
-		_buildClustersThreadGroupSize = build.ThreadGroupSize;
-		_writeLightIndicesThreadGroupSize = write.ThreadGroupSize;
-
-		_buildClustersPipeline = device.GetOrCreatePipeline(
-			new PipelineKey(PassKind.Compute, null, null, "CSBuildClusters", default, default, default, shaderVariant: "clustered_lighting.compute.slang"),
-			new ShaderBytecodeSet(compute: build.Bytecode, computeThreadGroupSize: _buildClustersThreadGroupSize));
-		_writeLightIndicesPipeline = device.GetOrCreatePipeline(
-			new PipelineKey(PassKind.Compute, null, null, "CSWriteLightIndices", default, default, default, shaderVariant: "clustered_lighting.compute.slang"),
-			new ShaderBytecodeSet(compute: write.Bytecode, computeThreadGroupSize: _writeLightIndicesThreadGroupSize));
-		_cameraWriter = new ShaderPropertyWriter(build.ReflectionLayout.GetConstantBuffer("CameraParams"));
-		_clusterWriter = new ShaderPropertyWriter(build.ReflectionLayout.GetConstantBuffer("ClusterParams"));
-		_compiledBackendKind = backendKind;
-	}
-
-	private ComputeThreadGroupSize GetThreadGroupSize(Stage stage)
-	{
-		return stage switch
-		{
-			Stage.BuildClusters => _buildClustersThreadGroupSize
-				?? throw new InvalidOperationException("Cluster build threadgroup size was not initialized."),
-			Stage.WriteLightIndices => _writeLightIndicesThreadGroupSize
-				?? throw new InvalidOperationException("Cluster write threadgroup size was not initialized."),
-			_ => throw new ArgumentOutOfRangeException(nameof(stage), stage, null)
-		};
 	}
 
 	private int UploadPointLights(IGfxBuffer buffer, SceneDrawData sceneData)

@@ -109,15 +109,11 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly List<TerrainVertexUpdateRecord> _pendingTerrainVertexUpdates = new();
 	private readonly List<uint> _pendingTerrainRetryHandles = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly ComputeKernel _terrainVertexUpdate;
 	private IGfxTopLevelAccelerationStructure? _topLevelAccelerationStructure;
 	private IGfxBuffer? _instanceIndexToInstanceHandleBuffer;
 	private IGfxBuffer? _instanceIndexToTerrainRayTracingResolutionBuffer;
 	private IGfxDevice? _sidecarDevice;
-	private IGfxPipeline? _terrainVertexUpdatePipeline;
-	private ShaderPropertyWriter? _terrainVertexUpdateParamsWriter;
-	private ComputeThreadGroupSize? _terrainVertexUpdateThreadGroupSize;
-	private ReadOnlyMemory<byte> _terrainVertexUpdateShaderBytecode;
 	private RayTracingSceneStats _lastStats;
 	private long _topLevelAccelerationStructureGeneration;
 	private int _topLevelCapacity;
@@ -129,9 +125,14 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	/// <summary>TLAS instances the scene starts with room for; the TLAS doubles as the scene outgrows it.</summary>
 	public const int InitialTopLevelCapacity = 4096;
 
-	public RayTracingSceneResources(IShaderProvider shaderCompiler)
+	public RayTracingSceneResources(ShaderSource shaderSource)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_terrainVertexUpdate = new ComputeKernel(
+			shaderSource,
+			EngineShaderPrograms.TerrainRayTracingVertexUpdate,
+			"TerrainRayTracingVertexUpdateCS");
 	}
 
 	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure => _topLevelAccelerationStructure;
@@ -764,11 +765,9 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			return;
 		}
 
-		var pipeline = EnsureTerrainVertexUpdatePipeline(device);
-		var writer = _terrainVertexUpdateParamsWriter
-			?? throw new InvalidOperationException("Terrain RT vertex update parameters were not reflected.");
-		var threadGroupSize = _terrainVertexUpdateThreadGroupSize
-			?? throw new InvalidOperationException("Terrain RT vertex update thread group size was not reflected.");
+		var pipeline = _terrainVertexUpdate.GetPipeline(device);
+		var writer = _terrainVertexUpdate.Writer("TerrainRtVertexUpdateParams");
+		var threadGroupSize = _terrainVertexUpdate.ThreadGroupSize;
 
 		commandList.BindPipeline(pipeline);
 		for (var i = 0; i < _pendingTerrainVertexUpdates.Count; i++)
@@ -791,35 +790,6 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		}
 
 		_pendingTerrainVertexUpdates.Clear();
-	}
-
-	private IGfxPipeline EnsureTerrainVertexUpdatePipeline(IGfxDevice device)
-	{
-		if (_terrainVertexUpdatePipeline is not null)
-		{
-			return _terrainVertexUpdatePipeline;
-		}
-
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.TerrainRayTracingVertexUpdate,
-			"TerrainRayTracingVertexUpdateCS",
-			device.BackendKind);
-		_terrainVertexUpdateShaderBytecode = compiled.Bytecode;
-		_terrainVertexUpdateThreadGroupSize = compiled.ThreadGroupSize;
-		_terrainVertexUpdateParamsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("TerrainRtVertexUpdateParams"));
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			null,
-			null,
-			"TerrainRayTracingVertexUpdateCS",
-			default,
-			default,
-			default,
-			shaderVariant: "terrain_rt_vertex_update.compute.slang");
-		_terrainVertexUpdatePipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _terrainVertexUpdateShaderBytecode, computeThreadGroupSize: _terrainVertexUpdateThreadGroupSize));
-		return _terrainVertexUpdatePipeline;
 	}
 
 	private IGfxBottomLevelAccelerationStructure AcquireMesh(Mesh mesh, IGfxDevice device)

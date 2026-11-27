@@ -196,13 +196,13 @@ public sealed class ScreenSpaceDecalPassTests
 			renderer.Setup(value => value.GetPackedMeshIndexBuffer()).Returns(buffer.Object);
 		}
 
-		var shaderProvider = new Mock<IShaderProvider>();
+		var shaderSource = new ShaderSource(new Mock<IShaderProvider>().Object);
 		var drawRecordEncoder = new Mock<IDrawRecordEncoder>();
 		var gpuDrawDiagnosticsSampler = new Mock<IGpuDrawDiagnosticsSampler>();
 		var bindlessRegistry = new BindlessResourceRegistry();
-		var gpuDrawResources = new GpuDrawResources(shaderProvider.Object);
+		var gpuDrawResources = new GpuDrawResources(shaderSource);
 		var hardeningStats = new GpuDrawHardeningStats();
-		var gameplayUiRenderer = new GameplayUiGpuRenderer(shaderProvider.Object, bindlessRegistry, renderer.Object);
+		var gameplayUiRenderer = new GameplayUiGpuRenderer(shaderSource, bindlessRegistry, renderer.Object);
 
 		var graph = new RenderGraph(
 			registry,
@@ -219,13 +219,13 @@ public sealed class ScreenSpaceDecalPassTests
 			new MainThreadDispatcher(),
 			NullImGuiRenderer.Instance,
 			gameplayUiRenderer,
-			shaderProvider.Object,
+			shaderSource,
 			bindlessRegistry,
 			drawRecordEncoder.Object,
 			gpuDrawDiagnosticsSampler.Object);
 		var passSet = new RenderGraphPassSet(
 			renderer.Object,
-			shaderProvider.Object,
+			shaderSource,
 			bindlessRegistry,
 			gpuDrawResources,
 			hardeningStats,
@@ -237,7 +237,7 @@ public sealed class ScreenSpaceDecalPassTests
 			passSet,
 			gpuDrawResources,
 			gameplayUiRenderer,
-			shaderProvider.Object,
+			shaderSource,
 			// Shared with the graph, as in production: the graph names and tags passes from the same view state
 			// the builder records into.
 			graph.ViewRegistry);

@@ -26,26 +26,26 @@ public sealed class ShadowMapPass
 		DefaultMaxShadowDistance
 	];
 
-	private readonly IShaderProvider _shaderCompiler;
-	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), IGfxPipeline> _pipelinesByCascadeExecutionKey = new();
-	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), SharedDrawGraphicsBufferBindings> _bufferBindingsByCascadeExecutionKey = new();
-	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), ShaderReflectionLayout> _reflectionByCascadeExecutionKey = new();
+	private readonly ShaderSource _shaderSource;
+	// One per cascade and lane, built on demand. Its generation is the lanes' binding generation, so records encoded
+	// against replaced pipelines re-encode.
+	private readonly ShaderVariantSet<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), ShadowLane> _lanes;
+	// The shadow shader the camera constant buffer is reflected from.
+	private readonly GraphicsShader _cameraShader;
 	// One set per cascade, per view; see PerViewIndirectCommandSets.
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly PerViewIndirectCommandSets _indirectCommandSets;
-	// Raised whenever a lane pipeline is created, so records encoded against the previous pipelines re-encode.
-	private ulong _laneBindingGeneration;
 	private ShadowFrameData _currentFrameData = CreateDisabledFrameData();
-	private GraphicsBackendKind? _reflectionBackendKind;
-	private ShaderPropertyWriter? _cameraWriter;
 
 	// Set per cascade by the cull pass, which is where compaction runs, and read back when that
 	// cascade's draw config is built.
 	private readonly bool[] _compactedExecutionByCascade = new bool[MaxCascadeCount];
 
-	public ShadowMapPass(IShaderProvider shaderCompiler, IndirectDrawRecords records, GpuDrawResources gpuDrawResources)
+	public ShadowMapPass(ShaderSource shaderSource, IndirectDrawRecords records, GpuDrawResources gpuDrawResources)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_shaderSource = shaderSource ?? throw new ArgumentNullException(nameof(shaderSource));
+		_lanes = new ShaderVariantSet<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), ShadowLane>(shaderSource, BuildLane);
+		_cameraShader = new GraphicsShader(shaderSource, EngineShaderPrograms.ShadowMap, "vertexShader", "fragmentShader");
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		var cascadeLanes = new ILaneBindingProvider[MaxCascadeCount];
 		for (var cascadeIndex = 0; cascadeIndex < cascadeLanes.Length; cascadeIndex++)
@@ -146,7 +146,7 @@ public sealed class ShadowMapPass
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ShadowCaster);
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
-			EnsurePipeline(device, laneDefinitions[i], cascadeIndex);
+			_lanes.Get((cascadeIndex, laneDefinitions[i].Key), device);
 		}
 
 		_indirectCommandSets.Get(viewIndex, cascadeIndex).EnsureCreated(device);
@@ -155,31 +155,31 @@ public sealed class ShadowMapPass
 	public bool HasIndirectLane(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
 	{
 		ValidateCascadeIndex(cascadeIndex);
-		return _pipelinesByCascadeExecutionKey.ContainsKey((cascadeIndex, lane.Key));
+		return _lanes.TryGet((cascadeIndex, lane.Key), out _);
 	}
 
 	private IGfxPipeline? GetPipeline(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
 	{
 		ValidateCascadeIndex(cascadeIndex);
-		return _pipelinesByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var pipeline)
-			? pipeline
+		return _lanes.TryGet((cascadeIndex, lane.Key), out var variant)
+			? variant.Pipeline
 			: null;
 	}
 
 	private SharedDrawGraphicsBufferBindings? GetBufferBindings(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
 	{
 		ValidateCascadeIndex(cascadeIndex);
-		return _bufferBindingsByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var bindings)
-			? bindings
+		return _lanes.TryGet((cascadeIndex, lane.Key), out var variant)
+			? variant.BufferBindings
 			: null;
 	}
 
 	private GraphicsPassBindingSet? GetPassBindingSet(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
 	{
 		ValidateCascadeIndex(cascadeIndex);
-		if (_reflectionByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var reflection) == false)
+		if (_lanes.TryGet((cascadeIndex, lane.Key), out var variant) == false)
 			return null;
-		return GraphicsPassBindingSet.FromReflection(reflection,
+		return GraphicsPassBindingSet.FromReflection(variant.Reflection,
 			new Dictionary<string, IGfxBuffer?>(StringComparer.Ordinal)
 			{
 				["CameraParams"] = _gpuDrawResources.ShadowCameraBuffer,
@@ -200,7 +200,7 @@ public sealed class ShadowMapPass
 		ArgumentNullException.ThrowIfNull(depthTarget);
 		ArgumentNullException.ThrowIfNull(device);
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
-		EnsureCameraWriter(device.BackendKind);
+		_cameraShader.EnsureCurrent(device);
 
 		ValidateCascadeIndex(cascadeIndex);
 
@@ -212,14 +212,14 @@ public sealed class ShadowMapPass
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
 			var laneDefinition = laneDefinitions[i];
-			var pipeline = EnsurePipeline(device, laneDefinition, cascadeIndex);
+			var lane = _lanes.Get((cascadeIndex, laneDefinition.Key), device);
 			buckets.Add(new ShadowMapExecutionBucket(
 				laneDefinition.DrawKind,
 				laneDefinition.BucketId,
 				laneDefinition.ExecutionIndex,
 				laneDefinition.DebugName,
-				_bufferBindingsByCascadeExecutionKey[(cascadeIndex, laneDefinition.Key)],
-				pipeline,
+				lane.BufferBindings,
+				lane.Pipeline,
 				commandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
 		}
 
@@ -321,7 +321,7 @@ public sealed class ShadowMapPass
 				}
 
 				commandList.BindConstantBuffer(
-					_cameraWriter?.RegisterIndex ?? throw new InvalidOperationException("Shadow camera writer was not initialized."),
+					_cameraShader.Writer("CameraParams").RegisterIndex,
 					config.CameraBuffer);
 				if (config.CompactedExecutionRangeBuffer is { } executionRangeBuffer)
 				{
@@ -344,15 +344,11 @@ public sealed class ShadowMapPass
 		commandList.EndPass();
 	}
 
-	private IGfxPipeline EnsurePipeline(
-		IGfxDevice device,
-		in GpuDrawExecutionLaneDefinition lane,
-		int cascadeIndex)
+	private ShadowLane BuildLane((int CascadeIndex, GpuDrawExecutionKey ExecutionKey) key, IGfxDevice device)
 	{
-		var pipelineKeyByCascadeBucket = (cascadeIndex, lane.Key);
-		if (_pipelinesByCascadeExecutionKey.TryGetValue(pipelineKeyByCascadeBucket, out var pipeline))
+		if (GpuDrawExecutionLanes.TryGetDefinition(key.ExecutionKey, out var lane) == false)
 		{
-			return pipeline;
+			throw new InvalidOperationException($"No shadow execution lane is defined for '{key.ExecutionKey}'.");
 		}
 
 		var renderState = new RenderStateDescriptor(
@@ -361,42 +357,33 @@ public sealed class ShadowMapPass
 			depthTestEnabled: true,
 			depthWriteEnabled: true,
 			BlendMode.Opaque,
-				reverseWinding: lane.ReverseWinding);
-
-		var key = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
-			computeEntryPoint: null,
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
-			renderState: renderState,
-			layout: GraphicsLayoutKind.Material,
-			shaderVariant: $"Shadow:{lane.ShaderVariant}:C{cascadeIndex}");
-
-		var cascadeDefine = $"WOLF_SHADOW_CASCADE_INDEX={cascadeIndex}";
-		var compiled = GraphicsShaderCompiler.CompileWithReflection(
-			_shaderCompiler,
-			device.BackendKind,
+			reverseWinding: lane.ReverseWinding);
+		var state = new GraphicsPipelineState(
+			new RenderTargetFormats(Array.Empty<TextureFormat>()),
+			new DepthStencilFormat(TextureFormat.D32Float),
+			renderState,
+			GraphicsLayoutKind.Material,
+			$"Shadow:{lane.ShaderVariant}:C{key.CascadeIndex}");
+		var shader = new GraphicsShader(
+			_shaderSource,
 			EngineShaderPrograms.ShadowMap,
 			"vertexShader",
 			"fragmentShader",
 			lane.PreprocessorDefine,
 			lane.DrawKind == GpuDrawKind.Terrain ? "WOLF_SHADOW_TERRAIN" : string.Empty,
-			cascadeDefine);
-		pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
-		_pipelinesByCascadeExecutionKey[pipelineKeyByCascadeBucket] = pipeline;
-		_laneBindingGeneration++;
-		_bufferBindingsByCascadeExecutionKey[pipelineKeyByCascadeBucket] =
-			SharedDrawGraphicsBufferBindings.FromShadowReflection(compiled.ReflectionLayout);
-		_reflectionByCascadeExecutionKey[pipelineKeyByCascadeBucket] = compiled.ReflectionLayout;
-		return pipeline;
+			$"WOLF_SHADOW_CASCADE_INDEX={key.CascadeIndex}");
+		var pipeline = shader.GetPipeline(device, state);
+		var reflection = shader.ReflectionLayout;
+
+		return new ShadowLane(
+			pipeline,
+			SharedDrawGraphicsBufferBindings.FromShadowReflection(reflection),
+			reflection);
 	}
 
 	private void UploadCameraConstants(RenderGraphContext context, in ShadowMapPassConfig config, IGfxCommandList commandList)
 	{
-		var cameraWriter = _cameraWriter
-			?? throw new InvalidOperationException("Shadow camera writer was not initialized.");
+		var cameraWriter = _cameraShader.Writer("CameraParams");
 		cameraWriter.Clear();
 		cameraWriter.SetMatrix4x4("viewProjection0", _currentFrameData.CascadeViewProjection0);
 		cameraWriter.SetMatrix4x4("viewProjection1", _currentFrameData.CascadeViewProjection1);
@@ -411,25 +398,6 @@ public sealed class ShadowMapPass
 		}
 
 		commandList.SetGraphicsConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
-	}
-
-	private void EnsureCameraWriter(GraphicsBackendKind backendKind)
-	{
-		if (_reflectionBackendKind.HasValue &&
-		    _reflectionBackendKind.Value == backendKind &&
-		    _cameraWriter is not null)
-		{
-			return;
-		}
-
-		var compiled = GraphicsShaderCompiler.CompileWithReflection(
-			_shaderCompiler,
-			backendKind,
-			EngineShaderPrograms.ShadowMap,
-			"vertexShader",
-			"fragmentShader");
-		_cameraWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("CameraParams"));
-		_reflectionBackendKind = backendKind;
 	}
 
 	private static void ValidateCascadeIndex(int cascadeIndex)
@@ -696,7 +664,7 @@ public sealed class ShadowMapPass
 			_cascadeIndex = cascadeIndex;
 		}
 
-		public ulong Generation => _pass._laneBindingGeneration;
+		public ulong Generation => _pass._lanes.Generation;
 
 		public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => _pass.HasIndirectLane(_cascadeIndex, lane);
 
@@ -708,4 +676,10 @@ public sealed class ShadowMapPass
 
 		public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) => _pass.GetPipeline(_cascadeIndex, lane);
 	}
+
+	/// <summary>What a cascade lane's draws need from its shader variant.</summary>
+	private sealed record ShadowLane(
+		IGfxPipeline Pipeline,
+		SharedDrawGraphicsBufferBindings BufferBindings,
+		ShaderReflectionLayout Reflection);
 }

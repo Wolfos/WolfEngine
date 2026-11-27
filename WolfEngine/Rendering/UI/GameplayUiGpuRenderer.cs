@@ -31,13 +31,13 @@ public sealed class GameplayUiGpuRenderer
 	private readonly HashSet<Texture> _active = new(ReferenceEqualityComparer.Instance);
 	private readonly List<Texture> _unused = [];
 
-	public GameplayUiGpuRenderer(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry, IRenderer resourceFactory)
+	public GameplayUiGpuRenderer(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry, IRenderer resourceFactory)
 	{
 		_bindlessRegistry = bindlessRegistry;
 		_resourceFactory = resourceFactory;
 		_renderer = OperatingSystem.IsMacOS()
-			? new MetalUiRenderer(shaderProvider, bindlessRegistry, sampleTexture: false)
-			: new D3D12UiRenderer(shaderProvider, sampleTexture: false);
+			? new MetalUiRenderer(shaderSource, bindlessRegistry, sampleTexture: false)
+			: new D3D12UiRenderer(shaderSource, sampleTexture: false);
 	}
 
 	public IGfxTexture EnsureTarget(IGfxDevice device, Texture target)
@@ -126,5 +126,4 @@ public sealed class GameplayUiGpuRenderer
 		ColorRGBA? clearColor = null) =>
 		_renderer.Record(commandList, frame, target, clearTarget, clearColor);
 
-	public void InvalidateShaderPipeline() => _renderer.InvalidateShaderPipeline();
 }

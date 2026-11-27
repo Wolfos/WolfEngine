@@ -61,5 +61,4 @@ internal sealed class UiCompositor
 		device.Submit(commandList);
 	}
 
-	public void InvalidateShaderPipeline() => _imGuiRenderer.InvalidateShaderPipeline();
 }

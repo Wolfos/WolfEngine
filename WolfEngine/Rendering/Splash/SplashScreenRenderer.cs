@@ -34,21 +34,19 @@ internal sealed class SplashScreenRenderer
 
 	private static readonly ushort[] TriangleIndices = [0, 1, 2];
 
-	private readonly IShaderProvider _shaderProvider;
+	private readonly GraphicsShader _shader;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly IRenderer _renderer;
-	private IGfxPipeline? _pipeline;
-	private TextureFormat _pipelineTargetFormat;
-	private GraphicsBackendKind? _compiledBackendKind;
-	private ShaderPropertyWriter? _paramsWriter;
 	private IGfxBuffer? _indexBuffer;
 	private int _contentRevision = -1;
 	private ITextureResources? _logoTexture;
 	private ITextureResources? _textTexture;
 
-	public SplashScreenRenderer(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry, IRenderer renderer)
+	public SplashScreenRenderer(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry, IRenderer renderer)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_shader = new GraphicsShader(shaderSource, EngineShaderPrograms.SplashScreen, "vertexShader", "fragmentShader");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 	}
@@ -77,8 +75,8 @@ internal sealed class SplashScreenRenderer
 		}
 
 		EnsureTextures(device, content, frame.ContentRevision);
-		var pipeline = EnsurePipeline(device, target.Descriptor.Format);
-		var writer = _paramsWriter ?? throw new InvalidOperationException("The splash screen writer was not initialized.");
+		var pipeline = GetPipeline(device, target.Descriptor.Format);
+		var writer = _shader.Writer("SplashParams");
 		WriteParams(writer, content, frame.Pose, width, height);
 
 		var commandList = device.BeginGraphics();
@@ -101,13 +99,6 @@ internal sealed class SplashScreenRenderer
 		commandList.EndPass();
 		commandList.EndEvent();
 		device.Submit(commandList);
-	}
-
-	public void InvalidateShaderPipeline()
-	{
-		_pipeline = null;
-		_paramsWriter = null;
-		_compiledBackendKind = null;
 	}
 
 	private void WriteParams(ShaderPropertyWriter writer, SplashScreenContent content, SplashScreenPose pose, int width, int height)
@@ -210,41 +201,20 @@ internal sealed class SplashScreenRenderer
 			"Splash screen texture");
 	}
 
-	private IGfxPipeline EnsurePipeline(IGfxDevice device, TextureFormat targetFormat)
+	private IGfxPipeline GetPipeline(IGfxDevice device, TextureFormat targetFormat)
 	{
-		if (_pipeline is not null &&
-		    _pipelineTargetFormat == targetFormat &&
-		    _compiledBackendKind == device.BackendKind)
-		{
-			return _pipeline;
-		}
-
-		var compiled = GraphicsShaderCompiler.CompileWithReflection(
-			_shaderProvider,
-			device.BackendKind,
-			EngineShaderPrograms.SplashScreen,
-			"vertexShader",
-			"fragmentShader");
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
 			CullMode.None,
 			depthTestEnabled: false,
 			depthWriteEnabled: false,
 			BlendMode.AlphaBlend);
-		var key = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
-			computeEntryPoint: null,
-			renderTargets: new(new[] { targetFormat }),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: renderState,
-			shaderVariant: "SplashScreen");
-
-		_pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
-		_pipelineTargetFormat = targetFormat;
-		_compiledBackendKind = device.BackendKind;
-		_paramsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("SplashParams"));
+		var state = new GraphicsPipelineState(
+			new RenderTargetFormats(new[] { targetFormat }),
+			new DepthStencilFormat(TextureFormat.Unknown),
+			renderState,
+			Variant: "SplashScreen");
+		var pipeline = _shader.GetPipeline(device, state);
 		if (_indexBuffer is null)
 		{
 			var indexBuffer = device.CreateBuffer(new BufferDescriptor(
@@ -256,6 +226,6 @@ internal sealed class SplashScreenRenderer
 			_indexBuffer = indexBuffer;
 		}
 
-		return _pipeline;
+		return pipeline;
 	}
 }

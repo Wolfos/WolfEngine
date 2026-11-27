@@ -283,16 +283,16 @@ internal sealed class RenderGraphFrameBuilder
 		RenderGraphPassSet passSet,
 		GpuDrawResources gpuDrawResources,
 		GameplayUiGpuRenderer gameplayUiRenderer,
-		IShaderProvider shaderProvider,
+		ShaderSource shaderSource,
 		RenderViewRegistry viewRegistry)
 	{
 		_viewRegistry = viewRegistry ?? throw new ArgumentNullException(nameof(viewRegistry));
 		_passSet = passSet;
 		_rayTracingScene = passSet.RayTracingScene;
-		_skinningPass = new SkinningPass(shaderProvider);
+		_skinningPass = new SkinningPass(shaderSource);
 		_resources = resources;
 		_renderer = renderer;
-		_renderFeatureHost = new RenderFeatureHost(resources, renderer, passSet.BindlessResourceRegistry);
+		_renderFeatureHost = new RenderFeatureHost(resources, renderer, passSet.BindlessResourceRegistry, shaderSource);
 		_ambientOcclusionPass = passSet.AmbientOcclusionPass;
 		_ambientOcclusionBlurPass = passSet.AmbientOcclusionBlurPass;
 		_ambientOcclusionUpsamplePass = passSet.AmbientOcclusionUpsamplePass;
@@ -334,13 +334,6 @@ internal sealed class RenderGraphFrameBuilder
 		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
 		_shadowMapExecute = ExecuteShadowMap;
 		_gpuDrawCameraCullExecute = ExecuteGpuDrawCullCamera;
-	}
-
-	public void InvalidateShaderPipelines()
-	{
-		_passSet.InvalidateShaderPipelines();
-		ShaderPipelineInvalidation.Invalidate(_rayTracingScene.Resources);
-		_skinningPass.InvalidateShaders();
 	}
 
 	public void ResetRayTracingScene()

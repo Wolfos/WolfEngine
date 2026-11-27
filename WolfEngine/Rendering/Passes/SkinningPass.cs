@@ -127,14 +127,9 @@ public sealed class SkinningPass
     private ulong _frameSubmission;
     public bool WasDeformed(Mesh mesh) => _poseHistory.TryGetValue(mesh, out var history) && history.DeformedSubmission == _frameSubmission;
 
-	private readonly IShaderProvider _shaderProvider;
+	private readonly ComputeKernel _kernel;
 	private readonly Dictionary<Mesh, SkinAttributeRange> _skinRangesBySourceMesh = new(new ReferenceComparer<Mesh>());
 	private readonly List<Mesh> _skinUploadOrder = new();
-
-	private IGfxPipeline? _pipeline;
-	private ShaderPropertyWriter? _paramsWriter;
-	private ComputeThreadGroupSize? _threadGroupSize;
-	private ReadOnlyMemory<byte>? _shaderBytecode;
 
 	private IGfxBuffer? _skinVertexBuffer;
 	private uint _skinVertexCapacity;
@@ -155,9 +150,11 @@ public sealed class SkinningPass
 
 	private int _lastDispatchedInstanceCount;
 
-	public SkinningPass(IShaderProvider shaderProvider)
+	public SkinningPass(ShaderSource shaderSource)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernel = new ComputeKernel(shaderSource, EngineShaderPrograms.Skinning, "SkinningCS");
 	}
 
 	/// <summary>Skinned instances deformed during the most recent recording. Used by tests and diagnostics.</summary>
@@ -208,11 +205,9 @@ public sealed class SkinningPass
 			}
 		}
 
-		var pipeline = EnsurePipeline(device);
-		var writer = _paramsWriter
-			?? throw new InvalidOperationException("Skinning parameters were not reflected.");
-		var threadGroupSize = _threadGroupSize
-			?? throw new InvalidOperationException("Skinning thread group size was not reflected.");
+		var pipeline = _kernel.GetPipeline(device);
+		var writer = _kernel.Writer("SkinningParams");
+		var threadGroupSize = _kernel.ThreadGroupSize;
 
 		commandList.BindPipeline(pipeline);
 		commandList.SetComputeBuffer(0, packedVertexBuffer);
@@ -622,45 +617,6 @@ public sealed class SkinningPass
 
 		((IWritableGpuBuffer)_boneMatrixBuffer!).Write<Matrix4x4>(staging[..totalMatrices]);
 		return true;
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device)
-	{
-		if (_pipeline is not null)
-		{
-			return _pipeline;
-		}
-
-		var compiled = _shaderProvider.GetComputeShaderWithReflection(
-			EngineShaderPrograms.Skinning,
-			"SkinningCS",
-			device.BackendKind);
-		_shaderBytecode = compiled.Bytecode;
-		_threadGroupSize = compiled.ThreadGroupSize;
-		_paramsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("SkinningParams"));
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			null,
-			null,
-			"SkinningCS",
-			default,
-			default,
-			default,
-			shaderVariant: "skinning.compute.slang");
-		_pipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _shaderBytecode, computeThreadGroupSize: _threadGroupSize));
-		return _pipeline;
-	}
-
-	/// <summary>Drops cached shader state so a shader reload rebuilds the pipeline.</summary>
-	public void InvalidateShaders()
-	{
-		_pipeline = null;
-		_paramsWriter = null;
-		_threadGroupSize = null;
-		_shaderBytecode = null;
 	}
 
 	private readonly record struct SkinAttributeRange(uint FirstVertex, uint VertexCount);

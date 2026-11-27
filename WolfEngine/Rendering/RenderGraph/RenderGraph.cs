@@ -57,8 +57,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	private readonly UiCompositor _uiCompositor;
 	private readonly SplashScreen _splashScreen;
 	private readonly SplashScreenRenderer _splashScreenRenderer;
+	private readonly ShaderSource _shaderSource;
 	private long _pendingShaderRevision;
-	private long _appliedShaderRevision;
 	private readonly RenderViewRegistry _viewRegistry = new();
 	private RenderViewState _view = null!;
 	// The view whose passes are being recorded, or None while recording shared passes.
@@ -101,7 +101,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		IMainThreadDispatcher mainThreadDispatcher,
 		IImGuiRenderer imGuiRenderer,
 		GameplayUiGpuRenderer gameplayUiRenderer,
-		IShaderProvider shaderProvider,
+		ShaderSource shaderSource,
 		BindlessResourceRegistry bindlessResourceRegistry,
 		IDrawRecordEncoder drawRecordEncoder,
 		IGpuDrawDiagnosticsSampler gpuDrawDiagnosticsSampler,
@@ -113,9 +113,11 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
+		_shaderSource = shaderSource ?? throw new ArgumentNullException(nameof(shaderSource));
+		_pendingShaderRevision = shaderSource.AppliedRevision;
 		var passSet = new RenderGraphPassSet(
 			renderer,
-			shaderProvider,
+			shaderSource,
 			bindlessResourceRegistry,
 			gpuDrawResources,
 			hardeningStats,
@@ -127,14 +129,14 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			passSet,
 			gpuDrawResources,
 			gameplayUiRenderer,
-			shaderProvider,
+			shaderSource,
 			_viewRegistry);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_gpuProfiler = gpuProfiler ?? throw new ArgumentNullException(nameof(gpuProfiler));
 		_uiCompositor = new UiCompositor(imGuiRenderer ?? throw new ArgumentNullException(nameof(imGuiRenderer)));
 		_splashScreen = splashScreen ?? new SplashScreen();
-		_splashScreenRenderer = new SplashScreenRenderer(shaderProvider, bindlessResourceRegistry, renderer);
+		_splashScreenRenderer = new SplashScreenRenderer(shaderSource, bindlessResourceRegistry, renderer);
 		_gameplayUiRenderer = gameplayUiRenderer ?? throw new ArgumentNullException(nameof(gameplayUiRenderer));
 		_uiFrameProvider = uiFrameProvider;
 		_gameplayUiFrameProvider = gameplayUiFrameProvider ?? throw new ArgumentNullException(nameof(gameplayUiFrameProvider));
@@ -152,7 +154,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
 		_gpuHardeningLogInterval = GraphicsConfig.GpuHardeningLogIntervalFrames;
-		shaderProvider.RevisionChanged += revision => Interlocked.Exchange(ref _pendingShaderRevision, revision);
+		shaderSource.Provider.RevisionChanged += revision => Interlocked.Exchange(ref _pendingShaderRevision, revision);
 	}
 
 
@@ -351,14 +353,9 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	private void ApplyPendingShaderReload()
 	{
 		var revision = Interlocked.Read(ref _pendingShaderRevision);
-		if (revision == 0 || revision == _appliedShaderRevision) return;
+		if (revision == _shaderSource.AppliedRevision) return;
 		var device = _renderer.GetGfxDevice();
 		device.WaitForIdle();
-		_frameBuilder.InvalidateShaderPipelines();
-		ShaderPipelineInvalidation.Invalidate(_gpuDrawResources);
-		ShaderPipelineInvalidation.Invalidate(_renderer);
-		_uiCompositor.InvalidateShaderPipeline();
-		_splashScreenRenderer.InvalidateShaderPipeline();
 		device.ClearPipelineCache();
 		lock (_resourceSync)
 		{
@@ -369,7 +366,9 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			}
 		}
 
-		_appliedShaderRevision = revision;
+		// Last: kernels, graphics shaders and shader variant sets rebuild from the new shaders on their next use,
+		// which can only be after this point, so none of them can hold a pipeline the cache clear just disposed.
+		_shaderSource.ApplyRevision(revision);
 	}
 
 	/// <summary>

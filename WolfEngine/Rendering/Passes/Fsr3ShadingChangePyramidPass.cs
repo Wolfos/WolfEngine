@@ -24,21 +24,16 @@ public sealed class Fsr3ShadingChangePyramidPass
 	/// <summary>Pyramid levels the shader declares.</summary>
 	public const int SpdMipCount = 6;
 
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly ComputeKernel _kernel;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline? _pipeline;
-	private ReadOnlyMemory<byte> _computeShader;
-	private ComputeThreadGroupSize? _threadGroupSize;
-	private GraphicsBackendKind? _compiledBackendKind;
-	private ShaderPropertyWriter? _bindlessWriter;
-	private ShaderPropertyWriter? _constantsWriter;
-	private ShaderPropertyWriter? _spdWriter;
 	private DescriptorHandle _pointSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 
-	public Fsr3ShadingChangePyramidPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public Fsr3ShadingChangePyramidPass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernel = new ComputeKernel(shaderSource, EngineShaderPrograms.Fsr3ShadingChangePyramid, "Fsr3ShadingChangePyramidCS");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
@@ -62,7 +57,7 @@ public sealed class Fsr3ShadingChangePyramidPass
 				nameof(spdMips));
 		}
 
-		var pipeline = EnsurePipeline(device);
+		var pipeline = _kernel.GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 		EnsureSamplers();
 
@@ -95,8 +90,7 @@ public sealed class Fsr3ShadingChangePyramidPass
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
 
-		var bindlessWriter = _bindlessWriter
-			?? throw new InvalidOperationException("FSR3 shading change pyramid bindless writer was not initialized.");
+		var bindlessWriter = _kernel.Writer("Fsr3BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("currentLumaReadHandle", config.CurrentLumaHandle.Value);
 		bindlessWriter.SetUInt("previousLumaHandle", config.PreviousLumaHandle.Value);
@@ -113,13 +107,11 @@ public sealed class Fsr3ShadingChangePyramidPass
 		bindlessWriter.SetUInt("linearSamplerHandle", config.LinearSampler.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		var constantsWriter = _constantsWriter
-			?? throw new InvalidOperationException("FSR3 constants writer was not initialized.");
+		var constantsWriter = _kernel.Writer("cbFSR3Upscaler");
 		Fsr3Constants.Write(constantsWriter, config.Constants);
 		commandList.SetComputeConstants(constantsWriter.RegisterIndex, constantsWriter.AsBytes());
 
-		var spdWriter = _spdWriter
-			?? throw new InvalidOperationException("FSR3 SPD constants writer was not initialized.");
+		var spdWriter = _kernel.Writer("cbSPD");
 		var setup = config.SpdSetup;
 		spdWriter.Clear();
 		spdWriter.SetUInt("spdMips", setup.MipCount);
@@ -149,60 +141,5 @@ public sealed class Fsr3ShadingChangePyramidPass
 			_linearSampler = _bindlessRegistry.GetSamplerHandle(new SamplerDescriptor(
 				FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp));
 		}
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device)
-	{
-		if (_pipeline is not null)
-		{
-			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
-			{
-				throw new InvalidOperationException(
-					$"Fsr3ShadingChangePyramidPass is already compiled for backend '{_compiledBackendKind.Value}', but was requested for '{device.BackendKind}'.");
-			}
-
-			return _pipeline;
-		}
-
-		EnsureReflectionWriters(device.BackendKind);
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "Fsr3ShadingChangePyramidCS",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: "fsr3_shading_change_pyramid.compute.slang");
-		_pipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _computeShader, computeThreadGroupSize: _threadGroupSize));
-		return _pipeline;
-	}
-
-	private void EnsureReflectionWriters(GraphicsBackendKind backendKind)
-	{
-		if (_compiledBackendKind.HasValue &&
-		    _compiledBackendKind.Value == backendKind &&
-		    _bindlessWriter is not null &&
-		    _constantsWriter is not null &&
-		    _spdWriter is not null &&
-		    _computeShader.IsEmpty == false &&
-		    _threadGroupSize.HasValue)
-		{
-			return;
-		}
-
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.Fsr3ShadingChangePyramid,
-			"Fsr3ShadingChangePyramidCS",
-			backendKind);
-		_computeShader = compiled.Bytecode;
-		_threadGroupSize = compiled.ThreadGroupSize;
-		var reflection = compiled.ReflectionLayout;
-		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("Fsr3BindlessHandles"));
-		_constantsWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("cbFSR3Upscaler"));
-		_spdWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("cbSPD"));
-		_compiledBackendKind = backendKind;
 	}
 }

@@ -56,6 +56,7 @@ public static class WolfEngine
 		services.AddSingleton<GpuDrawHardeningStats>();
 		services.AddSingleton<GpuProfiler>();
 		services.AddSingleton<BindlessResourceRegistry>();
+		services.AddSingleton<Rendering.Shaders.ShaderSource>();
 		services.AddSingleton<RenderGraphResourceRegistry>();
 		services.AddSingleton<Rendering.Features.RenderFeatureRegistry>();
 		services.AddSingleton<Rendering.Features.IRenderFeatureRegistry>(sp =>

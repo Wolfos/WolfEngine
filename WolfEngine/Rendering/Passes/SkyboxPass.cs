@@ -47,23 +47,12 @@ public sealed class SkyboxPass
 	private const float RelativeAltitudeChange = 0.02f;
 
 	private readonly IRenderer _renderer;
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly ComputeKernel _gradientSky;
+	private readonly ComputeKernel _iblIrradiance;
+	private readonly ComputeKernel _iblPrefilter;
+	private readonly ComputeKernel _iblBrdfLut;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private DescriptorHandle _skyboxSamplerHandle = DescriptorHandle.Invalid;
-	private IGfxPipeline? _iblIrradiancePipeline;
-	private IGfxPipeline? _iblPrefilterPipeline;
-	private IGfxPipeline? _iblBrdfLutPipeline;
-	private IGfxPipeline? _gradientSkyPipeline;
-	private GraphicsBackendKind? _reflectionBackendKind;
-	private ComputeThreadGroupSize? _iblIrradianceThreadGroupSize;
-	private ComputeThreadGroupSize? _iblPrefilterThreadGroupSize;
-	private ComputeThreadGroupSize? _iblBrdfThreadGroupSize;
-	private ComputeThreadGroupSize? _gradientSkyThreadGroupSize;
-	private ShaderPropertyWriter? _iblIrradianceWriter;
-	private ShaderPropertyWriter? _iblPrefilterWriter;
-	private ShaderPropertyWriter? _iblBrdfWriter;
-	private ShaderPropertyWriter? _gradientBindlessWriter;
-	private ShaderPropertyWriter? _gradientParamsWriter;
 	// The BRDF LUT depends on nothing about the sky, so every view shares this one.
 	private IGfxTexture? _brdfLut;
 	private bool _brdfLutValid;
@@ -73,12 +62,17 @@ public sealed class SkyboxPass
 	private readonly Action<RenderGraphContext> _prefilterExecute;
 	private readonly Action<RenderGraphContext> _brdfLutExecute;
 
-	public SkyboxPass(IRenderer renderer, IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public SkyboxPass(IRenderer renderer, ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_gradientSky = new ComputeKernel(shaderSource, EngineShaderPrograms.GradientSky, "GradientSkyCSMain");
+		_iblIrradiance = new ComputeKernel(shaderSource, EngineShaderPrograms.IblIrradiance, "IblIrradianceCSMain");
+		_iblPrefilter = new ComputeKernel(shaderSource, EngineShaderPrograms.IblPrefilter, "IblPrefilterCSMain");
+		_iblBrdfLut = new ComputeKernel(shaderSource, EngineShaderPrograms.IblBrdfLut, "IblBrdfCSMain");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
-		Atmosphere = new AtmospherePass(renderer, shaderCompiler, bindlessRegistry);
+		Atmosphere = new AtmospherePass(renderer, shaderSource, bindlessRegistry);
 		_environmentExecute = context => RecordEnvironment(context, context.ViewState.Sky);
 		_irradianceExecute = context => RecordIrradiance(context, context.ViewState.Sky, context.ViewState.FrameResources.SkyEnvironment);
 		_prefilterExecute = context => RecordPrefilter(context, context.ViewState.Sky, context.ViewState.FrameResources.SkyEnvironment);
@@ -339,19 +333,17 @@ public sealed class SkyboxPass
 
 	private void RecordGradientEnvironment(IGfxCommandList commandList, IGfxTexture environment, in GradientSkyConfig config)
 	{
-		var pipeline = GetGradientSkyPipeline(GetGfxDevice());
+		var pipeline = _gradientSky.GetPipeline(GetGfxDevice());
 		commandList.BindPipeline(pipeline);
 
-		var bindlessWriter = _gradientBindlessWriter
-			?? throw new InvalidOperationException("Gradient sky bindless writer was not initialized.");
+		var bindlessWriter = _gradientSky.Writer("BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("environmentHandle", environment.UnorderedAccessView.Value);
 		bindlessWriter.SetUInt("width", (uint)environment.Descriptor.Width);
 		bindlessWriter.SetUInt("height", (uint)environment.Descriptor.Height);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		var paramsWriter = _gradientParamsWriter
-			?? throw new InvalidOperationException("Gradient sky parameter writer was not initialized.");
+		var paramsWriter = _gradientSky.Writer("GradientParams");
 		paramsWriter.Clear();
 		paramsWriter.SetColorRGBA("zenithColor", config.ZenithColor);
 		paramsWriter.SetColorRGBA("horizonColor", config.HorizonColor);
@@ -359,8 +351,7 @@ public sealed class SkyboxPass
 		paramsWriter.SetVector4("shape", new Vector4(config.SkyExponent, config.GroundExponent, config.Intensity, 0.0f));
 		commandList.SetComputeConstants(paramsWriter.RegisterIndex, paramsWriter.AsBytes());
 
-		var threadGroupSize = _gradientSkyThreadGroupSize
-			?? throw new InvalidOperationException("Gradient sky threadgroup size was not initialized.");
+		var threadGroupSize = _gradientSky.ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)environment.Descriptor.Width,
 			(uint)environment.Descriptor.Height);
@@ -375,10 +366,9 @@ public sealed class SkyboxPass
 		DescriptorHandle samplerHandle,
 		uint sampleCount)
 	{
-		var pipeline = GetIblIrradiancePipeline(gfxDevice);
+		var pipeline = _iblIrradiance.GetPipeline(gfxDevice);
 		commandList.BindPipeline(pipeline);
-		var writer = _iblIrradianceWriter
-			?? throw new InvalidOperationException("IBL irradiance reflection writer was not initialized.");
+		var writer = _iblIrradiance.Writer("BindlessHandles");
 		writer.Clear();
 		source.Write(writer);
 		writer.SetUInt("irradianceHandle", irradianceTex.UnorderedAccessView.Value);
@@ -387,8 +377,7 @@ public sealed class SkyboxPass
 		writer.SetUInt("height", IrradianceSize);
 		writer.SetUInt("sampleCount", sampleCount);
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
-		var threadGroupSize = _iblIrradianceThreadGroupSize
-			?? throw new InvalidOperationException("IBL irradiance threadgroup size was not initialized.");
+		var threadGroupSize = _iblIrradiance.ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(IrradianceSize, IrradianceSize);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
@@ -401,10 +390,9 @@ public sealed class SkyboxPass
 		DescriptorHandle samplerHandle,
 		uint sampleCount)
 	{
-		var pipeline = GetIblPrefilterPipeline(gfxDevice);
+		var pipeline = _iblPrefilter.GetPipeline(gfxDevice);
 		commandList.BindPipeline(pipeline);
-		var writer = _iblPrefilterWriter
-			?? throw new InvalidOperationException("IBL prefilter reflection writer was not initialized.");
+		var writer = _iblPrefilter.Writer("BindlessHandles");
 		writer.Clear();
 		source.Write(writer);
 		writer.SetUInt("prefilterHandle", prefilterTex.UnorderedAccessView.Value);
@@ -417,8 +405,7 @@ public sealed class SkyboxPass
 		writer.SetUInt("sliceHeight", (uint)(prefilterHeight / PrefilterSlices));
 		writer.SetUInt("sampleCount", sampleCount);
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
-		var threadGroupSize = _iblPrefilterThreadGroupSize
-			?? throw new InvalidOperationException("IBL prefilter threadgroup size was not initialized.");
+		var threadGroupSize = _iblPrefilter.ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)prefilterWidth,
 			(uint)prefilterHeight);
@@ -427,15 +414,13 @@ public sealed class SkyboxPass
 
 	private void RecordBrdfLut(IGfxCommandList commandList, IGfxDevice gfxDevice, IGfxTexture brdfTex)
 	{
-		var pipeline = GetIblBrdfPipeline(gfxDevice);
+		var pipeline = _iblBrdfLut.GetPipeline(gfxDevice);
 		commandList.BindPipeline(pipeline);
-		var writer = _iblBrdfWriter
-			?? throw new InvalidOperationException("IBL BRDF reflection writer was not initialized.");
+		var writer = _iblBrdfLut.Writer("BindlessHandles");
 		writer.Clear();
 		writer.SetUInt("brdfHandle", brdfTex.UnorderedAccessView.Value);
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
-		var threadGroupSize = _iblBrdfThreadGroupSize
-			?? throw new InvalidOperationException("IBL BRDF threadgroup size was not initialized.");
+		var threadGroupSize = _iblBrdfLut.ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(BrdfSize, BrdfSize);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
@@ -588,107 +573,6 @@ public sealed class SkyboxPass
 		return _skyboxSamplerHandle;
 	}
 
-	private IGfxPipeline GetGradientSkyPipeline(IGfxDevice gfxDevice)
-	{
-		if (_gradientSkyPipeline is not null)
-		{
-			return _gradientSkyPipeline;
-		}
-
-		var compiled = CompileComputeWithReflection(EngineShaderPrograms.GradientSky, "GradientSkyCSMain", gfxDevice.BackendKind);
-		_gradientSkyThreadGroupSize = compiled.ThreadGroupSize;
-		_gradientBindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		_gradientParamsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("GradientParams"));
-		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _gradientSkyThreadGroupSize);
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "GradientSkyCSMain",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			layout: GraphicsLayoutKind.Default);
-		_gradientSkyPipeline = gfxDevice.GetOrCreatePipeline(pipelineKey, shaders);
-		return _gradientSkyPipeline;
-	}
-
-	private IGfxPipeline GetIblIrradiancePipeline(IGfxDevice gfxDevice)
-	{
-		if (_iblIrradiancePipeline is not null)
-		{
-			return _iblIrradiancePipeline;
-		}
-
-		var compiled = CompileComputeWithReflection(EngineShaderPrograms.IblIrradiance, "IblIrradianceCSMain", gfxDevice.BackendKind);
-		_iblIrradianceThreadGroupSize = compiled.ThreadGroupSize;
-		_iblIrradianceWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _iblIrradianceThreadGroupSize);
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "IblIrradianceCSMain",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			layout: GraphicsLayoutKind.Default);
-		_iblIrradiancePipeline = gfxDevice.GetOrCreatePipeline(pipelineKey, shaders);
-		return _iblIrradiancePipeline;
-	}
-
-	private IGfxPipeline GetIblPrefilterPipeline(IGfxDevice gfxDevice)
-	{
-		if (_iblPrefilterPipeline is not null)
-		{
-			return _iblPrefilterPipeline;
-		}
-
-		var compiled = CompileComputeWithReflection(EngineShaderPrograms.IblPrefilter, "IblPrefilterCSMain", gfxDevice.BackendKind);
-		_iblPrefilterThreadGroupSize = compiled.ThreadGroupSize;
-		_iblPrefilterWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _iblPrefilterThreadGroupSize);
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "IblPrefilterCSMain",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			layout: GraphicsLayoutKind.Default);
-		_iblPrefilterPipeline = gfxDevice.GetOrCreatePipeline(pipelineKey, shaders);
-		return _iblPrefilterPipeline;
-	}
-
-	private IGfxPipeline GetIblBrdfPipeline(IGfxDevice gfxDevice)
-	{
-		if (_iblBrdfLutPipeline is not null)
-		{
-			return _iblBrdfLutPipeline;
-		}
-
-		var compiled = CompileComputeWithReflection(EngineShaderPrograms.IblBrdfLut, "IblBrdfCSMain", gfxDevice.BackendKind);
-		_iblBrdfThreadGroupSize = compiled.ThreadGroupSize;
-		_iblBrdfWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _iblBrdfThreadGroupSize);
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "IblBrdfCSMain",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			layout: GraphicsLayoutKind.Default);
-		_iblBrdfLutPipeline = gfxDevice.GetOrCreatePipeline(pipelineKey, shaders);
-		return _iblBrdfLutPipeline;
-	}
-
 	private IGfxDevice GetGfxDevice()
 	{
 		var device = _renderer.GetGfxDevice();
@@ -698,20 +582,5 @@ public sealed class SkyboxPass
 		}
 
 		return device;
-	}
-
-	private CompiledComputeShaderWithReflection CompileComputeWithReflection(
-		ShaderProgramId shaderProgram,
-		string entryPoint,
-		GraphicsBackendKind backendKind)
-	{
-		if (_reflectionBackendKind.HasValue && _reflectionBackendKind.Value != backendKind)
-		{
-			throw new InvalidOperationException(
-				$"SkyboxPass was already compiled for backend '{_reflectionBackendKind.Value}', but was requested for '{backendKind}'.");
-		}
-
-		_reflectionBackendKind = backendKind;
-		return _shaderCompiler.GetComputeShaderWithReflection(shaderProgram, entryPoint, backendKind);
 	}
 }

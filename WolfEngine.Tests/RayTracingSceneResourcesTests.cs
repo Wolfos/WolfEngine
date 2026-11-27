@@ -6,6 +6,7 @@ using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Tests;
 
@@ -1795,7 +1796,7 @@ public sealed class RayTracingSceneResourcesTests
 		database.CopyUpdates(updates);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources(new ShaderCompiler());
+		var resources = new RayTracingSceneResources(new ShaderSource(new ShaderCompiler()));
 
 		resources.RecordUpdate(context, new TestRenderer(new TestDevice()), updates);
 
@@ -1826,7 +1827,7 @@ public sealed class RayTracingSceneResourcesTests
 		var entity = new Entity(1, 1);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources(new ShaderCompiler());
+		var resources = new RayTracingSceneResources(new ShaderSource(new ShaderCompiler()));
 		var renderer = new TestRenderer(new TestDevice());
 
 		database.BeginSync();
@@ -1860,7 +1861,7 @@ public sealed class RayTracingSceneResourcesTests
 		var alphaTestedMaterial = new Material("leaves") { AlphaMode = AlphaMode.AlphaTest };
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources(new ShaderCompiler());
+		var resources = new RayTracingSceneResources(new ShaderSource(new ShaderCompiler()));
 
 		database.BeginSync();
 		database.TouchMesh(new Entity(1, 1), CreateTestMesh(), opaqueMaterial, Matrix4x4.Identity);
@@ -1889,7 +1890,7 @@ public sealed class RayTracingSceneResourcesTests
 		var entity = new Entity(1, 1);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources(new ShaderCompiler());
+		var resources = new RayTracingSceneResources(new ShaderSource(new ShaderCompiler()));
 		var renderer = new TestRenderer(new TestDevice());
 
 		database.BeginSync();
@@ -1924,7 +1925,7 @@ public sealed class RayTracingSceneResourcesTests
 		var entity = new Entity(1, 1);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources(new ShaderCompiler());
+		var resources = new RayTracingSceneResources(new ShaderSource(new ShaderCompiler()));
 		var renderer = new TestRenderer(new TestDevice());
 
 		database.BeginSync();
@@ -1961,7 +1962,7 @@ public sealed class RayTracingSceneResourcesTests
 		var entity = new Entity(1, 1);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources(new ShaderCompiler());
+		var resources = new RayTracingSceneResources(new ShaderSource(new ShaderCompiler()));
 		var renderer = new TestRenderer(new TestDevice());
 		var instanceData = CreateTerrainInstanceData();
 		var surface = CreateTerrainSurface();
@@ -2016,7 +2017,7 @@ public sealed class RayTracingSceneResourcesTests
 		var entity = new Entity(1, 1);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources(new ShaderCompiler());
+		var resources = new RayTracingSceneResources(new ShaderSource(new ShaderCompiler()));
 		var renderer = new TestRenderer(new TestDevice());
 
 		database.BeginSync();

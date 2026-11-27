@@ -7,8 +7,6 @@ public interface IUiDrawRenderer
 {
 	void EnsureResources(IGfxDevice device, UiFrameData frame);
 
-	void InvalidateShaderPipeline();
-
 	void Record(IGfxCommandList commandList, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
 		ColorRGBA? clearColor = null);
 }

@@ -24,21 +24,16 @@ public sealed class Fsr3RcasPass
 	/// </summary>
 	private const int ThreadGroupWorkRegionDim = 16;
 
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly ComputeKernel _kernel;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline? _pipeline;
-	private ReadOnlyMemory<byte> _computeShader;
-	private ComputeThreadGroupSize? _threadGroupSize;
-	private GraphicsBackendKind? _compiledBackendKind;
-	private ShaderPropertyWriter? _bindlessWriter;
-	private ShaderPropertyWriter? _constantsWriter;
-	private ShaderPropertyWriter? _rcasWriter;
 	private DescriptorHandle _pointSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 
-	public Fsr3RcasPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public Fsr3RcasPass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernel = new ComputeKernel(shaderSource, EngineShaderPrograms.Fsr3Rcas, "Fsr3RcasCS");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
@@ -55,7 +50,7 @@ public sealed class Fsr3RcasPass
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
 
-		var pipeline = EnsurePipeline(device);
+		var pipeline = _kernel.GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 		EnsureSamplers();
 
@@ -80,8 +75,7 @@ public sealed class Fsr3RcasPass
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
 
-		var bindlessWriter = _bindlessWriter
-			?? throw new InvalidOperationException("FSR3 RCAS bindless writer was not initialized.");
+		var bindlessWriter = _kernel.Writer("Fsr3BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("rcasInputHandle", config.InputHandle.Value);
 		bindlessWriter.SetUInt("upscaledOutputHandle", config.OutputHandle.Value);
@@ -105,8 +99,7 @@ public sealed class Fsr3RcasPass
 	/// </summary>
 	private void WriteSharedConstants(IGfxCommandList commandList, in Fsr3RcasPassConfig config)
 	{
-		var writer = _constantsWriter
-			?? throw new InvalidOperationException("FSR3 constants writer was not initialized.");
+		var writer = _kernel.Writer("cbFSR3Upscaler");
 		Fsr3Constants.Write(writer, config.Constants);
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
 	}
@@ -117,8 +110,7 @@ public sealed class Fsr3RcasPass
 	/// </summary>
 	private void WriteRcasConstants(IGfxCommandList commandList, in Fsr3RcasPassConfig config)
 	{
-		var writer = _rcasWriter
-			?? throw new InvalidOperationException("FSR3 RCAS constants writer was not initialized.");
+		var writer = _kernel.Writer("cbRCAS");
 
 		// ffx_fsr3upscaler.cpp: sharpenessRemapped = (-2 * sharpness) + 2, so a dispatch
 		// sharpness of 1 becomes 0 stops (maximum) and 0 becomes 2 stops.
@@ -154,60 +146,5 @@ public sealed class Fsr3RcasPass
 				AddressMode.Clamp,
 				AddressMode.Clamp));
 		}
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device)
-	{
-		if (_pipeline is not null)
-		{
-			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
-			{
-				throw new InvalidOperationException(
-					$"Fsr3RcasPass is already compiled for backend '{_compiledBackendKind.Value}', but was requested for '{device.BackendKind}'.");
-			}
-
-			return _pipeline;
-		}
-
-		EnsureReflectionWriters(device.BackendKind);
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "Fsr3RcasCS",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: "fsr3_rcas.compute.slang");
-		_pipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _computeShader, computeThreadGroupSize: _threadGroupSize));
-		return _pipeline;
-	}
-
-	private void EnsureReflectionWriters(GraphicsBackendKind backendKind)
-	{
-		if (_compiledBackendKind.HasValue &&
-		    _compiledBackendKind.Value == backendKind &&
-		    _bindlessWriter is not null &&
-		    _constantsWriter is not null &&
-		    _rcasWriter is not null &&
-		    _computeShader.IsEmpty == false &&
-		    _threadGroupSize.HasValue)
-		{
-			return;
-		}
-
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.Fsr3Rcas,
-			"Fsr3RcasCS",
-			backendKind);
-		_computeShader = compiled.Bytecode;
-		_threadGroupSize = compiled.ThreadGroupSize;
-		var reflection = compiled.ReflectionLayout;
-		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("Fsr3BindlessHandles"));
-		_constantsWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("cbFSR3Upscaler"));
-		_rcasWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("cbRCAS"));
-		_compiledBackendKind = backendKind;
 	}
 }

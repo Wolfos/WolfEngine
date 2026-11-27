@@ -2,6 +2,7 @@ using Moq;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Tests;
 
@@ -97,7 +98,7 @@ public sealed class GpuDrawBucketHardeningTests
 
 	private static GpuDrawResources CreateResources()
 	{
-		var resources = new GpuDrawResources(new ShaderCompiler());
+		var resources = new GpuDrawResources(new ShaderSource(new ShaderCompiler()));
 		resources.EnsureTableCapacity(CreateDevice(), 1, 1, 1);
 		return resources;
 	}

@@ -11,15 +11,8 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 public sealed class DeferredLightingPass
 {
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly ComputeKernel _kernel;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline? _pipeline;
-	private ReadOnlyMemory<byte> _computeShader;
-	private ComputeThreadGroupSize? _threadGroupSize;
-	private GraphicsBackendKind? _compiledBackendKind;
-	private ShaderPropertyWriter? _bindlessWriter;
-	private ShaderPropertyWriter? _cameraWriter;
-	private ShaderPropertyWriter? _lightingWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private readonly GpuDrawResources _gpuDrawResources;
@@ -27,12 +20,14 @@ public sealed class DeferredLightingPass
 	private readonly Action<RenderGraphContext> _execute;
 
 	public DeferredLightingPass(
-		IShaderProvider shaderCompiler,
+		ShaderSource shaderSource,
 		BindlessResourceRegistry bindlessRegistry,
 		GpuDrawResources gpuDrawResources,
 		ShadowMapPass shadowMapPass)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernel = new ComputeKernel(shaderSource, EngineShaderPrograms.DeferredLighting, "DeferredLightingCS");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_shadowMapPass = shadowMapPass ?? throw new ArgumentNullException(nameof(shadowMapPass));
@@ -149,7 +144,7 @@ public sealed class DeferredLightingPass
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 		ArgumentNullException.ThrowIfNull(sceneData);
 
-		var pipeline = EnsurePipeline(device);
+		var pipeline = _kernel.GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 
 		if (_linearSampler.IsValid == false)
@@ -370,8 +365,7 @@ public sealed class DeferredLightingPass
 		// Bind pipeline
 		commandList.BindPipeline(config.Pipeline);
 
-		var bindlessWriter = _bindlessWriter
-			?? throw new InvalidOperationException("Deferred lighting bindless reflection writer was not initialized.");
+		var bindlessWriter = _kernel.Writer("BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("gbufferAlbedoHandle", config.GBufferAlbedo.Value);
 		bindlessWriter.SetUInt("gbufferNormalHandle", config.GBufferNormal.Value);
@@ -409,8 +403,7 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("ddgiFinalGatherHandle", config.DdgiFinalGather.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		var cameraWriter = _cameraWriter
-			?? throw new InvalidOperationException("Deferred lighting camera reflection writer was not initialized.");
+		var cameraWriter = _kernel.Writer("CameraParams");
 		cameraWriter.Clear();
 		cameraWriter.SetMatrix4x4("camera.invProjection", sceneData.InverseProjection);
 		cameraWriter.SetMatrix4x4("camera.invViewProjection", sceneData.InverseViewProjection);
@@ -422,8 +415,7 @@ public sealed class DeferredLightingPass
 		cameraWriter.SetUInt("camera.frameSizeY", (uint)Math.Max(sceneData.SceneFramebufferSize.Y, 1));
 		commandList.SetComputeConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
 
-		var lightingWriter = _lightingWriter
-			?? throw new InvalidOperationException("Deferred lighting lighting reflection writer was not initialized.");
+		var lightingWriter = _kernel.Writer("LightingParams");
 		lightingWriter.Clear();
 		var directionalLightCount = 0;
 		for (var i = 0; i < sceneData.Lights.Count && directionalLightCount < ClusteredLightingShared.MaxDirectionalLights; i++)
@@ -532,69 +524,10 @@ public sealed class DeferredLightingPass
 		commandList.SetComputeBuffer(5, config.ClusterLightIndexBuffer);
 
 		// Dispatch the compute shader
-		var threadGroupSize = _threadGroupSize
-			?? throw new InvalidOperationException("Deferred lighting threadgroup size was not initialized.");
+		var threadGroupSize = _kernel.ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)Math.Max(config.DispatchSize.X, 1),
 			(uint)Math.Max(config.DispatchSize.Y, 1));
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device)
-	{
-		if (_pipeline is not null)
-		{
-			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
-			{
-				throw new InvalidOperationException(
-					$"DeferredLightingPass is already compiled for backend '{_compiledBackendKind.Value}', " +
-					$"but was requested for '{device.BackendKind}'.");
-			}
-
-			return _pipeline;
-		}
-
-		EnsureReflectionWriters(device.BackendKind);
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "DeferredLightingCS",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: "deferred_lighting.compute.slang");
-
-		var shaderSet = new ShaderBytecodeSet(compute: _computeShader, computeThreadGroupSize: _threadGroupSize);
-		_pipeline = device.GetOrCreatePipeline(pipelineKey, shaderSet);
-		return _pipeline;
-	}
-
-	private void EnsureReflectionWriters(GraphicsBackendKind backendKind)
-	{
-		if (_compiledBackendKind.HasValue &&
-		    _compiledBackendKind.Value == backendKind &&
-		    _computeShader.IsEmpty == false &&
-		    _threadGroupSize.HasValue &&
-		    _bindlessWriter is not null &&
-		    _cameraWriter is not null &&
-		    _lightingWriter is not null)
-		{
-			return;
-		}
-
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.DeferredLighting,
-			"DeferredLightingCS",
-			backendKind);
-
-		_computeShader = compiled.Bytecode;
-		_threadGroupSize = compiled.ThreadGroupSize;
-		var reflection = compiled.ReflectionLayout;
-		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
-		_cameraWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("CameraParams"));
-		_lightingWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("LightingParams"));
-		_compiledBackendKind = backendKind;
 	}
 }

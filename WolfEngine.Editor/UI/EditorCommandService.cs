@@ -40,7 +40,11 @@ public interface IEditorCommandService
 	Guid? LoadingSceneAssetId { get; }
 	bool SaveScene();
 	bool RefreshAssetDatabase();
-	bool ReloadEngineShaders();
+	/// <summary>
+	/// Reloads the engine shaders and reports the outcome to the user. Returns the provider's result, or null when the
+	/// reload itself failed. The renderer switches to the new shaders at the start of its next frame.
+	/// </summary>
+	ShaderReloadResult? ReloadEngineShaders();
 
 	IEditorDocument SceneDocument { get; }
 
@@ -467,23 +471,31 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 	}
 
-	public bool ReloadEngineShaders()
+	public ShaderReloadResult? ReloadEngineShaders()
 	{
 		try
 		{
 			var result = _shaderProvider.Reload(_renderer.GetGfxDevice().BackendKind);
 			if (result.AppliedArtifactCount > 0)
+			{
 				_notificationService.ReportInfo($"Reloaded {result.AppliedArtifactCount} engine shader artifact(s).");
+			}
 			else if (result.Failures.Count == 0)
+			{
 				_notificationService.ReportInfo("Engine shaders are already up to date.");
+			}
+
 			foreach (var failure in result.Failures)
+			{
 				_notificationService.ReportError($"Shader reload failed for {failure.Request.ProgramId}: {failure.Error}");
-			return result.AppliedArtifactCount > 0 && result.Succeeded;
+			}
+
+			return result;
 		}
 		catch (Exception ex)
 		{
 			_notificationService.ReportError($"Failed to reload engine shaders: {ex.Message}");
-			return false;
+			return null;
 		}
 	}
 

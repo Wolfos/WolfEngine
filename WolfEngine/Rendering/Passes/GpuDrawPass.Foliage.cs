@@ -74,12 +74,6 @@ public sealed partial class GpuDrawPass
 	private readonly IGfxBuffer?[] _foliageCounterBuffers = new IGfxBuffer?[GpuDrawResources.MaxFramesInFlight];
 	private int _foliageReservationClearGeneration = -1;
 	private int _foliageFrame;
-	private ReadOnlyMemory<byte> _foliageCullShaderBytecode;
-	private ComputeThreadGroupSize? _foliageCullThreadGroupSize;
-	private ShaderPropertyWriter? _foliageCullParamsWriter;
-	private FoliageCullBindings? _foliageCullBindings;
-	private GraphicsBackendKind? _foliageCullBackendKind;
-	private IGfxPipeline? _foliageCullPipeline;
 
 	private readonly record struct FoliageSetKey(int OwnerViewIndex, int WorldId, Entity Entity);
 
@@ -562,9 +556,9 @@ public sealed partial class GpuDrawPass
 		}
 
 		var viewIndex = context.View.Index;
-		var pipeline = EnsureFoliageCullPipeline(device);
-		var writer = _foliageCullParamsWriter!;
-		var bindings = _foliageCullBindings!;
+		var pipeline = _foliageCull.GetPipeline(device);
+		var writer = _foliageCull.Writer("FoliageCullParams");
+		var bindings = GetFoliageCullBindings(_foliageCull.ReflectionLayout);
 		var commandList = context.CommandList;
 		var frameSlot = _gpuDrawResources.ActiveFrameSlot;
 
@@ -660,23 +654,9 @@ public sealed partial class GpuDrawPass
 		}
 	}
 
-	private IGfxPipeline EnsureFoliageCullPipeline(IGfxDevice device)
+	private static FoliageCullBindings GetFoliageCullBindings(ShaderReflectionLayout layout)
 	{
-		if (_foliageCullPipeline is not null && _foliageCullBackendKind == device.BackendKind)
-		{
-			return _foliageCullPipeline;
-		}
-
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.FoliageCull,
-			"CSCullFoliage",
-			device.BackendKind);
-		_foliageCullShaderBytecode = compiled.Bytecode;
-		_foliageCullThreadGroupSize = compiled.ThreadGroupSize;
-		_foliageCullParamsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("FoliageCullParams"));
-
-		var layout = compiled.ReflectionLayout;
-		_foliageCullBindings = new FoliageCullBindings(
+		return new FoliageCullBindings(
 			layout.GetResource("g_InstanceTable").RegisterIndex,
 			layout.GetResource("g_DrawArgs").RegisterIndex,
 			layout.GetResource("g_VisibleInstances").RegisterIndex,
@@ -687,16 +667,6 @@ public sealed partial class GpuDrawPass
 			layout.GetResource("g_FoliageChunks").RegisterIndex,
 			layout.GetResource("g_FoliageTypes").RegisterIndex,
 			layout.GetResource("g_FoliageRenderers").RegisterIndex);
-
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSCullFoliage", default, default, default);
-		_foliageCullPipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(
-				compute: _foliageCullShaderBytecode,
-				computeThreadGroupSize: _foliageCullThreadGroupSize));
-		_foliageCullBackendKind = device.BackendKind;
-
-		return _foliageCullPipeline;
 	}
 
 	/// <summary>Placed foliage drawn by the last update, for diagnostics.</summary>

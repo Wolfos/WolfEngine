@@ -21,17 +21,17 @@ public sealed class SelectionOutlinePass
 	/// </summary>
 	private const float DepthBias = 1e-5f;
 
-	private readonly IShaderProvider _shaderCompiler;
+	private static readonly GraphicsPipelineState PipelineState = CreatePipelineState();
+
+	private readonly GraphicsShader _shader;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline? _pipeline;
-	private GraphicsBackendKind? _compiledBackendKind;
-	private ShaderPropertyWriter? _viewWriter;
-	private ShaderPropertyWriter? _drawWriter;
 	private readonly Action<RenderGraphContext> _execute;
 
-	public SelectionOutlinePass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public SelectionOutlinePass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_shader = new GraphicsShader(shaderSource, EngineShaderPrograms.SelectionOutline, "vertexShader", "fragmentShader");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_execute = Execute;
 	}
@@ -63,7 +63,6 @@ public sealed class SelectionOutlinePass
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
 
-		EnsurePipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 
 		return new SelectionOutlinePassConfig
@@ -74,7 +73,7 @@ public sealed class SelectionOutlinePass
 			DepthHeight = resources.SceneFramebufferSize.Y,
 			TargetColor = context.GetTexture(resources.EncodedSceneColor),
 			DepthTexture = context.GetTexture(resources.GBufferDepth),
-			Pipeline = _pipeline ?? throw new InvalidOperationException("Selection outline pipeline was not initialized.")
+			Pipeline = _shader.GetPipeline(device, PipelineState)
 		};
 	}
 
@@ -98,8 +97,7 @@ public sealed class SelectionOutlinePass
 		commandList.BindPipeline(config.Pipeline);
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
-		var viewWriter = _viewWriter
-			?? throw new InvalidOperationException("Selection outline view writer was not initialized.");
+		var viewWriter = _shader.Writer("OutlineViewParams");
 		viewWriter.Clear();
 		viewWriter.SetMatrix4x4("unjitteredViewProjection", sceneData.UnjitteredViewProjection);
 		viewWriter.SetVector3("cameraPosition", sceneData.CameraOrigin);
@@ -114,8 +112,7 @@ public sealed class SelectionOutlinePass
 		viewWriter.SetVector2("jitterPixels", sceneData.JitterPixels);
 		commandList.SetGraphicsConstants(viewWriter.RegisterIndex, viewWriter.AsBytes());
 
-		var drawWriter = _drawWriter
-			?? throw new InvalidOperationException("Selection outline draw writer was not initialized.");
+		var drawWriter = _shader.Writer("OutlineDrawParams");
 		for (var i = 0; i < sceneData.Outlines.Count; i++)
 		{
 			var outline = sceneData.Outlines[i];
@@ -153,27 +150,8 @@ public sealed class SelectionOutlinePass
 		commandList.EndPass();
 	}
 
-	private void EnsurePipeline(IGfxDevice device)
+	private static GraphicsPipelineState CreatePipelineState()
 	{
-		if (_pipeline is not null)
-		{
-			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
-			{
-				throw new InvalidOperationException(
-					$"SelectionOutlinePass is already compiled for backend '{_compiledBackendKind.Value}', " +
-					$"but was requested for '{device.BackendKind}'.");
-			}
-
-			return;
-		}
-
-		var compiled = GraphicsShaderCompiler.CompileWithReflection(
-			_shaderCompiler,
-			device.BackendKind,
-			EngineShaderPrograms.SelectionOutline,
-			"vertexShader",
-			"fragmentShader");
-
 		// Front-face culling is what makes this an outline rather than a silhouette:
 		// only the hull's back faces are drawn, and the fragment shader then rejects
 		// the ones the object itself covers.
@@ -183,20 +161,11 @@ public sealed class SelectionOutlinePass
 			depthTestEnabled: false,
 			depthWriteEnabled: false,
 			BlendMode.Opaque);
-		var key = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
-			computeEntryPoint: null,
-			renderTargets: new(new[] { TextureFormat.Bgra8Unorm }),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: renderState,
-			shaderVariant: "SelectionOutline");
-		_pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
 
-		var reflection = compiled.ReflectionLayout;
-		_viewWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("OutlineViewParams"));
-		_drawWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("OutlineDrawParams"));
-		_compiledBackendKind = device.BackendKind;
+		return new GraphicsPipelineState(
+			new RenderTargetFormats(new[] { TextureFormat.Bgra8Unorm }),
+			new DepthStencilFormat(TextureFormat.Unknown),
+			renderState,
+			Variant: "SelectionOutline");
 	}
 }

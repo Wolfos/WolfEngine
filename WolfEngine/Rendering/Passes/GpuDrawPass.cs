@@ -8,7 +8,25 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed partial class GpuDrawPass
 {
-	private readonly IShaderProvider _shaderCompiler;
+	private static readonly RenderTargetFormats GBufferRenderTargets = new(new[]
+	{
+		TextureFormat.Bgra8Unorm,
+		TextureFormat.Rgba16Float,
+		TextureFormat.Rgba8Unorm,
+		TextureFormat.Rgba16Float,
+		TextureFormat.Rgba16Float
+	});
+
+	private readonly ShaderSource _shaderSource;
+	private readonly ComputeKernel _instanceUpdate;
+	private readonly ComputeKernel _meshUpdate;
+	private readonly ComputeKernel _materialUpdate;
+	private readonly ComputeKernel _terrainMaterialUpdate;
+	private readonly ComputeKernel _terrainLayerUpdate;
+	private readonly ComputeKernel _cull;
+	private readonly ComputeKernel _prepareBatchArgs;
+	private readonly ComputeKernel _compact;
+	private readonly ComputeKernel _foliageCull;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
@@ -20,41 +38,7 @@ public sealed partial class GpuDrawPass
 	private DescriptorHandle _terrainLayerSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _terrainControlSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _terrainHeightSampler = DescriptorHandle.Invalid;
-	private IGfxPipeline? _instanceUpdatePipeline;
-	private IGfxPipeline? _meshUpdatePipeline;
-	private IGfxPipeline? _materialUpdatePipeline;
-	private IGfxPipeline? _terrainMaterialUpdatePipeline;
-	private IGfxPipeline? _terrainLayerUpdatePipeline;
-	private IGfxPipeline? _prepareBatchArgsPipeline;
-	private IGfxPipeline? _cullPipeline;
-	private IGfxPipeline? _compactPipeline;
-	private GraphicsBackendKind? _computeReflectionBackendKind;
-	private ReadOnlyMemory<byte> _instanceUpdateShaderBytecode;
-	private ReadOnlyMemory<byte> _meshUpdateShaderBytecode;
-	private ReadOnlyMemory<byte> _materialUpdateShaderBytecode;
-	private ReadOnlyMemory<byte> _terrainMaterialUpdateShaderBytecode;
-	private ReadOnlyMemory<byte> _terrainLayerUpdateShaderBytecode;
-	private ReadOnlyMemory<byte> _prepareBatchArgsShaderBytecode;
-	private ReadOnlyMemory<byte> _cullShaderBytecode;
-	private ReadOnlyMemory<byte> _compactShaderBytecode;
-	private ComputeThreadGroupSize? _instanceUpdateThreadGroupSize;
-	private ComputeThreadGroupSize? _meshUpdateThreadGroupSize;
-	private ComputeThreadGroupSize? _materialUpdateThreadGroupSize;
-	private ComputeThreadGroupSize? _terrainMaterialUpdateThreadGroupSize;
-	private ComputeThreadGroupSize? _terrainLayerUpdateThreadGroupSize;
-	private ComputeThreadGroupSize? _prepareBatchArgsThreadGroupSize;
-	private ComputeThreadGroupSize? _cullThreadGroupSize;
-	private ComputeThreadGroupSize? _compactThreadGroupSize;
 	private uint[]? _executionRangeReset;
-	private ComputeResourceBindings? _terrainMaterialUpdateBindings;
-	private ComputeResourceBindings? _terrainLayerUpdateBindings;
-	private ShaderPropertyWriter? _instanceUpdateParamsWriter;
-	private ShaderPropertyWriter? _meshUpdateParamsWriter;
-	private ShaderPropertyWriter? _materialUpdateParamsWriter;
-	private ShaderPropertyWriter? _terrainMaterialUpdateParamsWriter;
-	private ShaderPropertyWriter? _terrainLayerUpdateParamsWriter;
-	private ShaderPropertyWriter? _cullParamsWriter;
-	private ShaderPropertyWriter? _compactParamsWriter;
 	private readonly List<GpuDrawUpdate> _updates = new();
 	// Parallel to _updates: the view that owns each update's draw, and the database it came from.
 	private readonly List<RenderViewId> _updateOwners = new();
@@ -82,12 +66,10 @@ public sealed partial class GpuDrawPass
 	private readonly ulong[] _uploadedLodThresholdSetVersions = new ulong[GpuDrawResources.MaxFramesInFlight];
 	private ulong _uploadedTableGeneration;
 	private readonly uint[] _lastGpuDiagnosticCounters = new uint[GpuDrawResources.HardeningCounterCount];
-	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GpuDrawExecutionLanes.ExecutionLaneCount];
-	private readonly SharedDrawGraphicsBufferBindings?[] _gbufferBufferBindings = new SharedDrawGraphicsBufferBindings?[GpuDrawExecutionLanes.ExecutionLaneCount];
-	private readonly ShaderReflectionLayout?[] _gbufferReflections = new ShaderReflectionLayout?[GpuDrawExecutionLanes.ExecutionLaneCount];
+	// One per lane, built on demand. Its generation is the lanes' binding generation, so records encoded against
+	// replaced pipelines re-encode.
+	private readonly ShaderVariantSet<GpuDrawExecutionKey, GBufferLane> _gbufferLanes;
 	private readonly PerViewIndirectCommandSets _gbufferIndirectCommandSets;
-	// Raised whenever a GBuffer lane pipeline is created, so records encoded against the previous pipelines re-encode.
-	private ulong _gbufferLaneBindingGeneration;
 	private bool _gbufferCompactionActive;
 	private readonly Dictionary<uint, MaterialDrawState> _materialDrawStates = new();
 	private readonly Dictionary<uint, TerrainDrawSurface> _terrainMaterialStates = new();
@@ -114,9 +96,7 @@ public sealed partial class GpuDrawPass
 
 	private readonly record struct TerrainMaterialAllocation(uint LayerStart, uint LayerCount, bool Reallocated);
 
-	private readonly record struct ComputeResourceBindings(params uint[] Slots);
-
-	internal GpuDrawPass(IShaderProvider shaderCompiler,
+	internal GpuDrawPass(ShaderSource shaderSource,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats, IRenderer renderer,
 		IndirectDrawRecords records,
@@ -124,7 +104,18 @@ public sealed partial class GpuDrawPass
 		IDrawRecordStalenessInputSource stalenessInputs,
 		IGpuDrawDiagnosticsSampler diagnosticsSampler)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_shaderSource = shaderSource ?? throw new ArgumentNullException(nameof(shaderSource));
+		var diagnosticsDefine = GpuDrawDiagnosticsEnabled ? "WOLF_GPU_DRAW_DIAGNOSTICS" : string.Empty;
+		_instanceUpdate = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawInstanceUpdate, "CSUpdateInstance");
+		_meshUpdate = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawMeshUpdate, "CSUpdateMesh");
+		_materialUpdate = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawMaterialUpdate, "CSUpdateMaterial");
+		_terrainMaterialUpdate = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawTerrainMaterialUpdate, "CSUpdateTerrainMaterial");
+		_terrainLayerUpdate = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawTerrainLayerUpdate, "CSUpdateTerrainLayer");
+		_cull = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawCull, "CSCull", diagnosticsDefine);
+		_prepareBatchArgs = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawCull, "CSPrepareBatchArgs", diagnosticsDefine);
+		_compact = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawCompact, "CSCompact");
+		_foliageCull = new ComputeKernel(shaderSource, EngineShaderPrograms.FoliageCull, "CSCullFoliage");
+		_gbufferLanes = new ShaderVariantSet<GpuDrawExecutionKey, GBufferLane>(shaderSource, BuildGBufferLane);
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
@@ -764,14 +755,12 @@ public sealed partial class GpuDrawPass
 			WriteBuffer<uint>(drawExecutionRangePerBucketBuffer!, resetRanges, "DrawExecutionRangePerBucketBuffer");
 		}
 
-		var preparePipeline = EnsurePrepareBatchArgsPipeline(device);
-		var cullPipeline = EnsureCullPipeline(device);
+		var preparePipeline = _prepareBatchArgs.GetPipeline(device);
+		var cullPipeline = _cull.GetPipeline(device);
 		var commandList = context.CommandList;
 		using (FrameProfiler.Instance.Measure("GpuDraw.Cull"))
 		{
-			var cullParamsWriter = _cullParamsWriter
-			                       ?? throw new InvalidOperationException(
-				                       "GpuDraw cull reflection writer was not initialized.");
+			var cullParamsWriter = _cull.Writer("CullParams");
 			cullParamsWriter.Clear();
 			WriteCullPlanes(cullParamsWriter, viewProjections, cullingPlanes, cullingPlaneCounts);
 
@@ -808,9 +797,7 @@ public sealed partial class GpuDrawPass
 				visibleInstanceBuffer!,
 				drawCountPerBucketBuffer!,
 				drawExecutionRangePerBucketBuffer!);
-			var prepareThreadGroupSize = _prepareBatchArgsThreadGroupSize
-			                             ?? throw new InvalidOperationException(
-				                             "GpuDraw batch args threadgroup size was not initialized.");
+			var prepareThreadGroupSize = _prepareBatchArgs.ThreadGroupSize;
 			var (prepareGroupCountX, prepareGroupCountY, prepareGroupCountZ) =
 				prepareThreadGroupSize.GetDispatchGroupCount(_gpuDrawResources.ActiveDrawCommandUpperBound);
 			commandList.Dispatch(prepareGroupCountX, prepareGroupCountY, prepareGroupCountZ);
@@ -825,9 +812,7 @@ public sealed partial class GpuDrawPass
 				visibleInstanceBuffer!,
 				drawCountPerBucketBuffer!,
 				drawExecutionRangePerBucketBuffer!);
-			var cullThreadGroupSize = _cullThreadGroupSize
-			                          ?? throw new InvalidOperationException(
-				                          "GpuDraw cull threadgroup size was not initialized.");
+			var cullThreadGroupSize = _cull.ThreadGroupSize;
 			var (cullGroupCountX, cullGroupCountY, cullGroupCountZ) =
 				cullThreadGroupSize.GetDispatchGroupCount(_gpuDrawResources.ActiveInstanceUpperBound);
 			commandList.Dispatch(cullGroupCountX, cullGroupCountY, cullGroupCountZ);
@@ -1067,9 +1052,9 @@ public sealed partial class GpuDrawPass
 		WriteBuffer<GpuDrawInstanceUpdateData>(_gpuDrawResources.InstanceUpdateBuffer!, CollectionsMarshal.AsSpan(_instanceUpdateData), "InstanceUpdateBuffer");
 		DispatchUpdatePass(
 			context,
-			EnsureInstanceUpdatePipeline(device),
-			_instanceUpdateParamsWriter!,
-			_instanceUpdateThreadGroupSize!.Value,
+			_instanceUpdate.GetPipeline(device),
+			_instanceUpdate.Writer("UpdateParams"),
+			_instanceUpdate.ThreadGroupSize,
 			(uint)_instanceUpdateData.Count,
 			commandList =>
 			{
@@ -1091,9 +1076,9 @@ public sealed partial class GpuDrawPass
 		WriteBuffer<GpuDrawMeshUpdateData>(_gpuDrawResources.MeshUpdateBuffer!, CollectionsMarshal.AsSpan(_meshUpdateData), "MeshUpdateBuffer");
 		DispatchUpdatePass(
 			context,
-			EnsureMeshUpdatePipeline(device),
-			_meshUpdateParamsWriter!,
-			_meshUpdateThreadGroupSize!.Value,
+			_meshUpdate.GetPipeline(device),
+			_meshUpdate.Writer("UpdateParams"),
+			_meshUpdate.ThreadGroupSize,
 			(uint)_meshUpdateData.Count,
 			commandList =>
 			{
@@ -1114,9 +1099,9 @@ public sealed partial class GpuDrawPass
 		WriteBuffer<GpuDrawMaterialUpdateData>(_gpuDrawResources.MaterialUpdateBuffer!, CollectionsMarshal.AsSpan(_materialUpdateData), "MaterialUpdateBuffer");
 		DispatchUpdatePass(
 			context,
-			EnsureMaterialUpdatePipeline(device),
-			_materialUpdateParamsWriter!,
-			_materialUpdateThreadGroupSize!.Value,
+			_materialUpdate.GetPipeline(device),
+			_materialUpdate.Writer("UpdateParams"),
+			_materialUpdate.ThreadGroupSize,
 			(uint)_materialUpdateData.Count,
 			commandList =>
 			{
@@ -1137,14 +1122,13 @@ public sealed partial class GpuDrawPass
 		WriteBuffer<GpuTerrainMaterialUpdateData>(_gpuDrawResources.TerrainMaterialUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainMaterialUpdateData), "TerrainMaterialUpdateBuffer");
 		DispatchUpdatePass(
 			context,
-			EnsureTerrainMaterialUpdatePipeline(device),
-			_terrainMaterialUpdateParamsWriter!,
-			_terrainMaterialUpdateThreadGroupSize!.Value,
+			_terrainMaterialUpdate.GetPipeline(device),
+			_terrainMaterialUpdate.Writer("UpdateParams"),
+			_terrainMaterialUpdate.ThreadGroupSize,
 			(uint)_terrainMaterialUpdateData.Count,
 			commandList =>
 			{
-				var slots = _terrainMaterialUpdateBindings?.Slots
-					?? throw new InvalidOperationException("Terrain material update bindings were not reflected.");
+				var slots = GetTerrainUpdateSlots(_terrainMaterialUpdate, "g_TerrainMaterialTable");
 				commandList.SetComputeBuffer(slots[0], _gpuDrawResources.TerrainMaterialUpdateBuffer!);
 				commandList.SetComputeBuffer(slots[1], _gpuDrawResources.TerrainMaterialBuffer!);
 				commandList.SetComputeBuffer(slots[2], _gpuDrawResources.MaterialGenerationBuffer!);
@@ -1163,15 +1147,14 @@ public sealed partial class GpuDrawPass
 		WriteBuffer<GpuTerrainLayerUpdateData>(_gpuDrawResources.TerrainLayerUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainLayerUpdateData), "TerrainLayerUpdateBuffer");
 		DispatchUpdatePass(
 			context,
-			EnsureTerrainLayerUpdatePipeline(device),
-			_terrainLayerUpdateParamsWriter!,
-			_terrainLayerUpdateThreadGroupSize!.Value,
+			_terrainLayerUpdate.GetPipeline(device),
+			_terrainLayerUpdate.Writer("UpdateParams"),
+			_terrainLayerUpdate.ThreadGroupSize,
 			(uint)_terrainLayerUpdateData.Count,
 			writer => writer.SetUInt("layerTableCapacity", (uint)_gpuDrawResources.TerrainLayerCapacity),
 			commandList =>
 			{
-				var slots = _terrainLayerUpdateBindings?.Slots
-					?? throw new InvalidOperationException("Terrain layer update bindings were not reflected.");
+				var slots = GetTerrainUpdateSlots(_terrainLayerUpdate, "g_TerrainLayerTable");
 				commandList.SetComputeBuffer(slots[0], _gpuDrawResources.TerrainLayerUpdateBuffer!);
 				commandList.SetComputeBuffer(slots[1], _gpuDrawResources.TerrainLayerBuffer!);
 				commandList.SetComputeBuffer(slots[2], _gpuDrawResources.MaterialGenerationBuffer!);
@@ -1218,113 +1201,6 @@ public sealed partial class GpuDrawPass
 			var (groupCountX, groupCountY, groupCountZ) = threadGroupSize.GetDispatchGroupCount(updateCount);
 			commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
 		}
-	}
-
-	private IGfxPipeline EnsureInstanceUpdatePipeline(IGfxDevice device)
-	{
-		if (_instanceUpdatePipeline is not null)
-		{
-			return _instanceUpdatePipeline;
-		}
-
-		EnsureComputeReflectionResources(device.BackendKind);
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateInstance", default, default, default);
-		_instanceUpdatePipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _instanceUpdateShaderBytecode, computeThreadGroupSize: _instanceUpdateThreadGroupSize));
-		return _instanceUpdatePipeline;
-	}
-
-	private IGfxPipeline EnsureMeshUpdatePipeline(IGfxDevice device)
-	{
-		if (_meshUpdatePipeline is not null)
-		{
-			return _meshUpdatePipeline;
-		}
-
-		EnsureComputeReflectionResources(device.BackendKind);
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateMesh", default, default, default);
-		_meshUpdatePipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _meshUpdateShaderBytecode, computeThreadGroupSize: _meshUpdateThreadGroupSize));
-		return _meshUpdatePipeline;
-	}
-
-	private IGfxPipeline EnsureMaterialUpdatePipeline(IGfxDevice device)
-	{
-		if (_materialUpdatePipeline is not null)
-		{
-			return _materialUpdatePipeline;
-		}
-
-		EnsureComputeReflectionResources(device.BackendKind);
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateMaterial", default, default, default);
-		_materialUpdatePipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _materialUpdateShaderBytecode, computeThreadGroupSize: _materialUpdateThreadGroupSize));
-		return _materialUpdatePipeline;
-	}
-
-	private IGfxPipeline EnsureTerrainMaterialUpdatePipeline(IGfxDevice device)
-	{
-		if (_terrainMaterialUpdatePipeline is not null)
-		{
-			return _terrainMaterialUpdatePipeline;
-		}
-
-		EnsureComputeReflectionResources(device.BackendKind);
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateTerrainMaterial", default, default, default);
-		_terrainMaterialUpdatePipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _terrainMaterialUpdateShaderBytecode, computeThreadGroupSize: _terrainMaterialUpdateThreadGroupSize));
-		return _terrainMaterialUpdatePipeline;
-	}
-
-	private IGfxPipeline EnsureTerrainLayerUpdatePipeline(IGfxDevice device)
-	{
-		if (_terrainLayerUpdatePipeline is not null)
-		{
-			return _terrainLayerUpdatePipeline;
-		}
-
-		EnsureComputeReflectionResources(device.BackendKind);
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateTerrainLayer", default, default, default);
-		_terrainLayerUpdatePipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _terrainLayerUpdateShaderBytecode, computeThreadGroupSize: _terrainLayerUpdateThreadGroupSize));
-		return _terrainLayerUpdatePipeline;
-	}
-
-	private IGfxPipeline EnsurePrepareBatchArgsPipeline(IGfxDevice device)
-	{
-		if (_prepareBatchArgsPipeline is not null)
-		{
-			return _prepareBatchArgsPipeline;
-		}
-
-		EnsureComputeReflectionResources(device.BackendKind);
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSPrepareBatchArgs", default, default, default);
-		_prepareBatchArgsPipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(
-				compute: _prepareBatchArgsShaderBytecode,
-				computeThreadGroupSize: _prepareBatchArgsThreadGroupSize));
-		return _prepareBatchArgsPipeline;
-	}
-
-	private IGfxPipeline EnsureCullPipeline(IGfxDevice device)
-	{
-		if (_cullPipeline is not null)
-		{
-			return _cullPipeline;
-		}
-
-		EnsureComputeReflectionResources(device.BackendKind);
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSCull", default, default, default);
-		_cullPipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _cullShaderBytecode, computeThreadGroupSize: _cullThreadGroupSize));
-		return _cullPipeline;
 	}
 
 	/// <summary>
@@ -1391,7 +1267,7 @@ public sealed partial class GpuDrawPass
 					executionRangeBuffer,
 					RentExecutionRangeReset(commandSet),
 					"SharedDrawCompactedExecutionRanges");
-				commandList.BindPipeline(EnsureCompactPipeline(device));
+				commandList.BindPipeline(_compact.GetPipeline(device));
 			}
 			else
 			{
@@ -1454,12 +1330,8 @@ public sealed partial class GpuDrawPass
 			return;
 		}
 
-		var compactParamsWriter = _compactParamsWriter
-		                          ?? throw new InvalidOperationException(
-			                          "GpuDraw compaction reflection writer was not initialized.");
-		var threadGroupSize = _compactThreadGroupSize
-		                      ?? throw new InvalidOperationException(
-			                      "GpuDraw compaction threadgroup size was not initialized.");
+		var compactParamsWriter = _compact.Writer("CompactParams");
+		var threadGroupSize = _compact.ThreadGroupSize;
 
 		compactParamsWriter.Clear();
 		compactParamsWriter.SetUInt("pageStartCommandIndex", request.PageStartCommandIndex);
@@ -1542,212 +1414,76 @@ public sealed partial class GpuDrawPass
 		return resolved;
 	}
 
-	private IGfxPipeline EnsureCompactPipeline(IGfxDevice device)
-	{
-		if (_compactPipeline is not null)
-		{
-			return _compactPipeline;
-		}
-
-		EnsureComputeReflectionResources(device.BackendKind);
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSCompact", default, default, default);
-		_compactPipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _compactShaderBytecode, computeThreadGroupSize: _compactThreadGroupSize));
-		return _compactPipeline;
-	}
-
-	private void EnsureComputeReflectionResources(GraphicsBackendKind backendKind)
-	{
-		if (_computeReflectionBackendKind.HasValue &&
-		    _computeReflectionBackendKind.Value == backendKind &&
-		    _instanceUpdateParamsWriter is not null &&
-		    _meshUpdateParamsWriter is not null &&
-		    _materialUpdateParamsWriter is not null &&
-		    _terrainMaterialUpdateParamsWriter is not null &&
-		    _terrainLayerUpdateParamsWriter is not null &&
-		    _cullParamsWriter is not null &&
-		    _instanceUpdateThreadGroupSize.HasValue &&
-		    _meshUpdateThreadGroupSize.HasValue &&
-		    _materialUpdateThreadGroupSize.HasValue &&
-		    _terrainMaterialUpdateThreadGroupSize.HasValue &&
-		    _terrainLayerUpdateThreadGroupSize.HasValue &&
-		    _cullThreadGroupSize.HasValue &&
-		    _prepareBatchArgsThreadGroupSize.HasValue &&
-		    _prepareBatchArgsShaderBytecode.IsEmpty == false &&
-		    _compactThreadGroupSize.HasValue &&
-		    _compactParamsWriter is not null &&
-		    _compactShaderBytecode.IsEmpty == false &&
-		    _instanceUpdateShaderBytecode.IsEmpty == false &&
-		    _meshUpdateShaderBytecode.IsEmpty == false &&
-		    _materialUpdateShaderBytecode.IsEmpty == false &&
-		    _terrainMaterialUpdateShaderBytecode.IsEmpty == false &&
-		    _terrainLayerUpdateShaderBytecode.IsEmpty == false &&
-		    _cullShaderBytecode.IsEmpty == false)
-		{
-			return;
-		}
-
-		var instanceUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.GpuDrawInstanceUpdate,
-			"CSUpdateInstance",
-			backendKind);
-		_instanceUpdateShaderBytecode = instanceUpdateCompiled.Bytecode;
-		_instanceUpdateThreadGroupSize = instanceUpdateCompiled.ThreadGroupSize;
-		_instanceUpdateParamsWriter =
-			new ShaderPropertyWriter(instanceUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
-
-		var meshUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.GpuDrawMeshUpdate,
-			"CSUpdateMesh",
-			backendKind);
-		_meshUpdateShaderBytecode = meshUpdateCompiled.Bytecode;
-		_meshUpdateThreadGroupSize = meshUpdateCompiled.ThreadGroupSize;
-		_meshUpdateParamsWriter =
-			new ShaderPropertyWriter(meshUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
-
-		var materialUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.GpuDrawMaterialUpdate,
-			"CSUpdateMaterial",
-			backendKind);
-		_materialUpdateShaderBytecode = materialUpdateCompiled.Bytecode;
-		_materialUpdateThreadGroupSize = materialUpdateCompiled.ThreadGroupSize;
-		_materialUpdateParamsWriter =
-			new ShaderPropertyWriter(materialUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
-
-		var terrainMaterialUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.GpuDrawTerrainMaterialUpdate,
-			"CSUpdateTerrainMaterial",
-			backendKind);
-		_terrainMaterialUpdateShaderBytecode = terrainMaterialUpdateCompiled.Bytecode;
-		_terrainMaterialUpdateThreadGroupSize = terrainMaterialUpdateCompiled.ThreadGroupSize;
-		_terrainMaterialUpdateParamsWriter =
-			new ShaderPropertyWriter(terrainMaterialUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
-		_terrainMaterialUpdateBindings = new ComputeResourceBindings(
-			terrainMaterialUpdateCompiled.ReflectionLayout.GetResource("g_Updates").RegisterIndex,
-			terrainMaterialUpdateCompiled.ReflectionLayout.GetResource("g_TerrainMaterialTable").RegisterIndex,
-			terrainMaterialUpdateCompiled.ReflectionLayout.GetResource("g_MaterialGenerations").RegisterIndex,
-			terrainMaterialUpdateCompiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex);
-
-		var terrainLayerUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.GpuDrawTerrainLayerUpdate,
-			"CSUpdateTerrainLayer",
-			backendKind);
-		_terrainLayerUpdateShaderBytecode = terrainLayerUpdateCompiled.Bytecode;
-		_terrainLayerUpdateThreadGroupSize = terrainLayerUpdateCompiled.ThreadGroupSize;
-		_terrainLayerUpdateParamsWriter =
-			new ShaderPropertyWriter(terrainLayerUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
-		_terrainLayerUpdateBindings = new ComputeResourceBindings(
-			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_Updates").RegisterIndex,
-			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_TerrainLayerTable").RegisterIndex,
-			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_MaterialGenerations").RegisterIndex,
-			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex);
-
-		var cullCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.GpuDrawCull,
-			"CSCull",
-			backendKind,
-			GpuDrawDiagnosticsEnabled ? "WOLF_GPU_DRAW_DIAGNOSTICS" : string.Empty);
-		_cullShaderBytecode = cullCompiled.Bytecode;
-		_cullThreadGroupSize = cullCompiled.ThreadGroupSize;
-		_cullParamsWriter = new ShaderPropertyWriter(cullCompiled.ReflectionLayout.GetConstantBuffer("CullParams"));
-
-		var prepareBatchArgsCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.GpuDrawCull,
-			"CSPrepareBatchArgs",
-			backendKind,
-			GpuDrawDiagnosticsEnabled ? "WOLF_GPU_DRAW_DIAGNOSTICS" : string.Empty);
-		_prepareBatchArgsShaderBytecode = prepareBatchArgsCompiled.Bytecode;
-		_prepareBatchArgsThreadGroupSize = prepareBatchArgsCompiled.ThreadGroupSize;
-
-		var compactCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.GpuDrawCompact,
-			"CSCompact",
-			backendKind);
-		_compactShaderBytecode = compactCompiled.Bytecode;
-		_compactThreadGroupSize = compactCompiled.ThreadGroupSize;
-		_compactParamsWriter = new ShaderPropertyWriter(compactCompiled.ReflectionLayout.GetConstantBuffer("CompactParams"));
-
-		_computeReflectionBackendKind = backendKind;
-	}
-
 	private void EnsureGBufferPipelines(IGfxDevice device)
 	{
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.GBuffer);
-		var allPipelinesReady = true;
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
-			var lane = laneDefinitions[i];
-			if (GetGBufferPipeline(lane) is null)
-			{
-				allPipelinesReady = false;
-				break;
-			}
+			_gbufferLanes.Get(laneDefinitions[i].Key, device);
 		}
+	}
 
-		if (allPipelinesReady)
+	private GBufferLane BuildGBufferLane(GpuDrawExecutionKey key, IGfxDevice device)
+	{
+		if (GpuDrawExecutionLanes.TryGetDefinition(key, out var lane) == false)
 		{
-			return;
+			throw new InvalidOperationException($"No G-buffer execution lane is defined for '{key}'.");
 		}
 
-		for (var i = 0; i < laneDefinitions.Length; i++)
-		{
-			var lane = laneDefinitions[i];
-			if (GetGBufferPipeline(lane) is not null)
-			{
-				continue;
-			}
+		var renderState = new RenderStateDescriptor(
+			FillMode.Solid,
+			lane.ResolveCullMode(CullMode.Back),
+			depthTestEnabled: true,
+			depthWriteEnabled: true,
+			BlendMode.Opaque,
+			reverseWinding: lane.ReverseWinding);
+		var state = new GraphicsPipelineState(
+			GBufferRenderTargets,
+			new DepthStencilFormat(TextureFormat.D32Float),
+			renderState,
+			GraphicsLayoutKind.Material,
+			$"GBuffer:{lane.ShaderVariant}");
+		var shader = new GraphicsShader(
+			_shaderSource,
+			GetGBufferShaderPath(lane.DrawKind),
+			"vertexShader",
+			"fragmentShader",
+			lane.PreprocessorDefine,
+			lane.IsSkinned ? "WOLF_GBUFFER_SKINNED" : string.Empty);
+		var pipeline = shader.GetPipeline(device, state);
+		var reflection = shader.ReflectionLayout;
 
-			var renderState = new RenderStateDescriptor(
-				FillMode.Solid,
-				lane.ResolveCullMode(CullMode.Back),
-				depthTestEnabled: true,
-				depthWriteEnabled: true,
-				BlendMode.Opaque,
-				reverseWinding: lane.ReverseWinding);
-			var compiled = GraphicsShaderCompiler.CompileWithReflection(
-				_shaderCompiler,
-				device.BackendKind,
-				GetGBufferShaderPath(lane.DrawKind),
-				"vertexShader",
-				"fragmentShader",
-				lane.PreprocessorDefine,
-                lane.IsSkinned ? "WOLF_GBUFFER_SKINNED" : string.Empty);
-			var shaderSet = compiled.Bytecode;
-			var pipelineKey = new PipelineKey(
-				PassKind.Graphics,
-				vertexEntryPoint: "vertexShader",
-				pixelEntryPoint: "fragmentShader",
-				computeEntryPoint: null,
-				renderTargets: new(new[]
-				{
-					TextureFormat.Bgra8Unorm,
-					TextureFormat.Rgba16Float,
-					TextureFormat.Rgba8Unorm,
-					TextureFormat.Rgba16Float,
-					TextureFormat.Rgba16Float
-				}),
-				depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
-				renderState: renderState,
-				layout: GraphicsLayoutKind.Material,
-				shaderVariant: $"GBuffer:{lane.ShaderVariant}");
-			_gbufferPipelines[lane.ExecutionIndex] = device.GetOrCreatePipeline(pipelineKey, shaderSet);
-			var bindings = SharedDrawGraphicsBufferBindings.FromGBufferReflection(compiled.ReflectionLayout);
-			_gbufferBufferBindings[lane.ExecutionIndex] = bindings;
-			_gbufferReflections[lane.ExecutionIndex] = compiled.ReflectionLayout;
-			_gbufferLaneBindingGeneration++;
-		}
+		return new GBufferLane(
+			pipeline,
+			SharedDrawGraphicsBufferBindings.FromGBufferReflection(reflection),
+			reflection);
+	}
+
+	/// <summary>
+	/// The register slots a terrain table update binds: its update list, the table it writes, the material
+	/// generations and the diagnostics counters, as reflected from the current shader.
+	/// </summary>
+	private static uint[] GetTerrainUpdateSlots(ComputeKernel kernel, string tableName)
+	{
+		var reflection = kernel.ReflectionLayout;
+
+		return
+		[
+			reflection.GetResource("g_Updates").RegisterIndex,
+			reflection.GetResource(tableName).RegisterIndex,
+			reflection.GetResource("g_MaterialGenerations").RegisterIndex,
+			reflection.GetResource("g_Diagnostics").RegisterIndex
+		];
 	}
 
 	private GraphicsPassBindingSet? CreateGBufferPassBindingSet(GpuDrawExecutionLaneDefinition lane)
 	{
-		var reflection = _gbufferReflections[lane.ExecutionIndex];
-		if (reflection is null)
+		if (_gbufferLanes.TryGet(lane.Key, out var variant) == false)
 		{
 			return null;
 		}
 
-		return GraphicsPassBindingSet.FromReflection(reflection,
+		return GraphicsPassBindingSet.FromReflection(variant.Reflection,
 			new Dictionary<string, IGfxBuffer?>(StringComparer.Ordinal)
 			{
 				["CameraParams"] = _gpuDrawResources.CameraBuffer,
@@ -1760,7 +1496,11 @@ public sealed partial class GpuDrawPass
 			SharedDrawPerDrawBindings.ResourceNames);
 	}
 
-	private IGfxPipeline? GetGBufferPipeline(GpuDrawExecutionLaneDefinition lane) => _gbufferPipelines[lane.ExecutionIndex];
+	private IGfxPipeline? GetGBufferPipeline(GpuDrawExecutionLaneDefinition lane) =>
+		_gbufferLanes.TryGet(lane.Key, out var variant) ? variant.Pipeline : null;
+
+	private SharedDrawGraphicsBufferBindings? GetGBufferBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+		_gbufferLanes.TryGet(lane.Key, out var variant) ? variant.BufferBindings : null;
 
 	private static void WriteBuffer<T>(IGfxBuffer buffer, ReadOnlySpan<T> data, string bufferName) where T : unmanaged
 	{
@@ -2092,12 +1832,12 @@ public sealed partial class GpuDrawPass
 			_pass = pass;
 		}
 
-		public ulong Generation => _pass._gbufferLaneBindingGeneration;
+		public ulong Generation => _pass._gbufferLanes.Generation;
 
 		public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => true;
 
 		public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
-			_pass._gbufferBufferBindings[lane.ExecutionIndex];
+			_pass.GetGBufferBufferBindings(lane);
 
 		public GraphicsPassBindingSet? GetPassBindings(GpuDrawExecutionLaneDefinition lane) =>
 			_pass.CreateGBufferPassBindingSet(lane);
@@ -2114,7 +1854,7 @@ public sealed partial class GpuDrawPass
 		{
 			var laneDefinition = laneDefinitions[i];
 			var pipeline = GetGBufferPipeline(laneDefinition);
-			var bufferBindings = _gbufferBufferBindings[laneDefinition.ExecutionIndex];
+			var bufferBindings = GetGBufferBufferBindings(laneDefinition);
 			var passBindings = CreateGBufferPassBindingSet(laneDefinition);
 			if (pipeline is null || bufferBindings is null || passBindings is null)
 			{
@@ -2465,6 +2205,12 @@ public sealed partial class GpuDrawPass
 		tmp[0] = data;
 		writableBuffer.Write<T>(tmp, elementOffset);
 	}
+
+	/// <summary>What a G-buffer lane's draws need from its shader variant.</summary>
+	private sealed record GBufferLane(
+		IGfxPipeline Pipeline,
+		SharedDrawGraphicsBufferBindings BufferBindings,
+		ShaderReflectionLayout Reflection);
 }
 
 /// <summary>

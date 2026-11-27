@@ -12,15 +12,8 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 public sealed class DdgiFinalGatherPass
 {
-	private readonly IShaderProvider _shaderProvider;
+	private readonly ComputeKernel _kernel;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline? _pipeline;
-	private ReadOnlyMemory<byte> _computeShader;
-	private ComputeThreadGroupSize? _threadGroupSize;
-	private GraphicsBackendKind? _compiledBackendKind;
-	private ShaderPropertyWriter? _bindlessWriter;
-	private ShaderPropertyWriter? _cameraWriter;
-	private ShaderPropertyWriter? _settingsWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private uint _frameIndex;
 	private readonly IRenderer _renderer;
@@ -30,14 +23,16 @@ public sealed class DdgiFinalGatherPass
 	private readonly Action<RenderGraphContext> _execute;
 
 	internal DdgiFinalGatherPass(
-		IShaderProvider shaderProvider,
+		ShaderSource shaderSource,
 		BindlessResourceRegistry bindlessRegistry,
 		IRenderer renderer,
 		GpuDrawResources gpuDrawResources,
 		RayTracingScene rayTracingScene,
 		ShadowMapPass shadowMapPass)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernel = new ComputeKernel(shaderSource, EngineShaderPrograms.DdgiFinalGather, "DdgiFinalGatherCS");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
@@ -107,7 +102,12 @@ public sealed class DdgiFinalGatherPass
 		ArgumentNullException.ThrowIfNull(rayTracingSceneResources);
 		ArgumentNullException.ThrowIfNull(sceneData);
 
-		var pipeline = EnsurePipeline(device);
+		if (device.SupportsRayTracing == false)
+		{
+			throw new NotSupportedException("DDGI final gather requires a ray-tracing capable graphics device.");
+		}
+
+		var pipeline = _kernel.GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 		if (_linearSampler.IsValid == false)
 		{
@@ -197,8 +197,7 @@ public sealed class DdgiFinalGatherPass
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
 
-		var bindlessWriter = _bindlessWriter
-			?? throw new InvalidOperationException("DDGI final gather bindless writer was not initialized.");
+		var bindlessWriter = _kernel.Writer("BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("depthHandle", config.Depth.Value);
 		bindlessWriter.SetUInt("normalHandle", config.Normal.Value);
@@ -220,8 +219,7 @@ public sealed class DdgiFinalGatherPass
 		bindlessWriter.SetUInt("shadowMapHandle2", config.ShadowMap2.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		var cameraWriter = _cameraWriter
-			?? throw new InvalidOperationException("DDGI final gather camera writer was not initialized.");
+		var cameraWriter = _kernel.Writer("CameraParams");
 		cameraWriter.Clear();
 		cameraWriter.SetMatrix4x4("camera.invProjection", sceneData.InverseProjection);
 		cameraWriter.SetMatrix4x4("camera.invViewProjection", sceneData.InverseViewProjection);
@@ -233,8 +231,7 @@ public sealed class DdgiFinalGatherPass
 		cameraWriter.SetUInt("camera.frameSizeY", (uint)Math.Max(sceneData.SceneFramebufferSize.Y, 1));
 		commandList.SetComputeConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
 
-		var settingsWriter = _settingsWriter
-			?? throw new InvalidOperationException("DDGI final gather settings writer was not initialized.");
+		var settingsWriter = _kernel.Writer("FinalGatherSettings");
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.FramebufferSize.X, 1));
 		settingsWriter.SetUInt("framebufferSizeY", (uint)Math.Max(config.FramebufferSize.Y, 1));
@@ -294,54 +291,10 @@ public sealed class DdgiFinalGatherPass
 		commandList.SetComputeReadOnlyBuffer(11, config.TerrainLayerBuffer);
 		commandList.SetComputeReadOnlyBuffer(12, config.InstanceIndexToTerrainRayTracingResolutionBuffer);
 
-		var threadGroupSize = _threadGroupSize
-			?? throw new InvalidOperationException("DDGI final gather threadgroup size was not initialized.");
+		var threadGroupSize = _kernel.ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)Math.Max(config.DispatchSize.X, 1),
 			(uint)Math.Max(config.DispatchSize.Y, 1));
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device)
-	{
-		if (_pipeline is not null)
-		{
-			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
-			{
-				throw new InvalidOperationException(
-					$"DdgiFinalGatherPass is already compiled for backend '{_compiledBackendKind.Value}', " +
-					$"but was requested for '{device.BackendKind}'.");
-			}
-			return _pipeline;
-		}
-		if (device.SupportsRayTracing == false)
-		{
-			throw new NotSupportedException("DDGI final gather requires a ray-tracing capable graphics device.");
-		}
-
-		var compiled = _shaderProvider.GetComputeShaderWithReflection(
-			EngineShaderPrograms.DdgiFinalGather,
-			"DdgiFinalGatherCS",
-			device.BackendKind);
-		_computeShader = compiled.Bytecode;
-		_threadGroupSize = compiled.ThreadGroupSize;
-		_bindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		_cameraWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("CameraParams"));
-		_settingsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("FinalGatherSettings"));
-		_compiledBackendKind = device.BackendKind;
-
-		var key = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "DdgiFinalGatherCS",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: "ddgi_final_gather.compute.slang");
-		_pipeline = device.GetOrCreatePipeline(
-			key,
-			new ShaderBytecodeSet(compute: _computeShader, computeThreadGroupSize: _threadGroupSize));
-		return _pipeline;
 	}
 }

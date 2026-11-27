@@ -79,6 +79,19 @@ public sealed record TerrainLayerPaintResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+/// <summary>
+/// The outcome of an engine shader reload: whether it ran, how many shader artifacts it replaced, any shaders that
+/// failed to compile, and the provider's new shader revision. The renderer applies the new shaders at the start of its
+/// next frame, so wait for render frames before capturing.
+/// </summary>
+public sealed record EngineShaderReloadResult(
+	bool Reloaded,
+	int AppliedArtifactCount,
+	IReadOnlyList<string> Failures,
+	long ShaderRevision,
+	long EditorFrameSequence,
+	long RenderFrameSequence);
+
 public sealed record EditorUndoResult(
 	bool Applied,
 	long EditorFrameSequence,

@@ -28,32 +28,30 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 	private const uint Bc1RefinementPasses = 2;
 
 	private readonly IRenderer _renderer;
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly ComputeKernel _bc1;
+	private readonly ComputeKernel _bc4;
+	private readonly ComputeKernel _bc3Stitch;
+	private readonly ComputeKernel _bc5Stitch;
+	private readonly ComputeKernel _bc6h;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly object _sync = new();
 
-	private GraphicsBackendKind? _cachedBackend;
-	private long _cachedShaderRevision = -1;
-	private IGfxPipeline? _bc1Pipeline;
-	private IGfxPipeline? _bc4Pipeline;
-	private IGfxPipeline? _bc3StitchPipeline;
-	private IGfxPipeline? _bc5StitchPipeline;
-	private IGfxPipeline? _bc6hPipeline;
-	private ComputeThreadGroupSize _bc1ThreadGroupSize;
-	private ComputeThreadGroupSize _bc4ThreadGroupSize;
-	private ComputeThreadGroupSize _bc3StitchThreadGroupSize;
-	private ComputeThreadGroupSize _bc5StitchThreadGroupSize;
-	private ComputeThreadGroupSize _bc6hThreadGroupSize;
 	private IGfxBuffer? _bc1Match5Buffer;
 	private IGfxBuffer? _bc1Match6Buffer;
 
 	public TextureGpuCompressionService(
 		IRenderer renderer,
-		IShaderProvider shaderCompiler,
+		ShaderSource shaderSource,
 		IMainThreadDispatcher mainThreadDispatcher)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_bc1 = new ComputeKernel(shaderSource, Bc1Shader, Bc1EntryPoint);
+		_bc4 = new ComputeKernel(shaderSource, Bc4Shader, Bc4EntryPoint);
+		_bc3Stitch = new ComputeKernel(shaderSource, Bc3StitchShader, Bc3StitchEntryPoint);
+		_bc5Stitch = new ComputeKernel(shaderSource, Bc5StitchShader, Bc5StitchEntryPoint);
+		_bc6h = new ComputeKernel(shaderSource, Bc6hShader, Bc6hEntryPoint);
 		_mainThreadDispatcher = mainThreadDispatcher ?? throw new ArgumentNullException(nameof(mainThreadDispatcher));
 	}
 
@@ -205,7 +203,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 			{
 				DispatchPrimitiveCompression(commandList, inputBuffer, colorBuffer, mip.Width, mip.Height, TextureFormat.Bc1Unorm, 0);
 				DispatchPrimitiveCompression(commandList, inputBuffer, alphaBuffer, mip.Width, mip.Height, TextureFormat.Bc4Unorm, 3);
-				DispatchStitch(commandList, _bc3StitchPipeline!, _bc3StitchThreadGroupSize, colorBuffer, alphaBuffer, outputBuffer, blockWidth, blockHeight);
+				DispatchStitch(commandList, _bc3Stitch.Pipeline, _bc3Stitch.ThreadGroupSize, colorBuffer, alphaBuffer, outputBuffer, blockWidth, blockHeight);
 				commandList.CopyBuffer(outputBuffer, 0, readbackBuffer, 0, (ulong)finalSizeInBytes);
 			}
 			finally
@@ -243,7 +241,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 			{
 				DispatchPrimitiveCompression(commandList, inputBuffer, redBuffer, mip.Width, mip.Height, TextureFormat.Bc4Unorm, 0);
 				DispatchPrimitiveCompression(commandList, inputBuffer, greenBuffer, mip.Width, mip.Height, TextureFormat.Bc4Unorm, 1);
-				DispatchStitch(commandList, _bc5StitchPipeline!, _bc5StitchThreadGroupSize, redBuffer, greenBuffer, outputBuffer, blockWidth, blockHeight);
+				DispatchStitch(commandList, _bc5Stitch.Pipeline, _bc5Stitch.ThreadGroupSize, redBuffer, greenBuffer, outputBuffer, blockWidth, blockHeight);
 				commandList.CopyBuffer(outputBuffer, 0, readbackBuffer, 0, (ulong)finalSizeInBytes);
 			}
 			finally
@@ -277,13 +275,13 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 			try
 			{
 				var constants = new PrimitiveCompressionConstants((uint)mip.Width, (uint)mip.Height, (uint)blockWidth, 0u);
-				commandList.BindPipeline(_bc6hPipeline!);
+				commandList.BindPipeline(_bc6h.Pipeline);
 				commandList.SetComputeConstants(11, StructAsBytes(ref constants));
 				commandList.SetComputeBuffer(0, inputBuffer);
 				commandList.SetComputeBuffer(1, outputBuffer);
 				commandList.Dispatch(
-					(uint)DivideRoundUp(blockWidth, (int)_bc6hThreadGroupSize.X),
-					(uint)DivideRoundUp(blockHeight, (int)_bc6hThreadGroupSize.Y),
+					(uint)DivideRoundUp(blockWidth, (int)_bc6h.ThreadGroupSize.X),
+					(uint)DivideRoundUp(blockHeight, (int)_bc6h.ThreadGroupSize.Y),
 					1);
 				commandList.CopyBuffer(outputBuffer, 0, readbackBuffer, 0, (ulong)outputSizeInBytes);
 			}
@@ -326,15 +324,15 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 		if (format == TextureFormat.Bc1Unorm)
 		{
 			var constants = new PrimitiveCompressionConstants((uint)width, (uint)height, (uint)GetBlockCount(width), Bc1RefinementPasses);
-			commandList.BindPipeline(_bc1Pipeline!);
+			commandList.BindPipeline(_bc1.Pipeline);
 			commandList.SetComputeConstants(11, StructAsBytes(ref constants));
 			commandList.SetComputeBuffer(0, inputBuffer);
 			commandList.SetComputeBuffer(1, outputBuffer);
 			commandList.SetComputeBuffer(2, _bc1Match5Buffer!);
 			commandList.SetComputeBuffer(3, _bc1Match6Buffer!);
 			commandList.Dispatch(
-				(uint)DivideRoundUp(GetBlockCount(width), (int)_bc1ThreadGroupSize.X),
-				(uint)DivideRoundUp(GetBlockCount(height), (int)_bc1ThreadGroupSize.Y),
+				(uint)DivideRoundUp(GetBlockCount(width), (int)_bc1.ThreadGroupSize.X),
+				(uint)DivideRoundUp(GetBlockCount(height), (int)_bc1.ThreadGroupSize.Y),
 				1);
 			return;
 		}
@@ -342,14 +340,14 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 		if (format == TextureFormat.Bc4Unorm)
 		{
 			var constants = new PrimitiveCompressionConstants((uint)width, (uint)height, (uint)GetBlockCount(width), channelIndex);
-			commandList.BindPipeline(_bc4Pipeline!);
+			commandList.BindPipeline(_bc4.Pipeline);
 			commandList.SetComputeConstants(11, StructAsBytes(ref constants));
 			commandList.SetComputeBuffer(0, inputBuffer);
 			commandList.SetComputeBuffer(1, outputBuffer);
 			commandList.Dispatch(
 				1,
-				(uint)DivideRoundUp(GetBlockCount(width), (int)_bc4ThreadGroupSize.Y),
-				(uint)DivideRoundUp(GetBlockCount(height), (int)_bc4ThreadGroupSize.Z));
+				(uint)DivideRoundUp(GetBlockCount(width), (int)_bc4.ThreadGroupSize.Y),
+				(uint)DivideRoundUp(GetBlockCount(height), (int)_bc4.ThreadGroupSize.Z));
 			return;
 		}
 
@@ -382,60 +380,16 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 	{
 		lock (_sync)
 		{
-			if (_cachedShaderRevision != _shaderCompiler.Revision)
-			{
-				_bc1Pipeline = null;
-				_bc4Pipeline = null;
-				_bc3StitchPipeline = null;
-				_bc5StitchPipeline = null;
-				_bc6hPipeline = null;
-				_cachedBackend = null;
-			}
+			// Makes every kernel current for this compression, rebuilding any that a shader reload left stale.
+			_bc1.GetPipeline(device);
+			_bc4.GetPipeline(device);
+			_bc3Stitch.GetPipeline(device);
+			_bc5Stitch.GetPipeline(device);
+			_bc6h.GetPipeline(device);
 
-			if (_cachedBackend == device.BackendKind &&
-			    _bc1Pipeline is not null &&
-			    _bc4Pipeline is not null &&
-			    _bc3StitchPipeline is not null &&
-			    _bc5StitchPipeline is not null &&
-			    _bc6hPipeline is not null &&
-			    _bc1Match5Buffer is not null &&
-			    _bc1Match6Buffer is not null)
-			{
-				return;
-			}
-
-			(_bc1Pipeline, _bc1ThreadGroupSize) = CreatePipeline(device, Bc1Shader, Bc1EntryPoint, "texture-import-bc1");
-			(_bc4Pipeline, _bc4ThreadGroupSize) = CreatePipeline(device, Bc4Shader, Bc4EntryPoint, "texture-import-bc4");
-			(_bc3StitchPipeline, _bc3StitchThreadGroupSize) = CreatePipeline(device, Bc3StitchShader, Bc3StitchEntryPoint, "texture-import-bc3-stitch");
-			(_bc5StitchPipeline, _bc5StitchThreadGroupSize) = CreatePipeline(device, Bc5StitchShader, Bc5StitchEntryPoint, "texture-import-bc5-stitch");
-			(_bc6hPipeline, _bc6hThreadGroupSize) = CreatePipeline(device, Bc6hShader, Bc6hEntryPoint, "texture-import-bc6h");
-
-			_bc1Match5Buffer = CreateLookupBuffer(device, Match5TableBytes);
-			_bc1Match6Buffer = CreateLookupBuffer(device, Match6TableBytes);
-			_cachedBackend = device.BackendKind;
-			_cachedShaderRevision = _shaderCompiler.Revision;
+			_bc1Match5Buffer ??= CreateLookupBuffer(device, Match5TableBytes);
+			_bc1Match6Buffer ??= CreateLookupBuffer(device, Match6TableBytes);
 		}
-	}
-
-	private (IGfxPipeline Pipeline, ComputeThreadGroupSize ThreadGroupSize) CreatePipeline(
-		IGfxDevice device,
-		ShaderProgramId shaderProgram,
-		string entryPoint,
-		string variant)
-	{
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection(shaderProgram, entryPoint, device.BackendKind);
-		var pipeline = device.GetOrCreatePipeline(
-			new PipelineKey(
-				PassKind.Compute,
-				null,
-				null,
-				entryPoint,
-				new RenderTargetFormats(Array.Empty<TextureFormat>()),
-				new DepthStencilFormat(TextureFormat.Unknown),
-				default,
-				shaderVariant: variant),
-			new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: compiled.ThreadGroupSize));
-		return (pipeline, compiled.ThreadGroupSize);
 	}
 
 	private static ReadOnlySpan<byte> StructAsBytes<T>(ref T value) where T : unmanaged

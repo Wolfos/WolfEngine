@@ -4,46 +4,95 @@ using WolfEngine.Rendering.Passes;
 namespace WolfEngine.Rendering.Shaders;
 
 /// <summary>
-/// One engine compute shader entry point: its pipeline, thread group size and reflected constant buffer writers,
-/// created on first use.
+/// One compute entry point of an engine shader, with the defines it is compiled with. It compiles the shader,
+/// creates the pipeline and reflects its constant buffers on first use, and builds them again after a shader
+/// reload, so a pass keeps only the kernel and asks it for the rest each time it executes.
 /// </summary>
+/// <remarks>
+/// <see cref="GetPipeline"/> or <see cref="Bind"/> makes the kernel current. <see cref="ThreadGroupSize"/>,
+/// <see cref="ReflectionLayout"/>, <see cref="Writer"/> and <see cref="Dispatch(IGfxCommandList, int, int, int)"/>
+/// throw until it is, so nothing can read state left over from before a reload. Do not keep the pipeline or a
+/// writer past the current execute.
+/// </remarks>
 internal sealed class ComputeKernel
 {
+	private readonly ShaderSource _source;
 	private readonly ShaderProgramId _program;
 	private readonly string _entryPoint;
+	private readonly string[] _defines;
 	private readonly string? _shaderVariant;
 	private readonly Dictionary<string, ShaderPropertyWriter> _writers = new(StringComparer.Ordinal);
 	private IGfxPipeline? _pipeline;
-	private ComputeThreadGroupSize? _threadGroupSize;
 	private CompiledComputeShaderWithReflection _compiled;
+	private long _builtRevision;
 
-	/// <param name="program">The shader program the entry point belongs to.</param>
-	/// <param name="entryPoint">The compute entry point.</param>
-	/// <param name="shaderVariant">
-	/// Names the pipeline's GPU profiler scope on D3D12. Without it the scope is named after the entry point.
-	/// </param>
-	public ComputeKernel(ShaderProgramId program, string entryPoint, string? shaderVariant = null)
+	public ComputeKernel(ShaderSource source, ShaderProgramId program, string entryPoint, params string[] defines)
 	{
+		_source = source ?? throw new ArgumentNullException(nameof(source));
+		ArgumentException.ThrowIfNullOrWhiteSpace(entryPoint);
+
 		_program = program;
-		_entryPoint = entryPoint ?? throw new ArgumentNullException(nameof(entryPoint));
-		_shaderVariant = shaderVariant;
+		_entryPoint = entryPoint;
+		_defines = ShaderSource.NormalizeDefines(defines);
+		_shaderVariant = _defines.Length == 0
+			? null
+			: $"{entryPoint}:{string.Join(';', _defines)}";
 	}
 
-	public IGfxPipeline Pipeline => _pipeline ?? throw new InvalidOperationException($"'{_entryPoint}' was not created.");
+	public string EntryPoint => _entryPoint;
 
-	public ComputeThreadGroupSize ThreadGroupSize => _threadGroupSize
-		?? throw new InvalidOperationException($"'{_entryPoint}' was not created.");
+	/// <summary>
+	/// The name the pipeline's GPU profiler scope carries: the entry point, followed by the defines when there are any.
+	/// </summary>
+	public string ProfileName => _shaderVariant ?? _entryPoint;
 
-	public void EnsureCreated(IGfxDevice device, IShaderProvider shaderProvider)
+	/// <summary>
+	/// The pipeline built for the current shaders. The kernel must be current: call <see cref="GetPipeline"/> or
+	/// <see cref="Bind"/> first in the same execute.
+	/// </summary>
+	public IGfxPipeline Pipeline
 	{
-		if (_pipeline is not null)
+		get
 		{
-			return;
+			EnsureCurrent();
+			return _pipeline!;
+		}
+	}
+
+	public ComputeThreadGroupSize ThreadGroupSize
+	{
+		get
+		{
+			EnsureCurrent();
+			return _compiled.ThreadGroupSize;
+		}
+	}
+
+	public ShaderReflectionLayout ReflectionLayout
+	{
+		get
+		{
+			EnsureCurrent();
+			return _compiled.ReflectionLayout;
+		}
+	}
+
+	/// <summary>Returns the kernel's pipeline, compiling the shader and creating the pipeline first if needed.</summary>
+	public IGfxPipeline GetPipeline(IGfxDevice device)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+
+		var appliedRevision = _source.AppliedRevision;
+		if (_pipeline is not null && _builtRevision == appliedRevision)
+		{
+			return _pipeline;
 		}
 
-		_compiled = shaderProvider.GetComputeShaderWithReflection(_program, _entryPoint, device.BackendKind);
-		_threadGroupSize = _compiled.ThreadGroupSize;
-		var shaders = new ShaderBytecodeSet(compute: _compiled.Bytecode, computeThreadGroupSize: _threadGroupSize);
+		_compiled = _source.GetComputeShader(_program, _entryPoint, device.BackendKind, _defines);
+		_writers.Clear();
+		var shaders = new ShaderBytecodeSet(
+			compute: _compiled.Bytecode,
+			computeThreadGroupSize: _compiled.ThreadGroupSize);
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
 			vertexEntryPoint: null,
@@ -55,10 +104,28 @@ internal sealed class ComputeKernel
 			layout: GraphicsLayoutKind.Default,
 			shaderVariant: _shaderVariant);
 		_pipeline = device.GetOrCreatePipeline(pipelineKey, shaders);
+		_builtRevision = appliedRevision;
+
+		return _pipeline;
 	}
 
+	/// <summary>Binds the kernel's pipeline, creating it first if needed.</summary>
+	public void Bind(IGfxCommandList commandList, IGfxDevice device)
+	{
+		ArgumentNullException.ThrowIfNull(commandList);
+
+		commandList.BindPipeline(GetPipeline(device));
+	}
+
+	/// <summary>
+	/// The writer for one of the kernel's constant buffers, reflected from the current shader. The kernel must be
+	/// current: call <see cref="GetPipeline"/> or <see cref="Bind"/> first in the same execute.
+	/// </summary>
 	public ShaderPropertyWriter Writer(string constantBuffer)
 	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(constantBuffer);
+		EnsureCurrent();
+
 		if (_writers.TryGetValue(constantBuffer, out var writer))
 		{
 			return writer;
@@ -70,17 +137,29 @@ internal sealed class ComputeKernel
 		return writer;
 	}
 
-	/// <summary>Binds the pipeline, creating it first if needed.</summary>
-	public void Bind(IGfxCommandList commandList, IGfxDevice device, IShaderProvider shaderProvider)
-	{
-		EnsureCreated(device, shaderProvider);
-		commandList.BindPipeline(Pipeline);
-	}
-
 	/// <summary>Dispatches enough groups to cover <paramref name="width"/> x <paramref name="height"/> x <paramref name="depth"/> threads.</summary>
 	public void Dispatch(IGfxCommandList commandList, int width, int height, int depth)
 	{
-		var (x, y, z) = ThreadGroupSize.GetDispatchGroupCount((uint)width, (uint)height, (uint)depth);
+		ArgumentNullException.ThrowIfNull(commandList);
+
+		var (x, y, z) = ThreadGroupSize.GetDispatchGroupCount(
+			(uint)Math.Max(width, 1),
+			(uint)Math.Max(height, 1),
+			(uint)Math.Max(depth, 1));
 		commandList.Dispatch(x, y, z);
+	}
+
+	/// <summary>Dispatches enough groups to cover <paramref name="width"/> x <paramref name="height"/> threads.</summary>
+	public void Dispatch(IGfxCommandList commandList, int width, int height)
+	{
+		Dispatch(commandList, width, height, 1);
+	}
+
+	private void EnsureCurrent()
+	{
+		if (_pipeline is not null && _builtRevision == _source.AppliedRevision) return;
+
+		throw new InvalidOperationException(
+			$"Compute kernel '{ProfileName}' is not current. Call GetPipeline or Bind before reading its reflection, writers or thread group size.");
 	}
 }

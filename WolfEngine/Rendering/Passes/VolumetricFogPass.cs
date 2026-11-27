@@ -45,15 +45,8 @@ public readonly struct VolumetricFogPassConfig
 
 public sealed class VolumetricFogPass
 {
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly ComputeKernel[] _kernels;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly IGfxPipeline?[] _pipelines = new IGfxPipeline?[3];
-	private readonly ReadOnlyMemory<byte>[] _shaders = new ReadOnlyMemory<byte>[3];
-	private readonly ComputeThreadGroupSize?[] _threadGroups = new ComputeThreadGroupSize?[3];
-	private GraphicsBackendKind? _backend;
-	private ShaderPropertyWriter? _bindlessWriter;
-	private ShaderPropertyWriter? _fogWriter;
-	private ShaderPropertyWriter? _lightingWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private uint _frameIndex;
@@ -78,12 +71,20 @@ public sealed class VolumetricFogPass
 	private readonly Action<RenderGraphContext> _integrateExecute;
 
 	public VolumetricFogPass(
-		IShaderProvider shaderCompiler,
+		ShaderSource shaderSource,
 		BindlessResourceRegistry bindlessRegistry,
 		GpuDrawResources gpuDrawResources,
 		ShadowMapPass shadowMapPass)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		// Indexed by VolumetricFogStage.
+		_kernels =
+		[
+			new ComputeKernel(shaderSource, EngineShaderPrograms.VolumetricFog, "VolumetricFogInjectCS"),
+			new ComputeKernel(shaderSource, EngineShaderPrograms.VolumetricFog, "VolumetricFogTemporalCS"),
+			new ComputeKernel(shaderSource, EngineShaderPrograms.VolumetricFog, "VolumetricFogIntegrateCS")
+		];
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_shadowMapPass = shadowMapPass ?? throw new ArgumentNullException(nameof(shadowMapPass));
@@ -206,7 +207,7 @@ public sealed class VolumetricFogPass
 		VolumetricFogStage stage)
 	{
 		if (!_framePrepared) throw new InvalidOperationException("VolumetricFogPass.PrepareFrame must run before building stage configs.");
-		var pipeline = EnsurePipeline(device, stage);
+		var pipeline = _kernels[(int)stage].GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 		_linearSampler = EnsureSampler(_linearSampler, FilterMode.Trilinear);
 		_shadowSampler = EnsureSampler(_shadowSampler, FilterMode.Bilinear);
@@ -286,9 +287,10 @@ public sealed class VolumetricFogPass
 
 	private void Record(RenderGraphContext context, VolumetricFogStage stage, in VolumetricFogPassConfig config)
 	{
+		var kernel = _kernels[(int)stage];
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
-		var bindless = _bindlessWriter!;
+		var bindless = kernel.Writer("BindlessHandles");
 		bindless.Clear();
 		bindless.SetUInt("currentHandle", config.Current.Value);
 		bindless.SetUInt("historyHandle", config.History.Value);
@@ -303,7 +305,7 @@ public sealed class VolumetricFogPass
 
 		var scene = context.SceneData;
 		var fog = config.Settings;
-		var parameters = _fogWriter!;
+		var parameters = kernel.Writer("FogParams");
 		parameters.Clear();
 		parameters.SetMatrix4x4("inverseUnjitteredViewProjection", config.InverseUnjitteredViewProjection);
 		parameters.SetMatrix4x4("viewMatrix", scene.ViewMatrix);
@@ -330,7 +332,7 @@ public sealed class VolumetricFogPass
 		commandList.SetComputeConstants(parameters.RegisterIndex, parameters.AsBytes());
 
 		var shadow = config.ShadowData;
-		var lighting = _lightingWriter!;
+		var lighting = kernel.Writer("FogLightingParams");
 		lighting.Clear();
 		lighting.SetVector4("lightColorIntensity", config.LightColorIntensity);
 		lighting.SetVector4("lightDirectionEnabled", config.LightDirectionEnabled);
@@ -348,34 +350,9 @@ public sealed class VolumetricFogPass
 		commandList.SetComputeReadOnlyBuffer(10, config.VolumeBuffer);
 		commandList.SetComputeReadOnlyBuffer(11, config.CellHeaderBuffer);
 		commandList.SetComputeReadOnlyBuffer(12, config.VolumeIndexBuffer);
-		var group = _threadGroups[(int)stage]!.Value;
+		var group = kernel.ThreadGroupSize;
 		var (x, y, z) = group.GetDispatchGroupCount((uint)config.Grid.X, (uint)config.Grid.Y, stage == VolumetricFogStage.Integrate ? 1u : (uint)config.Grid.Z);
 		commandList.Dispatch(x, y, z);
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device, VolumetricFogStage stage)
-	{
-		if (_backend.HasValue && _backend != device.BackendKind) throw new InvalidOperationException("Volumetric fog backend changed after pipeline compilation.");
-		var index = (int)stage;
-		if (_pipelines[index] is not null) return _pipelines[index]!;
-		var entry = stage switch { VolumetricFogStage.Inject => "VolumetricFogInjectCS", VolumetricFogStage.Temporal => "VolumetricFogTemporalCS", _ => "VolumetricFogIntegrateCS" };
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.VolumetricFog, entry, device.BackendKind);
-		_shaders[index] = compiled.Bytecode;
-		_threadGroups[index] = compiled.ThreadGroupSize;
-		_bindlessWriter ??= new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		_fogWriter ??= new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("FogParams"));
-		_lightingWriter ??= new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("FogLightingParams"));
-		_backend = device.BackendKind;
-		var key = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: entry,
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: "volumetric_fog.compute.slang");
-		return _pipelines[index] = device.GetOrCreatePipeline(key, new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: compiled.ThreadGroupSize));
 	}
 
 	private DescriptorHandle EnsureSampler(DescriptorHandle current, FilterMode filter) => current.IsValid

@@ -20,37 +20,35 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 		public required int IndexBufferSize { get; init; }
 	}
 
-	private readonly IShaderProvider _shaderCompiler;
+	private static readonly GraphicsPipelineState PipelineState = CreatePipelineState();
+
+	private readonly GraphicsShader _shader;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxDevice? _device;
-	private IGfxPipeline? _pipeline;
 	private MetalTexture? _fontTexture;
 	private DescriptorHandle _fontHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _imageSamplerHandle = DescriptorHandle.Invalid;
-	private ShaderPropertyWriter? _projectionWriter;
-	private ShaderPropertyWriter? _bindlessWriter;
 	private readonly List<UiBufferSet> _availableBuffers = new();
 	private UiBufferSet? _recordingBuffers;
 	private bool _fontUploaded;
 	private readonly string _fragmentEntryPoint;
 	private readonly bool _sampleTexture;
 
-	public MetalUiRenderer(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry, bool sampleTexture = true)
+	public MetalUiRenderer(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry, bool sampleTexture = true)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_fragmentEntryPoint = "fragmentShader";
+		_shader = new GraphicsShader(shaderSource, EngineShaderPrograms.ImGui, "vertexShader", _fragmentEntryPoint);
 		_sampleTexture = sampleTexture;
 	}
 
 	public void EnsureResources(IGfxDevice device, UiFrameData frame)
 	{
 		_device ??= device;
-		if (_pipeline is null)
-		{
-			_pipeline = CreatePipeline(device);
-		}
+		_shader.EnsureCurrent(device);
 
 		// A UI frame can be consumed before the renderer is ready to create its
 		// resources. Keep accepting atlas-bearing frames until we have a compatible
@@ -67,11 +65,6 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 		{
 			frame.MarkFontAtlasUploaded();
 		}
-	}
-
-	public void InvalidateShaderPipeline()
-	{
-		_pipeline = null;
 	}
 
 	public void Record(IGfxCommandList targetCommandList, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
@@ -103,7 +96,7 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 			commandList.ClearColorAttachment(0, clearColor ?? new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f));
 		}
 
-		if (frame.CommandCount == 0 || _pipeline is null || _fontTexture is null)
+		if (frame.CommandCount == 0 || _device is null || _fontTexture is null)
 		{
 			commandList.EndPass();
 			return;
@@ -111,7 +104,7 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 
 		EnsureBuffers(frame);
 
-		commandList.BindPipeline(_pipeline);
+		commandList.BindPipeline(_shader.GetPipeline(_device, PipelineState));
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
 		var buffers = _recordingBuffers ?? throw new InvalidOperationException("UI buffers were not prepared.");
@@ -123,8 +116,7 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 		var R = frame.DisplayPos.X + frame.DisplaySize.X;
 		var T = frame.DisplayPos.Y;
 		var B = frame.DisplayPos.Y + frame.DisplaySize.Y;
-		var projectionWriter = _projectionWriter
-			?? throw new InvalidOperationException("Metal ImGui projection writer was not initialized.");
+		var projectionWriter = _shader.Writer("Projection");
 		projectionWriter.Clear();
 		projectionWriter.SetMatrix4x4(
 			"ProjectionMatrix",
@@ -135,8 +127,7 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 				(R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f));
 		commandList.SetGraphicsConstants(projectionWriter.RegisterIndex, projectionWriter.AsBytes());
 
-		var bindlessWriter = _bindlessWriter
-			?? throw new InvalidOperationException("Metal ImGui bindless writer was not initialized.");
+		var bindlessWriter = _shader.Writer("ImGuiBindless");
 		uint activeTextureHandle = 0;
 		var hasActiveTextureHandle = false;
 		uint activeSamplerHandle = 0;
@@ -326,17 +317,8 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 		return buffer;
 	}
 
-	private IGfxPipeline CreatePipeline(IGfxDevice device)
+	private static GraphicsPipelineState CreatePipelineState()
 	{
-		var compiled = _shaderCompiler.GetGraphicsShaderWithReflection(
-			EngineShaderPrograms.ImGui,
-			"vertexShader",
-			_fragmentEntryPoint,
-			GraphicsBackendKind.Metal);
-		_projectionWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Projection"));
-		_bindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("ImGuiBindless"));
-		var shaderBytes = compiled.Bytecode.Vertex
-			?? throw new InvalidOperationException("ImGui Metal vertex bytecode was missing from reflection compile result.");
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
 			CullMode.None,
@@ -344,17 +326,12 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 			depthWriteEnabled: false,
 			BlendMode.AlphaBlend);
 
-		var pipelineKey = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: _fragmentEntryPoint,
-			computeEntryPoint: null,
-			renderTargets: new(new[] { TextureFormat.Bgra8Unorm }),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: renderState,
-			layout: GraphicsLayoutKind.ImGui);
-
-		return device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(shaderBytes, shaderBytes));
+		return new GraphicsPipelineState(
+			new RenderTargetFormats(new[] { TextureFormat.Bgra8Unorm }),
+			new DepthStencilFormat(TextureFormat.Unknown),
+			renderState,
+			GraphicsLayoutKind.ImGui,
+			"ImGui");
 	}
 
 	private void CreateFontTexture(IGfxDevice device, UiTextureAtlas atlas)

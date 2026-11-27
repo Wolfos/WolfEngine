@@ -37,7 +37,11 @@ public sealed class GpuDrawResources : IDisposable
 	private const int MinimumUploadBufferElementCount = 256;
 	public const int HardeningCounterCount = 16;
 	public const int MaxShadowViewCount = ShadowMapPass.MaxCascadeCount;
-	private readonly IShaderProvider _shaderCompiler;
+	// The shaders the shared constant buffers are sized from.
+	private readonly GraphicsShader _gBufferShader;
+	private readonly GraphicsShader _shadowShader;
+	private readonly GraphicsShader _transparentShader;
+	private readonly GraphicsShader _debugPrimitiveShader;
 
 	public IGfxBuffer? InstanceBuffer { get; private set; }
 	public IGfxBuffer? MaterialBuffer { get; private set; }
@@ -136,7 +140,6 @@ public sealed class GpuDrawResources : IDisposable
 	private IGfxBuffer? _boneMatrixBuffer;
 	private IGfxBuffer? _skinnedInstanceBuffer;
 	private int _activeIndirectCommandSlot;
-	private GraphicsBackendKind? _constantBufferLayoutBackend;
 	private ShaderConstantBufferLayout? _gBufferCameraLayout;
 	private int _cameraBufferSizeInBytes;
 	private int _shadowCameraBufferSizeInBytes;
@@ -216,9 +219,14 @@ public sealed class GpuDrawResources : IDisposable
 		}
 	}
 
-	public GpuDrawResources(IShaderProvider shaderCompiler)
+	public GpuDrawResources(ShaderSource shaderSource)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_gBufferShader = new GraphicsShader(shaderSource, EngineShaderPrograms.GBuffer, "vertexShader", "fragmentShader");
+		_shadowShader = new GraphicsShader(shaderSource, EngineShaderPrograms.ShadowMap, "vertexShader", "fragmentShader");
+		_transparentShader = new GraphicsShader(shaderSource, EngineShaderPrograms.TransparentForward, "vertexShader", "fragmentShader");
+		_debugPrimitiveShader = new GraphicsShader(shaderSource, EngineShaderPrograms.DebugPrimitiveForward, "vertexShader", "fragmentShader");
 	}
 
 	public int ActiveIndirectCommandSlot
@@ -409,7 +417,7 @@ public sealed class GpuDrawResources : IDisposable
 				$"GpuDraw requires MaxFramesInFlight ({MaxFramesInFlight}) to match IndirectCommandBufferSlotCount ({IndirectCommandBufferSlotCount}).");
 		}
 
-		EnsureConstantBufferLayouts(device.BackendKind);
+		EnsureConstantBufferLayouts(device);
 
 		if (InstanceBuffer is null)
 		{
@@ -1075,47 +1083,26 @@ public sealed class GpuDrawResources : IDisposable
 		}
 	}
 
-	private void EnsureConstantBufferLayouts(GraphicsBackendKind backendKind)
+	/// <summary>
+	/// Reads the shared constant buffers' layouts from the current shaders. It runs every frame, so a shader reload
+	/// that changes a layout resizes the buffers on the next frame.
+	/// </summary>
+	private void EnsureConstantBufferLayouts(IGfxDevice device)
 	{
-		if (_constantBufferLayoutBackend.HasValue && _constantBufferLayoutBackend.Value == backendKind)
-		{
-			return;
-		}
+		_gBufferShader.EnsureCurrent(device);
+		_shadowShader.EnsureCurrent(device);
+		_transparentShader.EnsureCurrent(device);
+		_debugPrimitiveShader.EnsureCurrent(device);
 
-		var gbuffer = _shaderCompiler.GetGraphicsShaderWithReflection(
-			EngineShaderPrograms.GBuffer,
-			"vertexShader",
-			"fragmentShader",
-			backendKind);
-		_gBufferCameraLayout = gbuffer.ReflectionLayout.GetConstantBuffer("CameraParams");
+		_gBufferCameraLayout = _gBufferShader.ReflectionLayout.GetConstantBuffer("CameraParams");
 		_cameraBufferSizeInBytes = _gBufferCameraLayout.SizeInBytes;
-
-		var shadow = _shaderCompiler.GetGraphicsShaderWithReflection(
-			EngineShaderPrograms.ShadowMap,
-			"vertexShader",
-			"fragmentShader",
-			backendKind);
-		_shadowCameraBufferSizeInBytes = shadow.ReflectionLayout.GetConstantBuffer("CameraParams").SizeInBytes;
-
-		var transparent = _shaderCompiler.GetGraphicsShaderWithReflection(
-			EngineShaderPrograms.TransparentForward,
-			"vertexShader",
-			"fragmentShader",
-			backendKind);
-		_transparentEnvironmentBufferSizeInBytes = transparent.ReflectionLayout
+		_shadowCameraBufferSizeInBytes = _shadowShader.ReflectionLayout.GetConstantBuffer("CameraParams").SizeInBytes;
+		_transparentEnvironmentBufferSizeInBytes = _transparentShader.ReflectionLayout
 			.GetConstantBuffer("TransparentEnvironmentParams").SizeInBytes;
 		_transparentLightingBufferSizeInBytes =
-			transparent.ReflectionLayout.GetConstantBuffer("LightingParams").SizeInBytes;
-
-		var debugPrimitive = _shaderCompiler.GetGraphicsShaderWithReflection(
-			EngineShaderPrograms.DebugPrimitiveForward,
-			"vertexShader",
-			"fragmentShader",
-			backendKind);
+			_transparentShader.ReflectionLayout.GetConstantBuffer("LightingParams").SizeInBytes;
 		_ddgiDebugBufferSizeInBytes =
-			debugPrimitive.ReflectionLayout.GetConstantBuffer("DdgiDebugParams").SizeInBytes;
-
-		_constantBufferLayoutBackend = backendKind;
+			_debugPrimitiveShader.ReflectionLayout.GetConstantBuffer("DdgiDebugParams").SizeInBytes;
 	}
 
 	private static IGfxBuffer EnsureConstantBufferCapacity(

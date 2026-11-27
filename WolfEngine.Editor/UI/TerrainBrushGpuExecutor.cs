@@ -45,23 +45,26 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 	private const string PaintLayerEntryPoint = "ApplyLayerMapLayerBrush";
 
 	private readonly IRenderer _renderer;
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly Dictionary<TerrainBrushOperation, ComputeKernel> _kernels;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly object _sync = new();
 
-	private GraphicsBackendKind? _compiledBackendKind;
-	private long _compiledShaderRevision = -1;
-	private readonly System.Collections.Generic.Dictionary<TerrainBrushOperation, BrushPipelineState> _pipelineStates = new();
-
 	public TerrainBrushGpuExecutor(
 		IRenderer renderer,
-		IShaderProvider shaderCompiler,
+		ShaderSource shaderSource,
 		IMainThreadDispatcher mainThreadDispatcher,
 		BindlessResourceRegistry bindlessRegistry)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernels = new Dictionary<TerrainBrushOperation, ComputeKernel>();
+		foreach (var operation in Enum.GetValues<TerrainBrushOperation>())
+		{
+			_kernels[operation] = new ComputeKernel(shaderSource, ShaderProgram, GetEntryPoint(operation));
+		}
+
 		_mainThreadDispatcher = mainThreadDispatcher ?? throw new ArgumentNullException(nameof(mainThreadDispatcher));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
@@ -312,42 +315,14 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 	{
 		lock (_sync)
 		{
-			if (_compiledShaderRevision != _shaderCompiler.Revision ||
-			    _compiledBackendKind.HasValue &&
-			    _compiledBackendKind.Value != device.BackendKind)
-			{
-				_pipelineStates.Clear();
-			}
+			var kernel = _kernels[operation];
+			var pipeline = kernel.GetPipeline(device);
 
-			if (_pipelineStates.TryGetValue(operation, out var cached))
-			{
-				_compiledBackendKind = device.BackendKind;
-				return cached;
-			}
-
-			var entryPoint = GetEntryPoint(operation);
-			var compiled = _shaderCompiler.GetComputeShaderWithReflection(ShaderProgram, entryPoint, device.BackendKind);
-			var reflection = compiled.ReflectionLayout;
-			var pipeline = device.GetOrCreatePipeline(
-				new PipelineKey(
-					PassKind.Compute,
-					vertexEntryPoint: null,
-					pixelEntryPoint: null,
-					computeEntryPoint: entryPoint,
-					renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-					depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
-					renderState: default,
-					shaderVariant: ShaderProgram.Value),
-				new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: compiled.ThreadGroupSize));
-			var state = new BrushPipelineState(
+			return new BrushPipelineState(
 				pipeline,
-				compiled.ThreadGroupSize,
-				new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles")),
-				new ShaderPropertyWriter(reflection.GetConstantBuffer("TerrainBrushParameters")));
-			_pipelineStates[operation] = state;
-			_compiledBackendKind = device.BackendKind;
-			_compiledShaderRevision = _shaderCompiler.Revision;
-			return state;
+				kernel.ThreadGroupSize,
+				kernel.Writer("BindlessHandles"),
+				kernel.Writer("TerrainBrushParameters"));
 		}
 	}
 

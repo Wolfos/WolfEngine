@@ -10,10 +10,6 @@ public sealed class NullImGuiRenderer : IImGuiRenderer
 	{
 	}
 
-	public void InvalidateShaderPipeline()
-	{
-	}
-
 	public void Record(IGfxCommandList commandList, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
 		ColorRGBA? clearColor = null)
 	{

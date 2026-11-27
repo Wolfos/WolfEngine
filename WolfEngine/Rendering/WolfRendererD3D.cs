@@ -89,7 +89,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	private int _width;
 	private int _height;
 	private string _windowTitle = "WolfEngine";
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly GraphicsShader _materialShader;
 	private readonly IArenaAllocator _arenaAllocator;
 	private readonly IInputSystem _inputSystem;
 	private readonly WindowChromeController _windowChromeController;
@@ -172,7 +172,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	private static readonly Guid DxgiDebugAll = new("e48ae283-da80-490b-87e6-43e9a9cfda08");
 
 	public WolfRendererD3D(
-		IShaderProvider shaderCompiler,
+		ShaderSource shaderSource,
 		IArenaAllocator arenaAllocator,
 		IInputSystem inputSystem,
 		IImGuiInputSink imguiSystem,
@@ -182,7 +182,9 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	{
 		_width = 1600;
 		_height = 900;
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_materialShader = new GraphicsShader(shaderSource, EngineShaderPrograms.GBuffer, "vertexShader", "fragmentShader");
 		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
 		_imguiInputSink = imguiSystem ?? throw new ArgumentNullException(nameof(imguiSystem));
@@ -1243,12 +1245,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			depthWriteEnabled: true,
 			BlendMode.Opaque);
 
-		var pipelineKey = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
-			computeEntryPoint: null,
-			renderTargets: new(new[]
+		var pipelineState = new GraphicsPipelineState(
+			new(new[]
 			{
 				TextureFormat.Bgra8Unorm,     // Albedo
 				TextureFormat.Rgba16Float,    // Normal
@@ -1256,13 +1254,11 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 				TextureFormat.Rgba16Float,    // Emissive
 				TextureFormat.Rgba16Float     // Velocity
 			}),
-			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.D32Float),
-			renderState: renderState,
-			layout: GraphicsLayoutKind.Material);
-
-		var shaderSet = _shaderCompiler.GetGraphicsShaderWithReflection(
-			EngineShaderPrograms.GBuffer, "vertexShader", "fragmentShader", GraphicsBackendKind.D3D12).Bytecode;
-		var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, shaderSet);
+			new AbstractionDepthStencilFormat(TextureFormat.D32Float),
+			renderState,
+			GraphicsLayoutKind.Material,
+			"GBuffer:Material");
+		var pipeline = _materialShader.GetPipeline(_gfxDevice, pipelineState);
 
 		var albedoResources = material.AlbedoTexture?.Resources
 		                      ?? throw new InvalidOperationException("Material is missing albedo texture resources.");

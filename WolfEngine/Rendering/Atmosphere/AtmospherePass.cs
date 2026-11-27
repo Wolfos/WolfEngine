@@ -19,23 +19,27 @@ internal sealed class AtmospherePass
 	public const int AerialPerspectiveSize = 32;
 
 	private readonly IRenderer _renderer;
-	private readonly IShaderProvider _shaderProvider;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly ComputeKernel _transmittance = new(EngineShaderPrograms.AtmosphereTransmittanceLut, "AtmosphereTransmittanceLutCSMain");
-	private readonly ComputeKernel _multipleScattering = new(EngineShaderPrograms.AtmosphereMultipleScatteringLut, "AtmosphereMultipleScatteringLutCSMain");
-	private readonly ComputeKernel _skyView = new(EngineShaderPrograms.AtmosphereSkyViewLut, "AtmosphereSkyViewLutCSMain");
-	private readonly ComputeKernel _aerialPerspective = new(EngineShaderPrograms.AtmosphereAerialPerspective, "AtmosphereAerialPerspectiveCSMain");
-	private readonly ComputeKernel _environment = new(EngineShaderPrograms.AtmosphereEnvironment, "AtmosphereEnvironmentCSMain");
+	private readonly ComputeKernel _transmittance;
+	private readonly ComputeKernel _multipleScattering;
+	private readonly ComputeKernel _skyView;
+	private readonly ComputeKernel _aerialPerspective;
+	private readonly ComputeKernel _environment;
 	private DescriptorHandle _linearClampSampler = DescriptorHandle.Invalid;
 	private readonly Action<RenderGraphContext> _transmittanceExecute;
 	private readonly Action<RenderGraphContext> _multipleScatteringExecute;
 	private readonly Action<RenderGraphContext> _skyViewExecute;
 	private readonly Action<RenderGraphContext> _aerialPerspectiveExecute;
 
-	public AtmospherePass(IRenderer renderer, IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	public AtmospherePass(IRenderer renderer, ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+		_transmittance = new(shaderSource, EngineShaderPrograms.AtmosphereTransmittanceLut, "AtmosphereTransmittanceLutCSMain");
+		_multipleScattering = new(shaderSource, EngineShaderPrograms.AtmosphereMultipleScatteringLut, "AtmosphereMultipleScatteringLutCSMain");
+		_skyView = new(shaderSource, EngineShaderPrograms.AtmosphereSkyViewLut, "AtmosphereSkyViewLutCSMain");
+		_aerialPerspective = new(shaderSource, EngineShaderPrograms.AtmosphereAerialPerspective, "AtmosphereAerialPerspectiveCSMain");
+		_environment = new(shaderSource, EngineShaderPrograms.AtmosphereEnvironment, "AtmosphereEnvironmentCSMain");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_transmittanceExecute = context => RecordTransmittance(context, context.ViewState.Sky);
 		_multipleScatteringExecute = context => RecordMultipleScattering(context, context.ViewState.Sky);
@@ -208,15 +212,13 @@ internal sealed class AtmospherePass
 
 	private static void Dispatch(IGfxCommandList commandList, ComputeKernel kernel, int width, int height, int depth)
 	{
-		var (x, y, z) = kernel.ThreadGroupSize.GetDispatchGroupCount((uint)width, (uint)height, (uint)depth);
-		commandList.Dispatch(x, y, z);
+		kernel.Dispatch(commandList, width, height, depth);
 	}
 
 	private ComputeKernel Bind(IGfxCommandList commandList, ComputeKernel kernel)
 	{
 		var device = _renderer.GetGfxDevice() ?? throw new InvalidOperationException("Graphics device is not initialized.");
-		kernel.EnsureCreated(device, _shaderProvider);
-		commandList.BindPipeline(kernel.Pipeline);
+		kernel.Bind(commandList, device);
 
 		return kernel;
 	}

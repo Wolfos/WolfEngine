@@ -33,7 +33,7 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private int _width;
     private int _height;
-    private readonly IShaderProvider _shaderCompiler;
+    private readonly GraphicsShader _materialShader;
     private readonly IMetalSurface _surface;
     private readonly BindlessResourceRegistry _bindlessRegistry;
     private readonly GpuDrawHardeningStats _hardeningStats;
@@ -127,14 +127,16 @@ internal unsafe class WolfRendererMetal : IRenderer
     }
 
     public WolfRendererMetal(
-        IShaderProvider shaderCompiler,
+        ShaderSource shaderSource,
         IMetalSurface surface,
         BindlessResourceRegistry bindlessRegistry,
         GpuDrawHardeningStats hardeningStats)
     {
         _width = 1600;
         _height = 900;
-        _shaderCompiler = shaderCompiler;
+        ArgumentNullException.ThrowIfNull(shaderSource);
+
+        _materialShader = new GraphicsShader(shaderSource, EngineShaderPrograms.GBuffer, "vertexShader", "fragmentShader");
         _surface = surface ?? throw new ArgumentNullException(nameof(surface));
         _bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
         _hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
@@ -437,12 +439,8 @@ internal unsafe class WolfRendererMetal : IRenderer
             depthWriteEnabled: true,
             AbstractionBlendMode.Opaque);
 
-        var pipelineKey = new PipelineKey(
-            PassKind.Graphics,
-            vertexEntryPoint: "vertexShader",
-            pixelEntryPoint: "fragmentShader",
-            computeEntryPoint: null,
-            renderTargets: new(new[]
+        var pipelineState = new GraphicsPipelineState(
+            new(new[]
             {
                 TextureFormat.Bgra8Unorm,
                 TextureFormat.Rgba16Float,
@@ -450,13 +448,11 @@ internal unsafe class WolfRendererMetal : IRenderer
                 TextureFormat.Rgba16Float,
                 TextureFormat.Rgba16Float
             }),
-            depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
-            renderState: renderState,
-            layout: GraphicsLayoutKind.Material);
-
-        var shaderBytes = _shaderCompiler.GetGraphicsShaderWithReflection(
-            EngineShaderPrograms.GBuffer, "vertexShader", "fragmentShader", GraphicsBackendKind.Metal).Bytecode;
-        var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, shaderBytes);
+            new DepthStencilFormat(TextureFormat.D32Float),
+            renderState,
+            GraphicsLayoutKind.Material,
+            "GBuffer:Material");
+        var pipeline = _materialShader.GetPipeline(_gfxDevice, pipelineState);
 
         if (_linearSamplerHandle.IsValid == false)
         {

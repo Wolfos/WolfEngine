@@ -8,20 +8,21 @@ public sealed class TonemappingPass
 {
 	private const int ModeCount = 3;
 
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly ComputeKernel[] _kernels;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly IGfxPipeline?[] _pipelines = new IGfxPipeline?[ModeCount];
-	private readonly ReadOnlyMemory<byte>[] _computeShaders = new ReadOnlyMemory<byte>[ModeCount];
-	private readonly ComputeThreadGroupSize?[] _threadGroupSizes = new ComputeThreadGroupSize?[ModeCount];
-	private readonly ShaderPropertyWriter?[] _bindlessWriters = new ShaderPropertyWriter?[ModeCount];
-	private readonly ShaderPropertyWriter?[] _settingsWriters = new ShaderPropertyWriter?[ModeCount];
-	private GraphicsBackendKind? _compiledBackendKind;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private readonly Action<RenderGraphContext> _execute;
 
-	public TonemappingPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public TonemappingPass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_kernels = new ComputeKernel[ModeCount];
+		for (var i = 0; i < ModeCount; i++)
+		{
+			_kernels[i] = new ComputeKernel(shaderSource, EngineShaderPrograms.Tonemapping, GetEntryPoint((TonemappingMode)i));
+		}
+
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_execute = Execute;
 	}
@@ -60,7 +61,7 @@ public sealed class TonemappingPass
 		ArgumentNullException.ThrowIfNull(device);
 
 		var settings = resources.Config.Tonemapping;
-		var pipeline = EnsurePipeline(device, settings.Mode);
+		var pipeline = _kernels[GetModeIndex(settings.Mode)].GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 		if (_linearSampler.IsValid == false)
 		{
@@ -111,8 +112,7 @@ public sealed class TonemappingPass
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
 
-		var bindlessWriter = _bindlessWriters[index]
-		                     ?? throw new InvalidOperationException("Tonemapping bindless writer was not initialized.");
+		var bindlessWriter = _kernels[index].Writer("BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("inputHandle", config.InputHandle.Value);
 		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
@@ -120,8 +120,7 @@ public sealed class TonemappingPass
 		bindlessWriter.SetUInt("lutHandle", config.LookupTableHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		var settingsWriter = _settingsWriters[index]
-		                     ?? throw new InvalidOperationException("Tonemapping settings writer was not initialized.");
+		var settingsWriter = _kernels[index].Writer("TonemappingSettings");
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("renderSizeX", (uint)Math.Max(config.RenderSize.X, 1));
 		settingsWriter.SetUInt("renderSizeY", (uint)Math.Max(config.RenderSize.Y, 1));
@@ -135,9 +134,7 @@ public sealed class TonemappingPass
 		settingsWriter.SetVector3("lutInverseDomainExtent", Vector3.One / domainExtent);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
-		var threadGroupSize = _threadGroupSizes[index]
-		                      ?? throw new InvalidOperationException(
-			                      "Tonemapping threadgroup size was not initialized.");
+		var threadGroupSize = _kernels[index].ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)Math.Max(config.RenderSize.X, 1),
 			(uint)Math.Max(config.RenderSize.Y, 1));
@@ -153,47 +150,5 @@ public sealed class TonemappingPass
 		}
 
 		return index;
-	}
-
-	private IGfxPipeline EnsurePipeline(IGfxDevice device, TonemappingMode mode)
-	{
-		if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
-		{
-			throw new InvalidOperationException(
-				$"TonemappingPass is already compiled for backend '{_compiledBackendKind.Value}', but was requested for '{device.BackendKind}'.");
-		}
-
-		var index = GetModeIndex(mode);
-		if (_pipelines[index] is { } existing)
-		{
-			return existing;
-		}
-
-		var entryPoint = GetEntryPoint(mode);
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			EngineShaderPrograms.Tonemapping,
-			entryPoint,
-			device.BackendKind);
-		_computeShaders[index] = compiled.Bytecode;
-		_threadGroupSizes[index] = compiled.ThreadGroupSize;
-		var reflection = compiled.ReflectionLayout;
-		_bindlessWriters[index] = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
-		_settingsWriters[index] = new ShaderPropertyWriter(reflection.GetConstantBuffer("TonemappingSettings"));
-		_compiledBackendKind = device.BackendKind;
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: entryPoint,
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: "tonemapping.compute.slang");
-		var pipeline = device.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _computeShaders[index], computeThreadGroupSize: _threadGroupSizes[index]));
-		_pipelines[index] = pipeline;
-		return pipeline;
 	}
 }

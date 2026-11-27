@@ -21,7 +21,10 @@ internal sealed class RenderFeatureHost
 	private readonly RenderGraphResourceRegistry _resources;
 	private readonly IRenderer _renderer;
 	private readonly Dictionary<RenderFeature, FeatureState> _states = new(ReferenceEqualityComparer.Instance);
-	private readonly ConditionalWeakTable<CompiledShaderArtifact, IGfxPipeline> _pipelines = new();
+	private readonly ShaderSource _shaderSource;
+	// A pipeline per game kernel, with the applied shader revision it was built at. A shader reload clears the
+	// device's pipeline cache, which disposes these too, so one built before the current revision is rebuilt.
+	private readonly ConditionalWeakTable<CompiledShaderArtifact, KernelPipeline> _pipelines = new();
 	private readonly List<RenderFeatureComputePass> _computePasses = [];
 	private readonly List<UploadPass> _uploads = [];
 	private readonly List<RenderFeatureTexture> _frameTextures = [];
@@ -31,11 +34,16 @@ internal sealed class RenderFeatureHost
 	private int _computePassesUsed;
 	private int _uploadsUsed;
 
-	public RenderFeatureHost(RenderGraphResourceRegistry resources, IRenderer renderer, BindlessResourceRegistry bindless)
+	public RenderFeatureHost(
+		RenderGraphResourceRegistry resources,
+		IRenderer renderer,
+		BindlessResourceRegistry bindless,
+		ShaderSource shaderSource)
 	{
 		_resources = resources;
 		_renderer = renderer;
 		Bindless = bindless;
+		_shaderSource = shaderSource ?? throw new ArgumentNullException(nameof(shaderSource));
 		_context = new RenderFeatureContext(this);
 	}
 
@@ -204,9 +212,11 @@ internal sealed class RenderFeatureHost
 
 	internal IGfxPipeline GetPipeline(CompiledShaderArtifact kernel)
 	{
-		if (_pipelines.TryGetValue(kernel, out var pipeline))
+		var appliedRevision = _shaderSource.AppliedRevision;
+		if (_pipelines.TryGetValue(kernel, out var cached) &&
+		    cached.Revision == appliedRevision)
 		{
-			return pipeline;
+			return cached.Pipeline;
 		}
 
 		// The content key is in the variant, so a reimported kernel never reuses a pipeline built from older code.
@@ -219,8 +229,9 @@ internal sealed class RenderFeatureHost
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
 			shaderVariant: $"{kernel.Request.ProgramId}:{kernel.ContentKey}");
-		pipeline = _renderer.GetGfxDevice().GetOrCreatePipeline(key, kernel.Bytecode);
-		_pipelines.AddOrUpdate(kernel, pipeline);
+		var pipeline = _renderer.GetGfxDevice().GetOrCreatePipeline(key, kernel.Bytecode);
+		_pipelines.AddOrUpdate(kernel, new KernelPipeline(pipeline, appliedRevision));
+
 		return pipeline;
 	}
 
@@ -252,4 +263,6 @@ internal sealed class RenderFeatureHost
 
 		public Action<RenderGraphContext> Execute { get; }
 	}
+
+	private sealed record KernelPipeline(IGfxPipeline Pipeline, long Revision);
 }

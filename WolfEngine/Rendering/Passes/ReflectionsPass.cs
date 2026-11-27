@@ -15,22 +15,9 @@ public sealed class ReflectionsPass
 	/// <summary>Matches REFLECTION_MAX_COLOR_PYRAMID_LEVELS in reflections_common.slang.</summary>
 	public const int MaxColorPyramidLevels = 8;
 
-	private readonly IShaderProvider _shaderProvider;
+	private readonly ComputeKernel _screenSpace;
+	private readonly ComputeKernel _rayTraced;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline? _screenSpacePipeline;
-	private IGfxPipeline? _rayTracedPipeline;
-	private ReadOnlyMemory<byte> _screenSpaceShader;
-	private ReadOnlyMemory<byte> _rayTracedShader;
-	private ComputeThreadGroupSize? _screenSpaceThreadGroupSize;
-	private ComputeThreadGroupSize? _rayTracedThreadGroupSize;
-	private GraphicsBackendKind? _screenSpaceBackendKind;
-	private GraphicsBackendKind? _rayTracedBackendKind;
-	private ShaderPropertyWriter? _screenSpaceBindlessWriter;
-	private ShaderPropertyWriter? _screenSpaceCameraWriter;
-	private ShaderPropertyWriter? _screenSpaceSettingsWriter;
-	private ShaderPropertyWriter? _rayTracedBindlessWriter;
-	private ShaderPropertyWriter? _rayTracedCameraWriter;
-	private ShaderPropertyWriter? _rayTracedSettingsWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private readonly IRenderer _renderer;
 	private readonly GpuDrawResources _gpuDrawResources;
@@ -38,13 +25,16 @@ public sealed class ReflectionsPass
 	private readonly Action<RenderGraphContext> _execute;
 
 	internal ReflectionsPass(
-		IShaderProvider shaderProvider,
+		ShaderSource shaderSource,
 		BindlessResourceRegistry bindlessRegistry,
 		IRenderer renderer,
 		GpuDrawResources gpuDrawResources,
 		RayTracingScene rayTracingScene)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_screenSpace = new ComputeKernel(shaderSource, EngineShaderPrograms.ReflectionsScreenSpace, "ReflectionsScreenSpaceCS");
+		_rayTraced = new ComputeKernel(shaderSource, EngineShaderPrograms.ReflectionsRayTraced, "ReflectionsRayTracedCS");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
@@ -112,8 +102,8 @@ public sealed class ReflectionsPass
 		var settings = resources.Config.Reflections;
 		var pipeline = settings.Mode switch
 		{
-			ReflectionMode.ScreenSpace => EnsureScreenSpacePipeline(device),
-			ReflectionMode.RayTraced => EnsureRayTracedPipeline(device),
+			ReflectionMode.ScreenSpace => _screenSpace.GetPipeline(device),
+			ReflectionMode.RayTraced => GetRayTracedPipeline(device),
 			_ => throw new InvalidOperationException($"Unsupported reflection mode '{settings.Mode}'.")
 		};
 
@@ -204,13 +194,13 @@ public sealed class ReflectionsPass
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);
 
+		var kernel = config.Mode == ReflectionMode.RayTraced
+			? _rayTraced
+			: _screenSpace;
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
 
-		var bindlessWriter = (config.Mode == ReflectionMode.RayTraced
-			? _rayTracedBindlessWriter
-			: _screenSpaceBindlessWriter)
-			?? throw new InvalidOperationException("Reflections bindless writer was not initialized.");
+		var bindlessWriter = kernel.Writer("BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("depthHandle", config.Depth.Value);
 		bindlessWriter.SetUInt("normalHandle", config.Normal.Value);
@@ -226,10 +216,7 @@ public sealed class ReflectionsPass
 		bindlessWriter.SetUInt("samplerHandle", config.LinearSampler.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		var cameraWriter = (config.Mode == ReflectionMode.RayTraced
-			? _rayTracedCameraWriter
-			: _screenSpaceCameraWriter)
-			?? throw new InvalidOperationException("Reflections camera writer was not initialized.");
+		var cameraWriter = kernel.Writer("CameraParams");
 		cameraWriter.Clear();
 		cameraWriter.SetMatrix4x4("camera.invProjection", sceneData.InverseProjection);
 		cameraWriter.SetMatrix4x4("camera.invViewProjection", sceneData.InverseViewProjection);
@@ -242,10 +229,7 @@ public sealed class ReflectionsPass
 		cameraWriter.SetMatrix4x4("viewProjection", sceneData.ViewProjection);
 		commandList.SetComputeConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
 
-		var settingsWriter = (config.Mode == ReflectionMode.RayTraced
-			? _rayTracedSettingsWriter
-			: _screenSpaceSettingsWriter)
-			?? throw new InvalidOperationException("Reflections settings writer was not initialized.");
+		var settingsWriter = kernel.Writer("ReflectionSettings");
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.FramebufferSize.X, 1));
 		settingsWriter.SetUInt("framebufferSizeY", (uint)Math.Max(config.FramebufferSize.Y, 1));
@@ -326,106 +310,20 @@ public sealed class ReflectionsPass
 				?? throw new InvalidOperationException("Ray traced reflections packed index buffer missing."));
 		}
 
-		var threadGroupSize = config.Mode == ReflectionMode.RayTraced
-			? _rayTracedThreadGroupSize
-			: _screenSpaceThreadGroupSize;
-		var size = threadGroupSize
-			?? throw new InvalidOperationException("Reflections threadgroup size was not initialized.");
+		var size = kernel.ThreadGroupSize;
 		var (dispatchX, dispatchY, dispatchZ) = size.GetDispatchGroupCount(
 			(uint)Math.Max(config.DispatchSize.X, 1),
 			(uint)Math.Max(config.DispatchSize.Y, 1));
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
-	private IGfxPipeline EnsureScreenSpacePipeline(IGfxDevice device)
+	private IGfxPipeline GetRayTracedPipeline(IGfxDevice device)
 	{
-		if (_screenSpacePipeline is not null)
-		{
-			ValidateBackend(_screenSpaceBackendKind, device.BackendKind, "screen-space");
-			return _screenSpacePipeline;
-		}
-
-		var compiled = _shaderProvider.GetComputeShaderWithReflection(
-			EngineShaderPrograms.ReflectionsScreenSpace,
-			"ReflectionsScreenSpaceCS",
-			device.BackendKind);
-		_screenSpaceShader = compiled.Bytecode;
-		_screenSpaceThreadGroupSize = compiled.ThreadGroupSize;
-		_screenSpaceBindlessWriter = new(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		_screenSpaceCameraWriter = new(compiled.ReflectionLayout.GetConstantBuffer("CameraParams"));
-		_screenSpaceSettingsWriter = new(compiled.ReflectionLayout.GetConstantBuffer("ReflectionSettings"));
-		_screenSpaceBackendKind = device.BackendKind;
-		_screenSpacePipeline = CreatePipeline(
-			device,
-			"ReflectionsScreenSpaceCS",
-			"reflections_ssr.compute.slang",
-			_screenSpaceShader,
-			_screenSpaceThreadGroupSize);
-		return _screenSpacePipeline;
-	}
-
-	private IGfxPipeline EnsureRayTracedPipeline(IGfxDevice device)
-	{
-		if (_rayTracedPipeline is not null)
-		{
-			ValidateBackend(_rayTracedBackendKind, device.BackendKind, "ray-traced");
-			return _rayTracedPipeline;
-		}
 		if (device.SupportsRayTracing == false)
 		{
 			throw new NotSupportedException("Ray traced reflections require a ray-tracing capable graphics device.");
 		}
 
-		var compiled = _shaderProvider.GetComputeShaderWithReflection(
-			EngineShaderPrograms.ReflectionsRayTraced,
-			"ReflectionsRayTracedCS",
-			device.BackendKind);
-		_rayTracedShader = compiled.Bytecode;
-		_rayTracedThreadGroupSize = compiled.ThreadGroupSize;
-		_rayTracedBindlessWriter = new(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		_rayTracedCameraWriter = new(compiled.ReflectionLayout.GetConstantBuffer("CameraParams"));
-		_rayTracedSettingsWriter = new(compiled.ReflectionLayout.GetConstantBuffer("ReflectionSettings"));
-		_rayTracedBackendKind = device.BackendKind;
-		_rayTracedPipeline = CreatePipeline(
-			device,
-			"ReflectionsRayTracedCS",
-			"reflections_rt.compute.slang",
-			_rayTracedShader,
-			_rayTracedThreadGroupSize);
-		return _rayTracedPipeline;
-	}
-
-	private static IGfxPipeline CreatePipeline(
-		IGfxDevice device,
-		string entryPoint,
-		string variant,
-		ReadOnlyMemory<byte> shader,
-		ComputeThreadGroupSize? threadGroupSize)
-	{
-		var key = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: entryPoint,
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: variant);
-		return device.GetOrCreatePipeline(
-			key,
-			new ShaderBytecodeSet(compute: shader, computeThreadGroupSize: threadGroupSize));
-	}
-
-	private static void ValidateBackend(
-		GraphicsBackendKind? compiledBackend,
-		GraphicsBackendKind requestedBackend,
-		string mode)
-	{
-		if (compiledBackend.HasValue && compiledBackend.Value != requestedBackend)
-		{
-			throw new InvalidOperationException(
-				$"ReflectionsPass {mode} pipeline is already compiled for backend '{compiledBackend.Value}', " +
-				$"but was requested for '{requestedBackend}'.");
-		}
+		return _rayTraced.GetPipeline(device);
 	}
 }

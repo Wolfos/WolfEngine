@@ -7,18 +7,13 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class ScreenSpaceDecalPass
 {
+	private static readonly GraphicsPipelineState PipelineState = CreatePipelineState();
+
 	private readonly IRenderer _renderer;
-	private readonly IShaderProvider _shaderCompiler;
+	private readonly GraphicsShader _shader;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly DebugPrimitiveMeshFactory _meshFactory = new();
 	private readonly List<GpuDecalProjectorData> _packedProjectors = new();
-	private IGfxPipeline? _pipeline;
-	private GraphicsBackendKind? _compiledBackendKind;
-	private ShaderPropertyWriter? _bindlessWriter;
-	private ShaderPropertyWriter? _cameraWriter;
-	private ShaderPropertyWriter? _drawWriter;
-	private const uint InvalidRegisterIndex = uint.MaxValue;
-	private uint _decalProjectorBufferRegisterIndex = InvalidRegisterIndex;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private Mesh? _projectorMesh;
 	private IGfxBuffer? _projectorVertexBuffer;
@@ -39,12 +34,14 @@ public sealed class ScreenSpaceDecalPass
 
 	public ScreenSpaceDecalPass(
 		IRenderer renderer,
-		IShaderProvider shaderCompiler,
+		ShaderSource shaderSource,
 		BindlessResourceRegistry bindlessRegistry,
 		GpuDrawResources gpuDrawResources)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		_shader = new GraphicsShader(shaderSource, EngineShaderPrograms.ScreenSpaceDecal, "vertexShader", "fragmentShader");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_execute = Execute;
@@ -89,7 +86,6 @@ public sealed class ScreenSpaceDecalPass
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 		ArgumentNullException.ThrowIfNull(sceneData);
 
-		EnsurePipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 
 		if (_linearSampler.IsValid == false)
@@ -118,7 +114,7 @@ public sealed class ScreenSpaceDecalPass
 			TargetNormal = context.GetTexture(resources.GBufferNormal),
 			TargetMaterial = context.GetTexture(resources.GBufferMaterial),
 			TargetEmissive = context.GetTexture(resources.GBufferEmissive),
-			Pipeline = _pipeline ?? throw new InvalidOperationException("Screen-space decal pipeline was not initialized."),
+			Pipeline = _shader.GetPipeline(device, PipelineState),
 			DecalProjectorBuffer = gpuDrawResources.DecalProjectorBuffer,
 			DecalProjectorCount = (uint)decalCount
 		};
@@ -160,10 +156,9 @@ public sealed class ScreenSpaceDecalPass
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 		commandList.SetVertexBuffer(new VertexBufferView(_projectorVertexBuffer, (uint)Marshal.SizeOf<VertexData>(), 0));
 		commandList.SetIndexBuffer(new IndexBufferView(_projectorIndexBuffer, IndexFormat.UInt32, 0));
-		commandList.BindConstantBuffer(_decalProjectorBufferRegisterIndex, config.DecalProjectorBuffer);
+		commandList.BindConstantBuffer(GetDecalProjectorBufferRegisterIndex(), config.DecalProjectorBuffer);
 
-		var bindlessWriter = _bindlessWriter
-			?? throw new InvalidOperationException("Screen-space decal bindless writer was not initialized.");
+		var bindlessWriter = _shader.Writer("BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("sourceAlbedoHandle", _bindlessRegistry.RegisterTexture(config.SourceAlbedo).Value);
 		bindlessWriter.SetUInt("sourceNormalHandle", _bindlessRegistry.RegisterTexture(config.SourceNormal).Value);
@@ -172,8 +167,7 @@ public sealed class ScreenSpaceDecalPass
 		bindlessWriter.SetUInt("depthHandle", _bindlessRegistry.RegisterDepthTexture(config.DepthTexture).Value);
 		commandList.SetGraphicsConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		var cameraWriter = _cameraWriter
-			?? throw new InvalidOperationException("Screen-space decal camera writer was not initialized.");
+		var cameraWriter = _shader.Writer("CameraParams");
 		cameraWriter.Clear();
 		cameraWriter.SetMatrix4x4("viewProjection", sceneData.ViewProjection);
 		cameraWriter.SetMatrix4x4("invViewProjection", sceneData.InverseViewProjection);
@@ -181,8 +175,7 @@ public sealed class ScreenSpaceDecalPass
 		cameraWriter.SetUInt("frameSizeY", (uint)Math.Max(config.FramebufferHeight, 1));
 		commandList.SetGraphicsConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
 
-		var drawWriter = _drawWriter
-			?? throw new InvalidOperationException("Screen-space decal draw writer was not initialized.");
+		var drawWriter = _shader.Writer("DrawParams");
 		for (var decalIndex = 0u; decalIndex < config.DecalProjectorCount; decalIndex++)
 		{
 			drawWriter.Clear();
@@ -284,61 +277,36 @@ public sealed class ScreenSpaceDecalPass
 		_projectorGeometryBackendKind = device.BackendKind;
 	}
 
-	private void EnsurePipeline(IGfxDevice device)
+	private static GraphicsPipelineState CreatePipelineState()
 	{
-		if (_pipeline is not null)
-		{
-			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
-			{
-				throw new InvalidOperationException(
-					$"ScreenSpaceDecalPass is already compiled for backend '{_compiledBackendKind.Value}', " +
-					$"but was requested for '{device.BackendKind}'.");
-			}
-
-			return;
-		}
-
-		var compiled = GraphicsShaderCompiler.CompileWithReflection(
-			_shaderCompiler,
-			device.BackendKind,
-			EngineShaderPrograms.ScreenSpaceDecal,
-			"vertexShader",
-			"fragmentShader");
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
 			CullMode.Front,
 			depthTestEnabled: false,
 			depthWriteEnabled: false,
 			BlendMode.Opaque);
-		var key = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
-			computeEntryPoint: null,
-			renderTargets: new(new[]
+
+		return new GraphicsPipelineState(
+			new RenderTargetFormats(new[]
 			{
 				TextureFormat.Bgra8Unorm,
 				TextureFormat.Rgba16Float,
 				TextureFormat.Rgba8Unorm,
 				TextureFormat.Rgba16Float
 			}),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: renderState,
-			shaderVariant: "ScreenSpaceDecal");
-		_pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
+			new DepthStencilFormat(TextureFormat.Unknown),
+			renderState,
+			Variant: "ScreenSpaceDecal");
+	}
 
-		var reflection = compiled.ReflectionLayout;
-		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
-		_cameraWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("CameraParams"));
-		_drawWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("DrawParams"));
-		if (reflection.TryGetResource("g_Decals", out var decalResource) == false)
+	private uint GetDecalProjectorBufferRegisterIndex()
+	{
+		if (_shader.ReflectionLayout.TryGetResource("g_Decals", out var decalResource) == false)
 		{
 			throw new InvalidOperationException(
 				"Screen-space decal shader reflection does not expose 'g_Decals'; the projector buffer has no register to bind to.");
 		}
 
-		_decalProjectorBufferRegisterIndex = decalResource.RegisterIndex;
-
-		_compiledBackendKind = device.BackendKind;
+		return decalResource.RegisterIndex;
 	}
 }

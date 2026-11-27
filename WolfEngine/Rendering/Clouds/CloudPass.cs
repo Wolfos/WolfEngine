@@ -18,20 +18,16 @@ internal sealed class CloudPass
 	public const int DetailNoiseSize = 64;
 	public const int WeatherSize = 512;
 
-	private const string ShaderVariant = "clouds.compute.slang";
-	private const string NoiseShaderVariant = "cloud_noise.compute.slang";
-
 	private readonly IRenderer _renderer;
-	private readonly IShaderProvider _shaderProvider;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly ComputeKernel _noiseShape = new(EngineShaderPrograms.CloudNoise, "CloudNoiseShapeCS", NoiseShaderVariant);
-	private readonly ComputeKernel _noiseDetail = new(EngineShaderPrograms.CloudNoise, "CloudNoiseDetailCS", NoiseShaderVariant);
-	private readonly ComputeKernel _noiseWeather = new(EngineShaderPrograms.CloudNoise, "CloudNoiseWeatherCS", NoiseShaderVariant);
-	private readonly ComputeKernel _march = new(EngineShaderPrograms.Clouds, "CloudMarchCS", ShaderVariant);
-	private readonly ComputeKernel _temporal = new(EngineShaderPrograms.Clouds, "CloudTemporalCS", ShaderVariant);
-	private readonly ComputeKernel _shadow = new(EngineShaderPrograms.Clouds, "CloudShadowCS", ShaderVariant);
-	private readonly ComputeKernel _environmentMarch = new(EngineShaderPrograms.Clouds, "CloudEnvironmentMarchCS", ShaderVariant);
-	private readonly ComputeKernel _environmentComposite = new(EngineShaderPrograms.Clouds, "CloudEnvironmentCompositeCS", ShaderVariant);
+	private readonly ComputeKernel _noiseShape;
+	private readonly ComputeKernel _noiseDetail;
+	private readonly ComputeKernel _noiseWeather;
+	private readonly ComputeKernel _march;
+	private readonly ComputeKernel _temporal;
+	private readonly ComputeKernel _shadow;
+	private readonly ComputeKernel _environmentMarch;
+	private readonly ComputeKernel _environmentComposite;
 	private DescriptorHandle _wrapSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _clampSampler = DescriptorHandle.Invalid;
 	private IGfxTexture? _weather;
@@ -46,10 +42,18 @@ internal sealed class CloudPass
 	private readonly Action<RenderGraphContext> _environmentMarchExecute;
 	private readonly Action<RenderGraphContext> _environmentCompositeExecute;
 
-	public CloudPass(IRenderer renderer, IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	public CloudPass(IRenderer renderer, ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+		_noiseShape = new(shaderSource, EngineShaderPrograms.CloudNoise, "CloudNoiseShapeCS");
+		_noiseDetail = new(shaderSource, EngineShaderPrograms.CloudNoise, "CloudNoiseDetailCS");
+		_noiseWeather = new(shaderSource, EngineShaderPrograms.CloudNoise, "CloudNoiseWeatherCS");
+		_march = new(shaderSource, EngineShaderPrograms.Clouds, "CloudMarchCS");
+		_temporal = new(shaderSource, EngineShaderPrograms.Clouds, "CloudTemporalCS");
+		_shadow = new(shaderSource, EngineShaderPrograms.Clouds, "CloudShadowCS");
+		_environmentMarch = new(shaderSource, EngineShaderPrograms.Clouds, "CloudEnvironmentMarchCS");
+		_environmentComposite = new(shaderSource, EngineShaderPrograms.Clouds, "CloudEnvironmentCompositeCS");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_noiseExecute = RecordNoise;
 		_shadowMapExecute = context => RecordShadowMap(context, context.ViewState.FrameResources);
@@ -431,7 +435,7 @@ internal sealed class CloudPass
 
 	private ComputeKernel Bind(IGfxCommandList commandList, ComputeKernel kernel)
 	{
-		kernel.Bind(commandList, GetDevice(), _shaderProvider);
+		kernel.Bind(commandList, GetDevice());
 
 		return kernel;
 	}

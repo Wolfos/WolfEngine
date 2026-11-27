@@ -19,25 +19,23 @@ public sealed class DdgiFinalGatherSvgfPass
 		Filter
 	}
 
-	private sealed class StagePipeline
-	{
-		public required IGfxPipeline Pipeline { get; init; }
-		public required ComputeThreadGroupSize ThreadGroupSize { get; init; }
-		public required ShaderPropertyWriter BindlessWriter { get; init; }
-		public required ShaderPropertyWriter SettingsWriter { get; init; }
-	}
-
-	private readonly IShaderProvider _shaderProvider;
+	private readonly ComputeKernel[] _kernels;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly StagePipeline?[] _stagePipelines = new StagePipeline?[3];
-	private GraphicsBackendKind? _compiledBackendKind;
 	private readonly Action<RenderGraphContext> _temporalExecute;
 	private readonly Action<RenderGraphContext> _varianceExecute;
 	private readonly Action<RenderGraphContext>[] _filterExecutes;
 
-	public DdgiFinalGatherSvgfPass(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	public DdgiFinalGatherSvgfPass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		ArgumentNullException.ThrowIfNull(shaderSource);
+
+		// Indexed by Stage.
+		_kernels =
+		[
+			new ComputeKernel(shaderSource, EngineShaderPrograms.DdgiFinalGatherSvgf, "DdgiSvgfTemporalCS"),
+			new ComputeKernel(shaderSource, EngineShaderPrograms.DdgiFinalGatherSvgf, "DdgiSvgfVarianceCS"),
+			new ComputeKernel(shaderSource, EngineShaderPrograms.DdgiFinalGatherSvgf, "DdgiSvgfFilterCS")
+		];
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_temporalExecute = context => Execute(context, Stage.Temporal, 0);
 		_varianceExecute = context => Execute(context, Stage.Variance, 0);
@@ -198,7 +196,7 @@ public sealed class DdgiFinalGatherSvgfPass
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
 
-		var stagePipeline = EnsurePipeline(device, stage);
+		var pipeline = _kernels[(int)stage].GetPipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 
 		var settings = resources.Config.DiffuseGlobalIllumination.FinalGather;
@@ -213,7 +211,7 @@ public sealed class DdgiFinalGatherSvgfPass
 
 		return new DdgiFinalGatherSvgfPassConfig
 		{
-			Pipeline = stagePipeline.Pipeline,
+			Pipeline = pipeline,
 			Stage = stage,
 			Depth = isTemporal
 				? _bindlessRegistry.RegisterDepthTexture(context.GetTexture(resources.GBufferDepth))
@@ -252,12 +250,11 @@ public sealed class DdgiFinalGatherSvgfPass
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(sceneData);
 
-		var stagePipeline = _stagePipelines[(int)config.Stage]
-			?? throw new InvalidOperationException($"DDGI final gather SVGF {config.Stage} pipeline was not initialized.");
+		var kernel = _kernels[(int)config.Stage];
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
 
-		var bindlessWriter = stagePipeline.BindlessWriter;
+		var bindlessWriter = kernel.Writer("BindlessHandles");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("depthHandle", config.Depth.Value);
 		bindlessWriter.SetUInt("normalHandle", config.Normal.Value);
@@ -278,7 +275,7 @@ public sealed class DdgiFinalGatherSvgfPass
 			throw new InvalidOperationException("DDGI final gather SVGF projection parameters could not be reconstructed.");
 		}
 
-		var settingsWriter = stagePipeline.SettingsWriter;
+		var settingsWriter = kernel.Writer("SvgfSettings");
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.FramebufferSize.X, 1));
 		settingsWriter.SetUInt("framebufferSizeY", (uint)Math.Max(config.FramebufferSize.Y, 1));
@@ -292,7 +289,7 @@ public sealed class DdgiFinalGatherSvgfPass
 		settingsWriter.SetUInt("stepSize", (uint)Math.Max(config.StepSize, 1));
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
-		var (dispatchX, dispatchY, dispatchZ) = stagePipeline.ThreadGroupSize.GetDispatchGroupCount(
+		var (dispatchX, dispatchY, dispatchZ) = kernel.ThreadGroupSize.GetDispatchGroupCount(
 			(uint)Math.Max(config.TraceSize.X, 1),
 			(uint)Math.Max(config.TraceSize.Y, 1));
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
@@ -306,54 +303,5 @@ public sealed class DdgiFinalGatherSvgfPass
 	private DescriptorHandle WriteHandle(RenderGraphContext context, RenderGraphResourceHandle handle)
 	{
 		return _bindlessRegistry.RegisterRwTexture(context.GetTexture(handle));
-	}
-
-	private StagePipeline EnsurePipeline(IGfxDevice device, Stage stage)
-	{
-		if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
-		{
-			throw new InvalidOperationException(
-				$"DdgiFinalGatherSvgfPass is already compiled for backend '{_compiledBackendKind.Value}', " +
-				$"but was requested for '{device.BackendKind}'.");
-		}
-
-		if (_stagePipelines[(int)stage] is StagePipeline existing)
-		{
-			return existing;
-		}
-
-		var entryPoint = stage switch
-		{
-			Stage.Temporal => "DdgiSvgfTemporalCS",
-			Stage.Variance => "DdgiSvgfVarianceCS",
-			_ => "DdgiSvgfFilterCS"
-		};
-
-		var compiled = _shaderProvider.GetComputeShaderWithReflection(
-			EngineShaderPrograms.DdgiFinalGatherSvgf,
-			entryPoint,
-			device.BackendKind);
-		var threadGroupSize = compiled.ThreadGroupSize;
-		var key = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: entryPoint,
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default,
-			shaderVariant: "ddgi_final_gather_svgf.compute.slang");
-		var stagePipeline = new StagePipeline
-		{
-			Pipeline = device.GetOrCreatePipeline(
-				key,
-				new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: threadGroupSize)),
-			ThreadGroupSize = threadGroupSize,
-			BindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles")),
-			SettingsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("SvgfSettings"))
-		};
-		_stagePipelines[(int)stage] = stagePipeline;
-		_compiledBackendKind = device.BackendKind;
-		return stagePipeline;
 	}
 }

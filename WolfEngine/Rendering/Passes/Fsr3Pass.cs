@@ -32,21 +32,21 @@ internal sealed class Fsr3Pass
 	private readonly Action<RenderGraphContext> _rcasExecute;
 	private readonly Action<RenderGraphContext> _debugViewExecute;
 
-	public Fsr3Pass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public Fsr3Pass(ShaderSource shaderSource, BindlessResourceRegistry bindlessRegistry)
 	{
-		ArgumentNullException.ThrowIfNull(shaderCompiler);
+		ArgumentNullException.ThrowIfNull(shaderSource);
 		ArgumentNullException.ThrowIfNull(bindlessRegistry);
 
-		_clearPass = new Fsr3ClearPass(shaderCompiler, bindlessRegistry);
-		_prepareInputsPass = new Fsr3PrepareInputsPass(shaderCompiler, bindlessRegistry);
-		_lumaPyramidPass = new Fsr3LumaPyramidPass(shaderCompiler, bindlessRegistry);
-		_shadingChangePyramidPass = new Fsr3ShadingChangePyramidPass(shaderCompiler, bindlessRegistry);
-		_shadingChangePass = new Fsr3ShadingChangePass(shaderCompiler, bindlessRegistry);
-		_prepareReactivityPass = new Fsr3PrepareReactivityPass(shaderCompiler, bindlessRegistry);
-		_lumaInstabilityPass = new Fsr3LumaInstabilityPass(shaderCompiler, bindlessRegistry);
-		_accumulatePass = new Fsr3AccumulatePass(shaderCompiler, bindlessRegistry);
-		_rcasPass = new Fsr3RcasPass(shaderCompiler, bindlessRegistry);
-		_debugViewPass = new Fsr3DebugViewPass(shaderCompiler, bindlessRegistry);
+		_clearPass = new Fsr3ClearPass(shaderSource, bindlessRegistry);
+		_prepareInputsPass = new Fsr3PrepareInputsPass(shaderSource, bindlessRegistry);
+		_lumaPyramidPass = new Fsr3LumaPyramidPass(shaderSource, bindlessRegistry);
+		_shadingChangePyramidPass = new Fsr3ShadingChangePyramidPass(shaderSource, bindlessRegistry);
+		_shadingChangePass = new Fsr3ShadingChangePass(shaderSource, bindlessRegistry);
+		_prepareReactivityPass = new Fsr3PrepareReactivityPass(shaderSource, bindlessRegistry);
+		_lumaInstabilityPass = new Fsr3LumaInstabilityPass(shaderSource, bindlessRegistry);
+		_accumulatePass = new Fsr3AccumulatePass(shaderSource, bindlessRegistry);
+		_rcasPass = new Fsr3RcasPass(shaderSource, bindlessRegistry);
+		_debugViewPass = new Fsr3DebugViewPass(shaderSource, bindlessRegistry);
 		_prepareInputsExecute = ExecutePrepareInputs;
 		_lumaPyramidExecute = ExecuteLumaPyramid;
 		_shadingChangePyramidExecute = ExecuteShadingChangePyramid;
@@ -87,21 +87,6 @@ internal sealed class Fsr3Pass
 	internal static Int2 GetShadingChangeSize(Int2 renderSize) => new(
 		Math.Max(renderSize.X / 2, 1),
 		Math.Max(renderSize.Y / 2, 1));
-
-	/// <summary>Clears pipelines its kernels cached, so a shader reload recompiles them.</summary>
-	public void InvalidateShaderPipelines()
-	{
-		ShaderPipelineInvalidation.Invalidate(_clearPass);
-		ShaderPipelineInvalidation.Invalidate(_prepareInputsPass);
-		ShaderPipelineInvalidation.Invalidate(_lumaPyramidPass);
-		ShaderPipelineInvalidation.Invalidate(_shadingChangePyramidPass);
-		ShaderPipelineInvalidation.Invalidate(_shadingChangePass);
-		ShaderPipelineInvalidation.Invalidate(_prepareReactivityPass);
-		ShaderPipelineInvalidation.Invalidate(_lumaInstabilityPass);
-		ShaderPipelineInvalidation.Invalidate(_accumulatePass);
-		ShaderPipelineInvalidation.Invalidate(_rcasPass);
-		ShaderPipelineInvalidation.Invalidate(_debugViewPass);
-	}
 
 	/// <summary>
 	/// Creates this frame's intermediates and adds FSR3's nodes: the clears its kernels rely on, input preparation,

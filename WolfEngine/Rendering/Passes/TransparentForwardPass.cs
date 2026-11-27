@@ -12,30 +12,31 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 public sealed class TransparentForwardPass
 {
-	private readonly IShaderProvider _shaderCompiler;
+	private static readonly RenderTargetFormats LaneRenderTargets = new(new[] { TextureFormat.Rgba16Float, TextureFormat.Rgba8Unorm });
+
+	private readonly ShaderSource _shaderSource;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly Dictionary<GpuDrawExecutionKey, IGfxPipeline> _pipelinesByExecutionKey = new();
-	private readonly Dictionary<GpuDrawExecutionKey, SharedDrawGraphicsBufferBindings> _bufferBindingsByExecutionKey = new();
-	private readonly Dictionary<GpuDrawExecutionKey, ShaderReflectionLayout> _reflectionByExecutionKey = new();
+	// One per lane, built on demand. Its generation is the lanes' binding generation, so records encoded against
+	// replaced pipelines re-encode.
+	private readonly ShaderVariantSet<GpuDrawExecutionKey, TransparentLane> _lanes;
+	// The transparent and debug primitive shaders the pass's shared constant buffers are reflected from.
+	private readonly GraphicsShader _environmentShader;
+	private readonly GraphicsShader _debugShader;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly PerViewIndirectCommandSets _indirectCommandSets;
-	// Raised whenever a lane pipeline is created, so records encoded against the previous pipelines re-encode.
-	private ulong _laneBindingGeneration;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
-	private GraphicsBackendKind? _reflectionBackendKind;
-	private ShaderPropertyWriter? _environmentWriter;
-	private ShaderPropertyWriter? _lightingWriter;
-	private ShaderPropertyWriter? _ddgiDebugWriter;
-	private uint _cameraRegisterIndex = 2;
 
 	public TransparentForwardPass(
-		IShaderProvider shaderCompiler,
+		ShaderSource shaderSource,
 		BindlessResourceRegistry bindlessRegistry,
 		IndirectDrawRecords records,
 		GpuDrawResources gpuDrawResources)
 	{
-		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_shaderSource = shaderSource ?? throw new ArgumentNullException(nameof(shaderSource));
+		_lanes = new ShaderVariantSet<GpuDrawExecutionKey, TransparentLane>(shaderSource, BuildLane);
+		_environmentShader = new GraphicsShader(shaderSource, EngineShaderPrograms.TransparentForward, "vertexShader", "fragmentShader");
+		_debugShader = new GraphicsShader(shaderSource, EngineShaderPrograms.DebugPrimitiveForward, "vertexShader", "fragmentShader");
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_indirectCommandSets = new PerViewIndirectCommandSets(
@@ -57,25 +58,25 @@ public sealed class TransparentForwardPass
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
-			EnsurePipeline(device, laneDefinitions[i]);
+			_lanes.Get(laneDefinitions[i].Key, device);
 		}
 
 		_indirectCommandSets.Get(viewIndex).EnsureCreated(device);
 	}
 
-	public bool HasIndirectLane(GpuDrawExecutionLaneDefinition lane) => _pipelinesByExecutionKey.ContainsKey(lane.Key);
+	public bool HasIndirectLane(GpuDrawExecutionLaneDefinition lane) => _lanes.TryGet(lane.Key, out _);
 
 	private IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) =>
-		_pipelinesByExecutionKey.TryGetValue(lane.Key, out var pipeline) ? pipeline : null;
+		_lanes.TryGet(lane.Key, out var variant) ? variant.Pipeline : null;
 
 	private SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
-		_bufferBindingsByExecutionKey.TryGetValue(lane.Key, out var bindings) ? bindings : null;
+		_lanes.TryGet(lane.Key, out var variant) ? variant.BufferBindings : null;
 
 	private GraphicsPassBindingSet? GetPassBindingSet(GpuDrawExecutionLaneDefinition lane)
 	{
-		if (_reflectionByExecutionKey.TryGetValue(lane.Key, out var reflection) == false)
+		if (_lanes.TryGet(lane.Key, out var variant) == false)
 			return null;
-		return GraphicsPassBindingSet.FromReflection(reflection,
+		return GraphicsPassBindingSet.FromReflection(variant.Reflection,
 			new Dictionary<string, IGfxBuffer?>(StringComparer.Ordinal)
 			{
 				["CameraParams"] = _gpuDrawResources.CameraBuffer,
@@ -102,7 +103,8 @@ public sealed class TransparentForwardPass
 		ArgumentNullException.ThrowIfNull(device);
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 		ArgumentNullException.ThrowIfNull(sceneData);
-		EnsureReflectionWriters(device.BackendKind);
+		_environmentShader.EnsureCurrent(device);
+		_debugShader.EnsureCurrent(device);
 
 		_bindlessRegistry.EnsureInitialized(device);
 		if (_linearSampler.IsValid == false)
@@ -230,8 +232,7 @@ public sealed class TransparentForwardPass
 			return;
 		}
 
-		var environmentWriter = _environmentWriter
-			?? throw new InvalidOperationException("Transparent environment writer was not initialized.");
+		var environmentWriter = _environmentShader.Writer("TransparentEnvironmentParams");
 		environmentWriter.Clear();
 		environmentWriter.SetUInt("irradianceHandle", config.SkyboxIrradiance.Value);
 		environmentWriter.SetUInt("prefilteredHandle", config.SkyboxPrefilter.Value);
@@ -249,8 +250,7 @@ public sealed class TransparentForwardPass
 		environmentWriter.SetFloat("fogMaxDistance", config.FogMaxDistance);
 		config.Clouds.Write(environmentWriter);
 
-		var lightingWriter = _lightingWriter
-			?? throw new InvalidOperationException("Transparent lighting writer was not initialized.");
+		var lightingWriter = _environmentShader.Writer("LightingParams");
 		lightingWriter.Clear();
 		var directionalLightCount = 0;
 		for (var i = 0; i < sceneData.Lights.Count && directionalLightCount < ClusteredLightingShared.MaxDirectionalLights; i++)
@@ -317,8 +317,7 @@ public sealed class TransparentForwardPass
 		writableEnvironmentBuffer.Write<byte>(environmentWriter.AsBytes());
 		writableLightingBuffer.Write<byte>(lightingWriter.AsBytes());
 
-		var ddgiDebugWriter = _ddgiDebugWriter
-			?? throw new InvalidOperationException("DDGI debug primitive writer was not initialized.");
+		var ddgiDebugWriter = _debugShader.Writer("DdgiDebugParams");
 		ddgiDebugWriter.Clear();
 		ddgiDebugWriter.SetUInt("ddgiProbeStateHandle", config.DdgiProbeState.Value);
 		ddgiDebugWriter.SetUInt("ddgiProbeStateAvailable", config.DdgiProbeStateAvailable ? 1u : 0u);
@@ -342,6 +341,7 @@ public sealed class TransparentForwardPass
 		var fallbackCount = config.FallbackMaxCommandCount == 0
 			? (uint)GpuDrawResources.MaxDrawCount
 			: config.FallbackMaxCommandCount;
+		var cameraRegisterIndex = _environmentShader.ReflectionLayout.GetConstantBuffer("CameraParams").RegisterIndex;
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 		SharedDrawIndirectExecution.BindPackedGeometry(
 			commandList,
@@ -380,7 +380,7 @@ public sealed class TransparentForwardPass
 					commandList.BindConstantBuffer(clusterLightIndexRegisterIndex, config.ClusterLightIndexBuffer);
 				}
 
-				commandList.BindConstantBuffer(_cameraRegisterIndex, config.CameraBuffer);
+				commandList.BindConstantBuffer(cameraRegisterIndex, config.CameraBuffer);
 				// Transparency stays on the full-range path: compaction orders draws by atomic arrival,
 				// which would make the alpha-blend order shuffle from frame to frame.
 				SharedDrawIndirectExecution.ExecutePages(
@@ -411,27 +411,27 @@ public sealed class TransparentForwardPass
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
 			var laneDefinition = laneDefinitions[i];
-			var pipeline = EnsurePipeline(device, laneDefinition);
+			var lane = _lanes.Get(laneDefinition.Key, device);
 			buckets.Add(new TransparentExecutionBucket(
 				laneDefinition.DrawKind,
 				laneDefinition.BucketId,
 				laneDefinition.ExecutionIndex,
 				laneDefinition.DebugName,
-				_bufferBindingsByExecutionKey[laneDefinition.Key],
+				lane.BufferBindings,
 				GetPassBindingSet(laneDefinition)
 					?? throw new InvalidOperationException($"Missing pass bindings for transparent lane '{laneDefinition.DebugName}'."),
-				pipeline,
+				lane.Pipeline,
 				indirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
 		}
 
 		return buckets;
 	}
 
-	private IGfxPipeline EnsurePipeline(IGfxDevice device, in GpuDrawExecutionLaneDefinition lane)
+	private TransparentLane BuildLane(GpuDrawExecutionKey key, IGfxDevice device)
 	{
-		if (_pipelinesByExecutionKey.TryGetValue(lane.Key, out var pipeline))
+		if (GpuDrawExecutionLanes.TryGetDefinition(key, out var lane) == false)
 		{
-			return pipeline;
+			throw new InvalidOperationException($"No transparent execution lane is defined for '{key}'.");
 		}
 
 		var renderState = new RenderStateDescriptor(
@@ -440,32 +440,26 @@ public sealed class TransparentForwardPass
 			depthTestEnabled: true,
 			depthWriteEnabled: false,
 			BlendMode.AlphaBlend,
-				reverseWinding: lane.ReverseWinding);
-
-		var key = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
-			computeEntryPoint: null,
-			renderTargets: new(new[] { TextureFormat.Rgba16Float, TextureFormat.Rgba8Unorm }),
-			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
-			renderState: renderState,
-			layout: GraphicsLayoutKind.Material,
-			shaderVariant: $"Transparent:{lane.ShaderVariant}");
-
-		var compiled = GraphicsShaderCompiler.CompileWithReflection(
-			_shaderCompiler,
-			device.BackendKind,
+			reverseWinding: lane.ReverseWinding);
+		var state = new GraphicsPipelineState(
+			LaneRenderTargets,
+			new DepthStencilFormat(TextureFormat.D32Float),
+			renderState,
+			GraphicsLayoutKind.Material,
+			$"Transparent:{lane.ShaderVariant}");
+		var shader = new GraphicsShader(
+			_shaderSource,
 			GetShaderPath(lane.DrawKind),
 			"vertexShader",
 			"fragmentShader",
 			lane.PreprocessorDefine);
-		pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
-		_pipelinesByExecutionKey[lane.Key] = pipeline;
-		_laneBindingGeneration++;
-		_bufferBindingsByExecutionKey[lane.Key] = SharedDrawGraphicsBufferBindings.FromTransparentReflection(compiled.ReflectionLayout);
-		_reflectionByExecutionKey[lane.Key] = compiled.ReflectionLayout;
-		return pipeline;
+		var pipeline = shader.GetPipeline(device, state);
+		var reflection = shader.ReflectionLayout;
+
+		return new TransparentLane(
+			pipeline,
+			SharedDrawGraphicsBufferBindings.FromTransparentReflection(reflection),
+			reflection);
 	}
 
 	private static ShaderProgramId GetShaderPath(GpuDrawKind drawKind) => drawKind switch
@@ -474,39 +468,6 @@ public sealed class TransparentForwardPass
 		GpuDrawKind.DebugPrimitive => EngineShaderPrograms.DebugPrimitiveForward,
 		_ => throw new NotSupportedException($"Transparent shared draw kind '{drawKind}' does not define a shader.")
 	};
-
-	private void EnsureReflectionWriters(GraphicsBackendKind backendKind)
-	{
-		if (_reflectionBackendKind.HasValue &&
-		    _reflectionBackendKind.Value == backendKind &&
-		    _environmentWriter is not null &&
-		    _lightingWriter is not null &&
-		    _ddgiDebugWriter is not null)
-		{
-			return;
-		}
-
-		var compiled = GraphicsShaderCompiler.CompileWithReflection(
-			_shaderCompiler,
-			backendKind,
-			EngineShaderPrograms.TransparentForward,
-			"vertexShader",
-			"fragmentShader");
-		var reflection = compiled.ReflectionLayout;
-		_environmentWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("TransparentEnvironmentParams"));
-		var cameraLayout = reflection.GetConstantBuffer("CameraParams");
-		_cameraRegisterIndex = cameraLayout.RegisterIndex;
-		_lightingWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("LightingParams"));
-		var debugCompiled = GraphicsShaderCompiler.CompileWithReflection(
-			_shaderCompiler,
-			backendKind,
-			EngineShaderPrograms.DebugPrimitiveForward,
-			"vertexShader",
-			"fragmentShader");
-		_ddgiDebugWriter = new ShaderPropertyWriter(
-			debugCompiled.ReflectionLayout.GetConstantBuffer("DdgiDebugParams"));
-		_reflectionBackendKind = backendKind;
-	}
 
 	private DescriptorHandle ResolveSkyboxHandle(RenderGraphContext context, RenderGraphResourceHandle handle)
 	{
@@ -529,7 +490,7 @@ public sealed class TransparentForwardPass
 			_pass = pass;
 		}
 
-		public ulong Generation => _pass._laneBindingGeneration;
+		public ulong Generation => _pass._lanes.Generation;
 
 		public bool IsLaneDrawn(GpuDrawExecutionLaneDefinition lane) => _pass.HasIndirectLane(lane);
 
@@ -541,4 +502,10 @@ public sealed class TransparentForwardPass
 
 		public IGfxPipeline? GetPipeline(GpuDrawExecutionLaneDefinition lane) => _pass.GetPipeline(lane);
 	}
+
+	/// <summary>What a lane's draws need from its shader variant.</summary>
+	private sealed record TransparentLane(
+		IGfxPipeline Pipeline,
+		SharedDrawGraphicsBufferBindings BufferBindings,
+		ShaderReflectionLayout Reflection);
 }

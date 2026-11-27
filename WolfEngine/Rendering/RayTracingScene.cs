@@ -9,12 +9,12 @@ namespace WolfEngine.Rendering;
 /// </summary>
 internal sealed class RayTracingScene
 {
-	private readonly IShaderProvider _shaderProvider;
+	private readonly ShaderSource _shaderSource;
 
-	public RayTracingScene(IShaderProvider shaderProvider)
+	public RayTracingScene(ShaderSource shaderSource)
 	{
-		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
-		Resources = new RayTracingSceneResources(shaderProvider);
+		_shaderSource = shaderSource ?? throw new ArgumentNullException(nameof(shaderSource));
+		Resources = new RayTracingSceneResources(shaderSource);
 	}
 
 	public RayTracingSceneResources Resources { get; private set; }
@@ -28,7 +28,7 @@ internal sealed class RayTracingScene
 		ArgumentNullException.ThrowIfNull(device);
 
 		var previous = Resources;
-		Resources = new RayTracingSceneResources(_shaderProvider);
+		Resources = new RayTracingSceneResources(_shaderSource);
 		device.Retire(previous, "Replaced scene ray tracing resources");
 	}
 }

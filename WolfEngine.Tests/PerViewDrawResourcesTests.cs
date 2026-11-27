@@ -15,7 +15,7 @@ public sealed class PerViewDrawResourcesTests
 		// The frame is one command list submitted at the end, so a buffer the CPU fills in two views' passes would
 		// hold the second view's data by the time the GPU ran the first view's.
 		var device = CreateDevice(out _);
-		var resources = new GpuDrawResources(new Mock<IShaderProvider>().Object);
+		var resources = new GpuDrawResources(new ShaderSource(new Mock<IShaderProvider>().Object));
 
 		resources.ActiveViewIndex = 0;
 		resources.EnsureDecalCapacity(device, 4);
@@ -38,7 +38,7 @@ public sealed class PerViewDrawResourcesTests
 	public void ReleaseView_RetiresThatViewsBuffersAndKeepsThePrimarys()
 	{
 		var device = CreateDevice(out var deviceMock);
-		var resources = new GpuDrawResources(new Mock<IShaderProvider>().Object);
+		var resources = new GpuDrawResources(new ShaderSource(new Mock<IShaderProvider>().Object));
 		resources.ActiveViewIndex = 0;
 		resources.EnsureDecalCapacity(device, 4);
 		var primary = resources.DecalProjectorBuffer;
