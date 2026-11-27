@@ -1276,7 +1276,6 @@ internal sealed class RenderGraphFrameBuilder
 		}
 	}
 
-	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
 	/// <summary>
 	/// Regenerates the bound view's sky when what it is built from changed since it was last built: its settings,
 	/// its sun in Procedural mode, or its HDRI texture in HDRI mode.
@@ -1312,213 +1311,214 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void RecordViewPasses(RenderGraph graph)
 	{
-		if (_view.FrameResources.SceneEnabled)
+		if (_view.FrameResources.SceneEnabled == false) return;
+		
+		RecordViewSkyUpdate(graph);
+
+		graph.AddPass("GpuDraw View Update", PassKind.Compute)
+			.SetExecute(_gpuDrawViewUpdateExecute);
+
+		if (_view.FrameResources.Config.ShadowMaps.Enabled)
 		{
-			RecordViewSkyUpdate(graph);
+			graph.AddPass("GpuDraw Cull (Shadow View)", PassKind.Compute)
+				.SetExecute(_gpuDrawShadowCullExecute);
 
-			graph.AddPass("GpuDraw View Update", PassKind.Compute)
-				.SetExecute(_gpuDrawViewUpdateExecute);
+			graph.AddPass("Shadow Map", PassKind.Graphics)
+				.WriteTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.DepthWrite)
+				.WriteTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.DepthWrite)
+				.WriteTexture(_view.FrameResources.ShadowMapDepth2, ResourceState.DepthWrite)
+				.SetExecute(_shadowMapExecute);
+		}
 
-			if (_view.FrameResources.Config.ShadowMaps.Enabled)
+		graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
+			.SetExecute(_gpuDrawCameraCullExecute);
+
+		var gbufferBuilder = graph.AddPass("GBuffer", PassKind.Graphics)
+			.WriteTexture(_view.FrameResources.DecalSourceGBufferAlbedo.IsValid ? _view.FrameResources.DecalSourceGBufferAlbedo : _view.FrameResources.GBufferAlbedo, ResourceState.RenderTarget)
+			.WriteTexture(_view.FrameResources.DecalSourceGBufferNormal.IsValid ? _view.FrameResources.DecalSourceGBufferNormal : _view.FrameResources.GBufferNormal, ResourceState.RenderTarget)
+			.WriteTexture(_view.FrameResources.DecalSourceGBufferMaterial.IsValid ? _view.FrameResources.DecalSourceGBufferMaterial : _view.FrameResources.GBufferMaterial, ResourceState.RenderTarget)
+			.WriteTexture(_view.FrameResources.DecalSourceGBufferEmissive.IsValid ? _view.FrameResources.DecalSourceGBufferEmissive : _view.FrameResources.GBufferEmissive, ResourceState.RenderTarget)
+			.WriteTexture(_view.FrameResources.GBufferVelocity, ResourceState.RenderTarget)
+			.WriteTexture(_view.FrameResources.GBufferDepth, ResourceState.DepthWrite);
+		
+		for (var i = 0; i < _gameplayTextureTargets.Count; i++)
+		{
+			gbufferBuilder.ReadTexture(_gameplayTextureTargets[i].Handle, ResourceState.ShaderResource);
+		}
+		
+		gbufferBuilder.SetExecute(_gbufferExecute);
+
+		if (_view.FrameResources.DecalSourceGBufferAlbedo.IsValid)
+		{
+			_gBufferDecalSeedPass.AddNodes(graph, _view.FrameResources);
+			_screenSpaceDecalPass.AddNodes(graph, _view.FrameResources);
+		}
+
+		if (_view.FrameResources.AmbientOcclusionRaw.IsValid)
+		{
+			_ambientOcclusionPass.AddNodes(graph, _view.FrameResources);
+			_ambientOcclusionBlurPass.AddNodes(graph, _view);
+			if (_view.FrameResources.Config.AmbientOcclusion.Resolution == AmbientOcclusionResolution.Half)
 			{
-				graph.AddPass("GpuDraw Cull (Shadow View)", PassKind.Compute)
-					.SetExecute(_gpuDrawShadowCullExecute);
-
-				graph.AddPass("Shadow Map", PassKind.Graphics)
-					.WriteTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.DepthWrite)
-					.WriteTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.DepthWrite)
-					.WriteTexture(_view.FrameResources.ShadowMapDepth2, ResourceState.DepthWrite)
-					.SetExecute(_shadowMapExecute);
+				_ambientOcclusionUpsamplePass.AddNodes(graph, _view.FrameResources);
 			}
+		}
 
-			graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
-				.SetExecute(_gpuDrawCameraCullExecute);
+		if (_view.FrameResources.Clouds.Enabled)
+		{
+			_cloudPass.AddNodes(graph, _view.FrameResources);
+		}
 
-			var gbufferBuilder = graph.AddPass("GBuffer", PassKind.Graphics)
-				.WriteTexture(_view.FrameResources.DecalSourceGBufferAlbedo.IsValid ? _view.FrameResources.DecalSourceGBufferAlbedo : _view.FrameResources.GBufferAlbedo, ResourceState.RenderTarget)
-				.WriteTexture(_view.FrameResources.DecalSourceGBufferNormal.IsValid ? _view.FrameResources.DecalSourceGBufferNormal : _view.FrameResources.GBufferNormal, ResourceState.RenderTarget)
-				.WriteTexture(_view.FrameResources.DecalSourceGBufferMaterial.IsValid ? _view.FrameResources.DecalSourceGBufferMaterial : _view.FrameResources.GBufferMaterial, ResourceState.RenderTarget)
-				.WriteTexture(_view.FrameResources.DecalSourceGBufferEmissive.IsValid ? _view.FrameResources.DecalSourceGBufferEmissive : _view.FrameResources.GBufferEmissive, ResourceState.RenderTarget)
-				.WriteTexture(_view.FrameResources.GBufferVelocity, ResourceState.RenderTarget)
-				.WriteTexture(_view.FrameResources.GBufferDepth, ResourceState.DepthWrite);
-			for (var i = 0; i < _gameplayTextureTargets.Count; i++)
+		if (_view.FrameResources.FogIntegrated.IsValid)
+		{
+			_volumetricFogPass.AddNodes(graph, _view.FrameResources);
+		}
+
+		if (_view.FrameResources.DdgiTraceIrradiance.IsValid &&
+		    _view.FrameResources.DdgiTraceVisibility.IsValid &&
+		    _view.FrameResources.DdgiIrradianceEstimator.IsValid &&
+		    _view.FrameResources.DdgiIrradianceL0HistoryRead.IsValid &&
+		    _view.FrameResources.DdgiIrradianceL0HistoryWrite.IsValid &&
+		    _view.FrameResources.DdgiIrradianceLyHistoryRead.IsValid &&
+		    _view.FrameResources.DdgiIrradianceLyHistoryWrite.IsValid &&
+		    _view.FrameResources.DdgiIrradianceLzHistoryRead.IsValid &&
+		    _view.FrameResources.DdgiIrradianceLzHistoryWrite.IsValid &&
+		    _view.FrameResources.DdgiIrradianceLxHistoryRead.IsValid &&
+		    _view.FrameResources.DdgiIrradianceLxHistoryWrite.IsValid &&
+		    _view.FrameResources.DdgiVisibilityHistoryRead.IsValid &&
+		    _view.FrameResources.DdgiVisibilityHistoryWrite.IsValid &&
+		    _view.FrameResources.DdgiProbeStateRead.IsValid &&
+		    _view.FrameResources.DdgiProbeStateWrite.IsValid &&
+		    _view.FrameResources.DdgiProbeActivity.IsValid &&
+		    _view.FrameResources.DdgiProbeActivityMarks.IsValid)
+		{
+			_ddgiPass.AddNodes(graph, _view);
+
+			if (_view.FrameResources.DdgiFinalGatherTrace.IsValid)
 			{
-				gbufferBuilder.ReadTexture(_gameplayTextureTargets[i].Handle, ResourceState.ShaderResource);
-			}
-			gbufferBuilder.SetExecute(_gbufferExecute);
+				_ddgiFinalGatherPass.AddNodes(graph, _view.FrameResources, _sharedResources);
 
-			if (_view.FrameResources.DecalSourceGBufferAlbedo.IsValid)
-			{
-				_gBufferDecalSeedPass.AddNodes(graph, _view.FrameResources);
-				_screenSpaceDecalPass.AddNodes(graph, _view.FrameResources);
-			}
-
-			if (_view.FrameResources.AmbientOcclusionRaw.IsValid)
-			{
-				_ambientOcclusionPass.AddNodes(graph, _view.FrameResources);
-				_ambientOcclusionBlurPass.AddNodes(graph, _view);
-				if (_view.FrameResources.Config.AmbientOcclusion.Resolution == AmbientOcclusionResolution.Half)
+				if (_view.FrameResources.DdgiFinalGatherHistoryWrite is not null)
 				{
-					_ambientOcclusionUpsamplePass.AddNodes(graph, _view.FrameResources);
+					_ddgiFinalGatherSvgfPass.AddNodes(graph, _view);
+				}
+
+				if (_view.FrameResources.DdgiFinalGatherDenoised.Id != _view.FrameResources.DdgiFinalGatherIrradiance.Id)
+				{
+					_reflectionsUpsamplePass.AddFinalGatherNodes(graph, _view.FrameResources);
 				}
 			}
+		}
 
-			if (_view.FrameResources.Clouds.Enabled)
+		_clusteredLightingPass.AddNodes(graph);
+
+		// Reflections run before deferred lighting so their radiance can feed the specular
+		// term directly. Shaded hit color therefore comes from the previous frame's pyramid.
+		if (_view.FrameResources.ReflectionsRadiance.IsValid)
+		{
+			_reflectionsPass.AddNodes(graph, _view.FrameResources, _sharedResources);
+
+			if (_view.FrameResources.Config.Reflections.Mode == ReflectionMode.RayTraced &&
+			    _view.FrameResources.Config.Reflections.RayTracedSettings.Resolution !=
+			    RayTracedReflectionResolution.Full)
 			{
-				_cloudPass.AddNodes(graph, _view.FrameResources);
+				_reflectionsUpsamplePass.AddReflectionNodes(graph, _view.FrameResources);
 			}
+		}
+		_deferredLightingPass.AddNodes(graph, _view.FrameResources, _sharedResources);
 
-			if (_view.FrameResources.FogIntegrated.IsValid)
-			{
-				_volumetricFogPass.AddNodes(graph, _view.FrameResources);
-			}
-
-			if (_view.FrameResources.DdgiTraceIrradiance.IsValid &&
-			    _view.FrameResources.DdgiTraceVisibility.IsValid &&
-			    _view.FrameResources.DdgiIrradianceEstimator.IsValid &&
-			    _view.FrameResources.DdgiIrradianceL0HistoryRead.IsValid &&
-				    _view.FrameResources.DdgiIrradianceL0HistoryWrite.IsValid &&
-				    _view.FrameResources.DdgiIrradianceLyHistoryRead.IsValid &&
-				    _view.FrameResources.DdgiIrradianceLyHistoryWrite.IsValid &&
-				    _view.FrameResources.DdgiIrradianceLzHistoryRead.IsValid &&
-				    _view.FrameResources.DdgiIrradianceLzHistoryWrite.IsValid &&
-				    _view.FrameResources.DdgiIrradianceLxHistoryRead.IsValid &&
-				    _view.FrameResources.DdgiIrradianceLxHistoryWrite.IsValid &&
-				    _view.FrameResources.DdgiVisibilityHistoryRead.IsValid &&
-				    _view.FrameResources.DdgiVisibilityHistoryWrite.IsValid &&
-				    _view.FrameResources.DdgiProbeStateRead.IsValid &&
-				    _view.FrameResources.DdgiProbeStateWrite.IsValid &&
-				    _view.FrameResources.DdgiProbeActivity.IsValid &&
-				    _view.FrameResources.DdgiProbeActivityMarks.IsValid)
-			{
-				_ddgiPass.AddNodes(graph, _view);
-
-				if (_view.FrameResources.DdgiFinalGatherTrace.IsValid)
-				{
-					_ddgiFinalGatherPass.AddNodes(graph, _view.FrameResources, _sharedResources);
-
-					if (_view.FrameResources.DdgiFinalGatherHistoryWrite is not null)
-					{
-						_ddgiFinalGatherSvgfPass.AddNodes(graph, _view);
-					}
-
-					if (_view.FrameResources.DdgiFinalGatherDenoised.Id != _view.FrameResources.DdgiFinalGatherIrradiance.Id)
-					{
-						_reflectionsUpsamplePass.AddFinalGatherNodes(graph, _view.FrameResources);
-					}
-				}
-			}
-
-			_clusteredLightingPass.AddNodes(graph);
-
-			// Reflections run before deferred lighting so their radiance can feed the specular
-			// term directly. Shaded hit color therefore comes from the previous frame's pyramid.
-			if (_view.FrameResources.ReflectionsRadiance.IsValid)
-			{
-				_reflectionsPass.AddNodes(graph, _view.FrameResources, _sharedResources);
-
-				if (_view.FrameResources.Config.Reflections.Mode == ReflectionMode.RayTraced &&
-				    _view.FrameResources.Config.Reflections.RayTracedSettings.Resolution !=
-				    RayTracedReflectionResolution.Full)
-				{
-					_reflectionsUpsamplePass.AddReflectionNodes(graph, _view.FrameResources);
-				}
-			}
-			_deferredLightingPass.AddNodes(graph, _view.FrameResources, _sharedResources);
-
-			var transparentForwardBuilder = graph.AddPass("Transparent Forward", PassKind.Graphics)
-				.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.DepthWrite)
-				.ReadTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.ShaderResource)
-				.ReadTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.ShaderResource)
-				.ReadTexture(_view.FrameResources.ShadowMapDepth2, ResourceState.ShaderResource)
-				.WriteTexture(_view.FrameResources.LightingBuffer, ResourceState.RenderTarget);
-			if (_view.FrameResources.Fsr3.TransparencyMask.IsValid)
-			{
-				transparentForwardBuilder.WriteTexture(_view.FrameResources.Fsr3.TransparencyMask, ResourceState.RenderTarget);
-			}
-			if (_view.FrameResources.DdgiProbeStateWrite.IsValid)
-			{
-				transparentForwardBuilder.ReadTexture(
-					_view.FrameResources.DdgiProbeStateWrite,
-					ResourceState.ShaderResource);
-			}
-			if (_view.FrameResources.FogIntegrated.IsValid)
-			{
-				transparentForwardBuilder.ReadTexture(_view.FrameResources.FogIntegrated, ResourceState.ShaderResource);
-			}
+		var transparentForwardBuilder = graph.AddPass("Transparent Forward", PassKind.Graphics)
+			.ReadTexture(_view.FrameResources.GBufferDepth, ResourceState.DepthWrite)
+			.ReadTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.ShaderResource)
+			.ReadTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.ShaderResource)
+			.ReadTexture(_view.FrameResources.ShadowMapDepth2, ResourceState.ShaderResource)
+			.WriteTexture(_view.FrameResources.LightingBuffer, ResourceState.RenderTarget);
+		if (_view.FrameResources.Fsr3.TransparencyMask.IsValid)
+		{
+			transparentForwardBuilder.WriteTexture(_view.FrameResources.Fsr3.TransparencyMask, ResourceState.RenderTarget);
+		}
+		if (_view.FrameResources.DdgiProbeStateWrite.IsValid)
+		{
+			transparentForwardBuilder.ReadTexture(
+				_view.FrameResources.DdgiProbeStateWrite,
+				ResourceState.ShaderResource);
+		}
+		if (_view.FrameResources.FogIntegrated.IsValid)
+		{
+			transparentForwardBuilder.ReadTexture(_view.FrameResources.FogIntegrated, ResourceState.ShaderResource);
+		}
 			
-			transparentForwardBuilder.ReadSkyLighting(_view.FrameResources, _sharedResources);
-			transparentForwardBuilder.ReadCloudShadow(_view.FrameResources);
-			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
+		transparentForwardBuilder.ReadSkyLighting(_view.FrameResources, _sharedResources);
+		transparentForwardBuilder.ReadCloudShadow(_view.FrameResources);
+		transparentForwardBuilder.SetExecute(_transparentForwardExecute);
 
-			if (VfxPass.HasWork(_view.VfxFrame))
+		if (VfxPass.HasWork(_view.VfxFrame))
+		{
+			_vfxPass.AddNodes(graph, _view.FrameResources);
+		}
+
+		_renderFeatureHost.Record(
+			graph,
+			RenderInjectionPoint.BeforeTemporalResolve,
+			_view.RenderFeatureFrames,
+			_view.View,
+			_view.FrameResources.LightingBuffer,
+			_view.FrameResources.GBufferDepth);
+
+		if (_view.FrameResources.Config.AntiAliasing.UsesFsr3 && _view.FrameResources.Fsr3.InternalHistoryWrite.IsValid)
+		{
+			_passSet.Fsr3Pass.AddNodes(graph, _view);
+		}
+		else if (_view.FrameResources.Config.AntiAliasing.Enabled && _view.FrameResources.HistoryColorWrite.IsValid)
+		{
+			_temporalAntiAliasingPass.AddNodes(graph, _view.FrameResources);
+			_temporalHistoryStorePass.AddNodes(graph, _view.FrameResources);
+		}
+
+		// Capture the finished HDR scene color so next frame's reflections have shaded,
+		// pre-filtered radiance to sample.
+		_colorPyramidPass.AddNodes(graph, _view.FrameResources);
+
+		if (_view.FrameResources.BloomDownsampleLevels?.Length > 0)
+		{
+			_bloomPass.AddNodes(graph, _view.FrameResources);
+		}
+
+		_tonemappingPass.AddNodes(graph, _view.FrameResources);
+
+		if (_view.FrameResources.Config.AntiAliasing.UsesCasSharpening)
+		{
+			_casSharpenPass.AddNodes(graph, _view.FrameResources);
+		}
+
+		_copyToFinalPass.AddNodes(graph, _view.FrameResources, _sharedResources, _view.Output);
+
+		if (_view.FrameResources.GBufferDepth.IsValid)
+		{
+			_selectionOutlinePass.AddNodes(graph, _view.FrameResources);
+		}
+
+		// Gameplay screen UI belongs to the game's view, not to previews or documents.
+		if (_view.OwnsPresentation &&
+		    ReferenceEquals(_gameplayUiFrame.Screen, UiFrameData.Empty) == false &&
+		    _gameplayUiFrame.Screen.CommandCount > 0)
+		{
+			// Captures and the editor viewport use the encoded scene texture. Standalone
+			// also composites into the window target. CSS colors are in display space.
+			graph.AddPass("Gameplay UI Screen Capture", PassKind.Graphics)
+				.WriteTexture(_view.FrameResources.EncodedSceneColor, ResourceState.RenderTarget)
+				.SetExecute(_gameplayScreenEncodedUiExecute);
+			if (_view.Output == RenderViewOutput.Backbuffer)
 			{
-				_vfxPass.AddNodes(graph, _view.FrameResources);
+				graph.AddPass("Gameplay UI Screen", PassKind.Graphics)
+					.WriteTexture(_sharedResources.FinalColor, ResourceState.RenderTarget)
+					.SetExecute(_gameplayScreenFinalUiExecute);
 			}
+		}
 
-			_renderFeatureHost.Record(
-				graph,
-				RenderInjectionPoint.BeforeTemporalResolve,
-				_view.RenderFeatureFrames,
-				_view.View,
-				_view.FrameResources.LightingBuffer,
-				_view.FrameResources.GBufferDepth);
-
-			if (_view.FrameResources.Config.AntiAliasing.UsesFsr3 && _view.FrameResources.Fsr3.InternalHistoryWrite.IsValid)
-			{
-				_passSet.Fsr3Pass.AddNodes(graph, _view);
-			}
-			else if (_view.FrameResources.Config.AntiAliasing.Enabled && _view.FrameResources.HistoryColorWrite.IsValid)
-			{
-				_temporalAntiAliasingPass.AddNodes(graph, _view.FrameResources);
-				_temporalHistoryStorePass.AddNodes(graph, _view.FrameResources);
-			}
-
-			// Capture the finished HDR scene color so next frame's reflections have shaded,
-			// pre-filtered radiance to sample.
-			_colorPyramidPass.AddNodes(graph, _view.FrameResources);
-
-			if (_view.FrameResources.BloomDownsampleLevels?.Length > 0)
-			{
-				_bloomPass.AddNodes(graph, _view.FrameResources);
-			}
-
-			_tonemappingPass.AddNodes(graph, _view.FrameResources);
-
-			if (_view.FrameResources.Config.AntiAliasing.UsesCasSharpening)
-			{
-				_casSharpenPass.AddNodes(graph, _view.FrameResources);
-			}
-
-			_copyToFinalPass.AddNodes(graph, _view.FrameResources, _sharedResources, _view.Output);
-
-			if (_view.FrameResources.GBufferDepth.IsValid)
-			{
-				_selectionOutlinePass.AddNodes(graph, _view.FrameResources);
-			}
-
-			// Gameplay screen UI belongs to the game's view, not to previews or documents.
-			if (_view.OwnsPresentation &&
-			    ReferenceEquals(_gameplayUiFrame.Screen, UiFrameData.Empty) == false &&
-			    _gameplayUiFrame.Screen.CommandCount > 0)
-			{
-				// Captures and the editor viewport use the encoded scene texture. Standalone
-				// also composites into the window target. CSS colors are in display space.
-				graph.AddPass("Gameplay UI Screen Capture", PassKind.Graphics)
-					.WriteTexture(_view.FrameResources.EncodedSceneColor, ResourceState.RenderTarget)
-					.SetExecute(_gameplayScreenEncodedUiExecute);
-				if (_view.Output == RenderViewOutput.Backbuffer)
-				{
-					graph.AddPass("Gameplay UI Screen", PassKind.Graphics)
-						.WriteTexture(_sharedResources.FinalColor, ResourceState.RenderTarget)
-						.SetExecute(_gameplayScreenFinalUiExecute);
-				}
-			}
-
-			if (_view.FrameResources.MotionVectorDebugColor.IsValid)
-			{
-				_motionVectorDebugPass.AddNodes(graph, _view.FrameResources);
-			}
+		if (_view.FrameResources.MotionVectorDebugColor.IsValid)
+		{
+			_motionVectorDebugPass.AddNodes(graph, _view.FrameResources);
 		}
 	}
 
