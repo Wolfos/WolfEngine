@@ -8,6 +8,10 @@ using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.UnityImport;
 
+/// <param name="RendererCount">Mesh renderers the prefab draws with; zero for one that only held, say, a particle system.</param>
+/// <param name="UnsupportedComponents">Unity components on its nodes that were not converted, such as colliders or scripts.</param>
+public sealed record UnityConvertedPrefab(Guid PrefabId, int RendererCount, IReadOnlyList<string> UnsupportedComponents);
+
 /// <summary>
 /// Rebuilds exported Unity prefabs as WolfEngine prefabs: their meshes from the exported glTF, their materials through
 /// <see cref="UnityMaterialConversion"/>, and their hierarchy, renderers and LOD group from Unity's own data.
@@ -42,7 +46,7 @@ public sealed class UnityPrefabImporter
 
 	/// <summary>Converts the prefabs at <paramref name="prefabPaths"/>, each once.</summary>
 	/// <returns>The WolfEngine prefab each Unity prefab path became.</returns>
-	public IReadOnlyDictionary<string, Guid> Import(
+	public IReadOnlyDictionary<string, UnityConvertedPrefab> Import(
 		UnitySceneExport export,
 		string unityProjectPath,
 		string targetFolder,
@@ -54,7 +58,7 @@ public sealed class UnityPrefabImporter
 
 		var session = new Session(export, unityProjectPath, ProjectPathUtility.NormalizeAssetsFolderPath(targetFolder), warnings);
 		var prefabsByPath = export.Prefabs.ToDictionary(prefab => prefab.Path, StringComparer.Ordinal);
-		var converted = new Dictionary<string, Guid>(StringComparer.Ordinal);
+		var converted = new Dictionary<string, UnityConvertedPrefab>(StringComparer.Ordinal);
 		foreach (var path in prefabPaths.Distinct(StringComparer.Ordinal))
 		{
 			if (prefabsByPath.TryGetValue(path, out var prefab) == false)
@@ -74,9 +78,11 @@ public sealed class UnityPrefabImporter
 		return converted;
 	}
 
-	private Guid ImportPrefab(Session session, UnityPrefabExport prefab)
+	private UnityConvertedPrefab ImportPrefab(Session session, UnityPrefabExport prefab)
 	{
 		var scene = _sceneFactory.New();
+		var rendererCount = 0;
+		var unsupported = new SortedSet<string>(StringComparer.Ordinal);
 		var levels = GetRendererLevels(prefab);
 		var entities = new Entity[prefab.Nodes.Count];
 		for (var i = 0; i < prefab.Nodes.Count; i++)
@@ -101,8 +107,10 @@ public sealed class UnityPrefabImporter
 
 			if (node.Renderer is { Enabled: true } renderer)
 			{
-				AddRenderers(session, scene, entity, node.Name, renderer, levels.GetValueOrDefault(i));
+				rendererCount += AddRenderers(session, scene, entity, node.Name, renderer, levels.GetValueOrDefault(i));
 			}
+
+			unsupported.UnionWith(node.OtherComponents);
 		}
 
 		if (prefab.LodGroup is { } group)
@@ -116,7 +124,7 @@ public sealed class UnityPrefabImporter
 			throw new InvalidOperationException($"Could not save prefab '{prefab.Path}': {result.ErrorMessage}");
 		}
 
-		return id;
+		return new UnityConvertedPrefab(id, rendererCount, unsupported.ToArray());
 	}
 
 	private static bool IsActive(UnityPrefabExport prefab, int index)
@@ -151,7 +159,8 @@ public sealed class UnityPrefabImporter
 		return levels;
 	}
 
-	private void AddRenderers(
+	/// <returns>How many renderers were added.</returns>
+	private int AddRenderers(
 		Session session,
 		EditorScene scene,
 		Entity entity,
@@ -163,9 +172,10 @@ public sealed class UnityPrefabImporter
 		if (meshes.Count == 0)
 		{
 			session.Warnings.Add($"Mesh '{renderer.Mesh}' of '{nodeName}' is not in the export.");
-			return;
+			return 0;
 		}
 
+		var added = 0;
 		for (var submesh = 0; submesh < meshes.Count; submesh++)
 		{
 			if (meshes[submesh] is not { } meshId)
@@ -194,7 +204,11 @@ public sealed class UnityPrefabImporter
 					LastLevel = range.Last
 				});
 			}
+
+			added++;
 		}
+
+		return added;
 	}
 
 	/// <summary>

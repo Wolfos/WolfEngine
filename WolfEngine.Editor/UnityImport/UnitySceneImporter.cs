@@ -16,16 +16,24 @@ namespace WolfEngine.Editor.UnityImport;
 /// <param name="UnityProjectPath">The Unity project the export came from, which its textures are read from.</param>
 /// <param name="RenderConfigPath">Optional project path of a RenderConfig for the scene's world settings.</param>
 /// <param name="LightIntensityScale">Multiplies Unity light intensities, whose units differ from WolfEngine's.</param>
+/// <param name="PlacePrefabInstances">Converts the prefabs the scene places and places them, as well as the terrain.</param>
 public sealed record UnitySceneImportRequest(
 	string ExportFolder,
 	string TargetFolder,
 	string SceneName,
 	string UnityProjectPath,
 	string? RenderConfigPath = null,
-	float LightIntensityScale = 2.5f);
+	float LightIntensityScale = 2.5f,
+	bool PlacePrefabInstances = true);
 
 /// <param name="UnresolvedTreePrefabs">Unity tree prefabs that could not be converted, and their tree counts.</param>
 /// <param name="ConvertedPrefabs">Unity prefab paths and the WolfEngine prefabs they were converted to.</param>
+/// <param name="PrefabInstancesPlaced">Unity prefab instances placed in the scene.</param>
+/// <param name="SkippedPrefabInstances">Instances not placed, counted per reason and prefab.</param>
+/// <param name="InstanceOverrides">
+/// Overrides Unity placements made to their prefabs, other than static flags, counted per kind. Placements keep only
+/// their transform, so these are what the import leaves out.
+/// </param>
 /// <param name="DiscardedLayerWeight">Mean layer weight per texel beyond the four layers a texel holds, from 0 to 1.</param>
 public sealed record UnitySceneImportReport(
 	Guid SceneId,
@@ -36,14 +44,17 @@ public sealed record UnitySceneImportReport(
 	int TreesSkipped,
 	IReadOnlyDictionary<string, int> UnresolvedTreePrefabs,
 	IReadOnlyList<string> CreatedFoliageTypes,
-	IReadOnlyDictionary<string, Guid> ConvertedPrefabs,
+	IReadOnlyDictionary<string, UnityConvertedPrefab> ConvertedPrefabs,
+	int PrefabInstancesPlaced,
+	IReadOnlyDictionary<string, int> SkippedPrefabInstances,
+	IReadOnlyDictionary<string, int> InstanceOverrides,
 	float DiscardedLayerWeight,
 	IReadOnlyList<string> Warnings);
 
 /// <summary>
 /// Imports a scene exported from Unity with WolfEngine.UnityExporter into the open project: each terrain with its
-/// layers, layer maps and trees, the directional lights and the main camera, as a new scene. The tree prefabs are
-/// converted from the export by <see cref="UnityPrefabImporter"/>.
+/// layers, layer maps and trees, the prefab instances it places, the directional lights and the main camera, as a new
+/// scene. The prefabs are converted from the export by <see cref="UnityPrefabImporter"/>.
 /// </summary>
 public sealed class UnitySceneImporter
 {
@@ -98,15 +109,25 @@ public sealed class UnitySceneImporter
 			throw new InvalidOperationException($"A scene already exists at '{scene.RelativeAssetPath}'.");
 		}
 
-		var treePrefabPaths = export.Terrains
+		var prefabPaths = export.Terrains
 			.SelectMany(terrain => terrain.TreePrototypes)
 			.Select(prototype => prototype.Prefab)
 			.OfType<string>();
-		context.ConvertedPrefabs = _prefabImporter.Import(export, request.UnityProjectPath, targetFolder, treePrefabPaths, context.Warnings);
+		if (request.PlacePrefabInstances)
+		{
+			prefabPaths = prefabPaths.Concat(export.PrefabInstances.Select(instance => instance.PrefabPath));
+		}
+
+		context.ConvertedPrefabs = _prefabImporter.Import(export, request.UnityProjectPath, targetFolder, prefabPaths, context.Warnings);
 
 		foreach (var terrain in export.Terrains)
 		{
 			ImportTerrain(context, scene, terrain);
+		}
+
+		if (request.PlacePrefabInstances)
+		{
+			PlacePrefabInstances(context, scene);
 		}
 
 		AddLights(context, scene);
@@ -125,6 +146,9 @@ public sealed class UnitySceneImporter
 			context.UnresolvedTreePrefabs,
 			context.CreatedFoliageTypes,
 			context.ConvertedPrefabs,
+			context.PrefabInstancesPlaced,
+			context.SkippedPrefabInstances,
+			context.InstanceOverrides,
 			context.DiscardedLayerWeight,
 			context.Warnings);
 	}
@@ -157,6 +181,62 @@ public sealed class UnitySceneImporter
 		}
 
 		scene.World.AddComponent(entity, component);
+	}
+
+	/// <summary>
+	/// Places each Unity prefab instance as a linked WolfEngine prefab instance with its world transform, under one parent
+	/// so the hierarchy stays usable. Both engines share a space and converted meshes are Unity's own, so the transform
+	/// carries over as it is.
+	/// </summary>
+	private void PlacePrefabInstances(ImportContext context, EditorScene scene)
+	{
+		if (context.Export.PrefabInstances.Count == 0) return;
+
+		var world = scene.World;
+		var group = world.CreateEntity("Props", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		foreach (var instance in context.Export.PrefabInstances)
+		{
+			foreach (var kind in instance.OverrideKinds)
+			{
+				// Unity records static flag changes on a placement's children as GameObject overrides; they change nothing here.
+				if (string.Equals(kind, "modified GameObject", StringComparison.Ordinal) == false)
+				{
+					context.InstanceOverrides[kind] = context.InstanceOverrides.GetValueOrDefault(kind) + 1;
+				}
+			}
+
+			if (context.ConvertedPrefabs.TryGetValue(instance.PrefabPath, out var prefab) == false)
+			{
+				Skip(context, "not converted", instance.PrefabPath);
+				continue;
+			}
+
+			if (prefab.RendererCount == 0)
+			{
+				var components = prefab.UnsupportedComponents.Count > 0 ? string.Join(", ", prefab.UnsupportedComponents) : "nothing";
+				Skip(context, $"draws nothing (has {components})", instance.PrefabPath);
+				continue;
+			}
+
+			var root = _assetPipelineService.InstantiatePrefab(_projectService.ProjectRootPath!, prefab.PrefabId, scene);
+			if (root == default)
+			{
+				Skip(context, "empty prefab", instance.PrefabPath);
+				continue;
+			}
+
+			world.SetLocalPosition(root, UnitySpace.ToVector3(instance.Position));
+			world.SetLocalRotation(root, UnitySpace.ToQuaternion(instance.Rotation));
+			world.SetLocalScale(root, UnitySpace.ToVector3(instance.Scale));
+			world.SetParent(root, group);
+			context.PrefabInstancesPlaced++;
+		}
+	}
+
+	private static void Skip(ImportContext context, string reason, string prefabPath)
+	{
+		var key = $"{reason}: {Path.GetFileName(prefabPath)}";
+		context.SkippedPrefabInstances[key] = context.SkippedPrefabInstances.GetValueOrDefault(key) + 1;
 	}
 
 	private Guid ImportLayerSet(ImportContext context, UnityTerrainExport terrain, string terrainName, string terrainFolder)
@@ -309,8 +389,8 @@ public sealed class UnitySceneImporter
 				continue;
 			}
 
-			if (context.ConvertedPrefabs.TryGetValue(prefabPath, out var prefabId) == false ||
-			    _projectService.TryGetAsset(prefabId, out var prefab) == false)
+			if (context.ConvertedPrefabs.TryGetValue(prefabPath, out var converted) == false ||
+			    _projectService.TryGetAsset(converted.PrefabId, out var prefab) == false)
 			{
 				continue;
 			}
@@ -510,7 +590,10 @@ public sealed class UnitySceneImporter
 		public Dictionary<Guid, AssetRef<FoliageType>> FoliageTypesByPrefab { get; } = new();
 		public Dictionary<string, int> UnresolvedTreePrefabs { get; } = new(StringComparer.Ordinal);
 		public List<string> CreatedFoliageTypes { get; } = [];
-		public IReadOnlyDictionary<string, Guid> ConvertedPrefabs { get; set; } = new Dictionary<string, Guid>();
+		public IReadOnlyDictionary<string, UnityConvertedPrefab> ConvertedPrefabs { get; set; } = new Dictionary<string, UnityConvertedPrefab>();
+		public Dictionary<string, int> SkippedPrefabInstances { get; } = new(StringComparer.Ordinal);
+		public Dictionary<string, int> InstanceOverrides { get; } = new(StringComparer.Ordinal);
+		public int PrefabInstancesPlaced { get; set; }
 		public List<string> Warnings { get; } = [];
 		public int LayerCount { get; set; }
 		public int TreesImported { get; set; }

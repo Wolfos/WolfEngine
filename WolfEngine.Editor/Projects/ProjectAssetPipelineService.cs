@@ -40,16 +40,19 @@ public interface IProjectAssetPipelineService
 		IReadOnlyDictionary<Int2, string> spatialCellPaths);
 	AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath);
 	void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world, Vector3? spawnPosition = null);
-	void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null);
+
+	/// <summary>Places a linked instance of a prefab in the scene.</summary>
+	/// <returns>The instance's root entity, or the default entity when the prefab is empty.</returns>
+	Entity InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null);
 	void InstantiateImportedModel(IAssetCatalog catalog, Guid modelNodeId, World world, Vector3? spawnPosition = null)
 	{
 		ArgumentNullException.ThrowIfNull(catalog);
 		InstantiateImportedModel(catalog.GetAsset(modelNodeId).Mount.RootPath, modelNodeId, world, spawnPosition);
 	}
-	void InstantiatePrefab(IAssetCatalog catalog, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
+	Entity InstantiatePrefab(IAssetCatalog catalog, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
 	{
 		ArgumentNullException.ThrowIfNull(catalog);
-		InstantiatePrefab(catalog.GetAsset(prefabNodeId).Mount.RootPath, prefabNodeId, scene, spawnPosition);
+		return InstantiatePrefab(catalog.GetAsset(prefabNodeId).Mount.RootPath, prefabNodeId, scene, spawnPosition);
 	}
 }
 
@@ -510,7 +513,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		});
 	}
 
-	public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
+	public Entity InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
 		ArgumentNullException.ThrowIfNull(scene);
@@ -528,7 +531,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var prefabFile = PrefabAssetFile.Load(GetAbsolutePath(projectRootPath, prefabNode.RelativeAssetPath));
 		if (prefabFile.RootEntityId == Guid.Empty)
 		{
-			return;
+			return default;
 		}
 
 		var entitiesById = prefabFile.Entities.ToDictionary(entity => entity.EntityId);
@@ -544,6 +547,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent, skippedComponents);
 		ApplySpawnPosition(scene.World, instantiatedRoot, spawnPosition);
 		ReportSkippedPrefabComponents(prefabNode.RelativeAssetPath, skippedComponents);
+
+		return instantiatedRoot;
 	}
 
 	private Entity CreateModelNodeEntities(

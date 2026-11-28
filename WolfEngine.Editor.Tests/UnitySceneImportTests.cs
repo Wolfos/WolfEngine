@@ -71,6 +71,30 @@ public sealed class UnitySceneImportTests
 	}
 
 	[Test]
+	public void TerrainComponent_DrawsItsNearestLevelAtTheHeightmapsSpacing()
+	{
+		var terrain = new UnityTerrainExport
+		{
+			Size = [256.0f, 80.0f, 256.0f],
+			HeightmapResolution = 513
+		};
+		var component = new TerrainComponent();
+		component.ApplyDefaultValues(null!, default);
+
+		UnityTerrainConversion.ApplyTo(ref component, terrain);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(component.WorldSizeMeters, Is.EqualTo(new Vector2(256.0f, 256.0f)));
+			Assert.That(component.HeightScaleMeters, Is.EqualTo(80.0f));
+
+			// 0.5 m between samples over a 64 m chunk.
+			Assert.That(component.Lod0ResolutionInQuads, Is.EqualTo(128));
+			Assert.That(component.RayTracingResolutionInQuads, Is.EqualTo(64));
+		});
+	}
+
+	[Test]
 	public void TreeInstance_IsInTheTerrainsLocalSpaceWithBothScales()
 	{
 		var tree = new UnityTreeExport

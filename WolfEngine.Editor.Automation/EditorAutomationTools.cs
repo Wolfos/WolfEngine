@@ -389,7 +389,7 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken = default) =>
 		_controller.SnapFoliageToTerrainAsync(terrainEntityId, cancellationToken);
 
-	[McpServerTool(Name = "import_unity_scene"), Description("Import a scene exported from Unity with WolfEngine.UnityExporter as a new scene in the open project, then open it. Creates the terrain, its layer set and textures, its trees as placed foliage with their prefabs converted from the export, the directional lights and the main camera. Returns what was imported, skipped and guessed.")]
+	[McpServerTool(Name = "import_unity_scene"), Description("Import a scene exported from Unity with WolfEngine.UnityExporter as a new scene in the open project, then open it. Creates the terrain, its layer set and textures, its trees as placed foliage, its prefab instances, the directional lights and the main camera, with prefabs, meshes and materials converted from the export. Returns what was imported, skipped and guessed.")]
 	public Task<UnitySceneImportResult> ImportUnityScene(
 		[Description("Folder the Unity exporter wrote, holding scene.json.")] string exportFolder,
 		[Description("The Unity project the export came from; its textures are read from there.")] string unityProjectPath,

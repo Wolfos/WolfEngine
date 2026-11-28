@@ -1826,8 +1826,9 @@ public sealed class AssetsWindowTests
 		{
 		}
 
-		public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
+		public Entity InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
 		{
+			return default;
 		}
 
 		public void ResetCounters()

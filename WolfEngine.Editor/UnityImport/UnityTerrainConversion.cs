@@ -24,11 +24,24 @@ public static class UnityTerrainConversion
 		return terrain.GetPosition() + new Vector3(size.X * 0.5f, 0.0f, size.Z * 0.5f);
 	}
 
+	/// <summary>
+	/// Sizes the terrain like Unity's and draws its nearest level at the heightmap's own spacing, as Unity does close up;
+	/// the component's default draws a quarter of that, smoothing away the detail the heightmap holds. Ray tracing gets
+	/// half the drawn resolution.
+	/// </summary>
 	public static void ApplyTo(ref TerrainComponent component, UnityTerrainExport terrain)
 	{
 		var size = terrain.GetSize();
 		component.WorldSizeMeters = new Vector2(size.X, size.Z);
 		component.HeightScaleMeters = size.Y;
+
+		var sampleSpacing = size.X / Math.Max(terrain.HeightmapResolution - 1, 1);
+		if (sampleSpacing > 0.0f)
+		{
+			var quads = (int)MathF.Round(component.GetResolvedChunkSizeMeters() / sampleSpacing);
+			component.Lod0ResolutionInQuads = Math.Clamp(quads, 2, 1024);
+			component.RayTracingResolutionInQuads = Math.Clamp(quads / 2, 1, 256);
+		}
 	}
 
 	/// <summary>
