@@ -124,8 +124,18 @@ void DdgiVisibilityIntegrateCS(
                 hitCoverage);
             traceValue.b = hitCoverage;
         }
-        float historyWeight = g_UsableHistory != 0u ? hysteresis : 0.0f;
+        // Alpha holds how many updates this probe's moments average.
+        float historyWeight = 0.0f;
+        uint updateCount = 1u;
+        if (g_UsableHistory != 0u)
+        {
+            uint historyUpdateCount = uint(round(clamp(historyValue.a, 1.0f, float(DDGI_WARM_UP_UPDATE_LIMIT))));
+            historyWeight = DdgiWarmUpHistoryWeight(hysteresis, historyUpdateCount);
+            updateCount = DdgiNextWarmUpUpdateCount(historyUpdateCount);
+        }
+
         finalValue = lerp(traceValue, historyValue, historyWeight);
+        finalValue.a = float(updateCount);
     }
 
     g_FinalVisibility[groupIndex] = finalValue;

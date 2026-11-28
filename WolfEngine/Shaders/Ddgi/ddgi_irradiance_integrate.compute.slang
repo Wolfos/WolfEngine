@@ -12,6 +12,8 @@ struct DdgiVarianceData
     float3 mean;
     float3 shortMean;
     float3 variance;
+    // Updates the mean averages, for the warm-up in DdgiWarmUpHistoryWeight.
+    uint updateCount;
 };
 
 RWStructuredBuffer<uint4> g_IrradianceEstimator : register(u2);
@@ -45,6 +47,8 @@ DdgiVarianceData LoadVarianceData(uint index)
     data.shortMean = UnpackRgbe(packed.y);
     float3 deviation = UnpackRgbe(packed.z);
     data.variance = deviation * deviation;
+    data.updateCount = packed.w;
+
     return data;
 }
 
@@ -56,14 +60,14 @@ void StoreVarianceData(uint index, DdgiVarianceData data)
         // Squared low-light values underflow RGB9E5 long before radiance does.
         // Store deviation to retain the noise estimate throughout its range.
         PackRgbe(sqrt(max(0.0f.xxx, data.variance))),
-        // Keep the existing 16-byte structured-buffer stride.
-        0u);
+        data.updateCount);
 }
 
 void MultiscaleMeanEstimator(float3 sampleValue, inout DdgiVarianceData data)
 {
     float shortBlend = clamp(irradianceTemporalBlendSpeed, 1.0f / 256.0f, 0.5f);
     float meanBlend = clamp(irradianceTemporalBlendSpeed * 0.5f, 0.01f, 0.1f);
+    meanBlend = 1.0f - DdgiWarmUpHistoryWeight(1.0f - meanBlend, data.updateCount);
     float3 deviation = sqrt(max(0.0f.xxx, data.variance));
     // Track the raw observation in a short window so a sustained light change
     // can lift the envelope. Only the clipped sample enters the cached result;
@@ -75,6 +79,7 @@ void MultiscaleMeanEstimator(float3 sampleValue, inout DdgiVarianceData data)
     data.variance = lerp(data.variance, residual * residual, shortBlend * 0.5f);
     data.shortMean = lerp(data.shortMean, sampleValue, shortBlend);
     data.mean = lerp(data.mean, filteredSample, meanBlend);
+    data.updateCount = DdgiNextWarmUpUpdateCount(data.updateCount);
 }
 
 float3 IntegrateDirection(float3 direction, uint rayCount)

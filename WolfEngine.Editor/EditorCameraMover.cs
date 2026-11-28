@@ -176,7 +176,8 @@ public class EditorCameraSystem: IUpdate
 		return false;
 	}
 
-	public bool TrySetCameraPose(RenderViewId view, Vector3 position, Vector3 target)
+	/// <param name="lens">Optional field of view and clip planes for the view's camera; unset values are kept.</param>
+	public bool TrySetCameraPose(RenderViewId view, Vector3 position, Vector3 target, EditorCameraLens lens = default)
 	{
 		var direction = target - position;
 		if (!float.IsFinite(position.X) || !float.IsFinite(position.Y) || !float.IsFinite(position.Z) ||
@@ -193,6 +194,11 @@ public class EditorCameraSystem: IUpdate
 		pose.World.SetLocalPosition(pose.Entity, position);
 		pose.World.SetLocalRotation(pose.Entity, Quaternion.CreateFromRotationMatrix(rotation));
 		pose.World.GetComponent<EditorCameraMover>(pose.Entity).Initialized = false;
+		if (pose.World.HasComponent<Camera>(pose.Entity))
+		{
+			lens.ApplyTo(ref pose.World.GetComponent<Camera>(pose.Entity));
+		}
+
 		_cameraPoses[view] = new CameraPose(pose.World, pose.Entity, position, forward);
 		return true;
 	}
@@ -236,5 +242,34 @@ public class EditorCameraSystem: IUpdate
 		}
 
 		mover.Initialized = true;
+	}
+}
+
+/// <summary>
+/// Lens overrides for an editor camera, so automation can match a gameplay camera's projection. Each unset value
+/// keeps the camera's current one.
+/// </summary>
+public readonly record struct EditorCameraLens(float? Fov, float? NearPlane, float? FarPlane)
+{
+	public void ApplyTo(ref Camera camera)
+	{
+		if (Fov is null &&
+		    NearPlane is null &&
+		    FarPlane is null)
+		{
+			return;
+		}
+
+		if (NearPlane is float nearPlane)
+		{
+			camera.NearPlane = nearPlane;
+		}
+
+		if (FarPlane is float farPlane)
+		{
+			camera.FarPlane = farPlane;
+		}
+
+		camera.SetPerspective(Fov ?? camera.Fov);
 	}
 }

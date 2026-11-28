@@ -90,8 +90,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 		}
 	}
 
-	public Task SetEditorCameraAsync(System.Numerics.Vector3 position, System.Numerics.Vector3 target, CancellationToken cancellationToken) =>
-		GetRunningEditor().SetEditorCameraAsync(position, target, cancellationToken);
+	public Task SetEditorCameraAsync(
+		System.Numerics.Vector3 position,
+		System.Numerics.Vector3 target,
+		EditorCameraLens lens,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEditorCameraAsync(position, target, lens, cancellationToken);
 
 	public async Task<CreatedEntity> CreateEntityAsync(string? name, CancellationToken cancellationToken)
 	{

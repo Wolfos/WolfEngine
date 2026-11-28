@@ -1610,11 +1610,13 @@ public sealed partial class EditorRemoteAutomationController
 			capture.RenderFrameSequence);
 	}
 
-	public Task SetEditorCameraAsync(Vector3 position, Vector3 target, CancellationToken cancellationToken) =>
+	public Task SetEditorCameraAsync(Vector3 position, Vector3 target, EditorCameraLens lens, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
-			if (!_cameraSystem.TrySetCameraPose(RenderViewId.Primary, position, target))
+			if (_cameraSystem.TrySetCameraPose(RenderViewId.Primary, position, target, lens) == false)
+			{
 				throw new InvalidOperationException("The editor camera is not ready; wait for render frames first.");
+			}
 		}, cancellationToken);
 
 	public Task ShutdownAsync(CancellationToken cancellationToken) => Enqueue(() => { ShutdownRequested = true; }, cancellationToken);

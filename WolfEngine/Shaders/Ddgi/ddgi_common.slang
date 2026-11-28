@@ -101,6 +101,28 @@ static const uint DDGI_PROBE_STATE_DISABLED = 0u;
 static const uint DDGI_PROBE_STATE_STABLE = 1u;
 static const uint DDGI_RELOCATION_RAY_COUNT = 16u;
 static const uint DDGI_RELOCATION_ITERATION_COUNT = 4u;
+// Updates a probe counts before its history weight reaches the configured
+// hysteresis. Exact in the half-float visibility alpha that stores the count.
+static const uint DDGI_WARM_UP_UPDATE_LIMIT = 256u;
+
+// A probe whose history was just seeded holds a single low-ray-count
+// observation, which may have been traced before streamed content reached the
+// TLAS (a Play-mode world's foliage joins a few frames after the bootstrap
+// build). Blending that seed at full hysteresis keeps it for hundreds of
+// frames, because each probe only updates every probeUpdateFrames frames.
+// Average the first updates evenly instead, the cumulative mean, until the
+// configured hysteresis takes over.
+float DdgiWarmUpHistoryWeight(float historyWeight, uint historyUpdateCount)
+{
+    float count = float(max(historyUpdateCount, 1u));
+
+    return min(historyWeight, count / (count + 1.0f));
+}
+
+uint DdgiNextWarmUpUpdateCount(uint historyUpdateCount)
+{
+    return min(historyUpdateCount + 1u, DDGI_WARM_UP_UPDATE_LIMIT);
+}
 
 struct DdgiTexelInfo
 {

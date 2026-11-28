@@ -22,9 +22,23 @@ public sealed class EditorAutomationTools
 	}
 
 	[McpServerTool(Name = "set_editor_camera"), Description("Move the primary editor camera to a position looking at a target, in memory only. Wait for render frames after loading a scene before calling this.")]
-	public async Task<string> SetEditorCamera(float x, float y, float z, float targetX, float targetY, float targetZ, CancellationToken cancellationToken)
+	public async Task<string> SetEditorCamera(
+		float x,
+		float y,
+		float z,
+		float targetX,
+		float targetY,
+		float targetZ,
+		CancellationToken cancellationToken,
+		[Description("Optional vertical field of view in degrees, for example the gameplay camera's, so an Edit-mode capture frames the same view as capture_gameplay_frame.")] float? fov = null,
+		[Description("Optional near clip plane distance. Shadow cascades and depth follow the clip range, so match the gameplay camera's for like-for-like comparisons.")] float? nearPlane = null,
+		[Description("Optional far clip plane distance.")] float? farPlane = null)
 	{
-		await _controller.SetEditorCameraAsync(new(x, y, z), new(targetX, targetY, targetZ), cancellationToken);
+		await _controller.SetEditorCameraAsync(
+			new(x, y, z),
+			new(targetX, targetY, targetZ),
+			new EditorCameraLens(fov, nearPlane, farPlane),
+			cancellationToken);
 		return "Editor camera updated in memory.";
 	}
 

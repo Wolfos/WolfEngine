@@ -24,6 +24,14 @@ public static class DdgiUtilities
 	private const float RelocationMinimumTolerance = 0.001f;
 	// Mirrored by DDGI_ACTIVITY_SCATTER_ROW_WIDTH in ddgi_classify.compute.slang. Stays within D3D12's baseline limit.
 	internal const uint ActivityScatterRowWidth = 65535;
+	// Mirrored by DDGI_WARM_UP_UPDATE_LIMIT in ddgi_common.slang.
+	public const uint WarmUpUpdateLimit = 256;
+
+	// Instance-set changes that leave a freshly seeded probe volume describing a scene that no longer exists.
+	private const RayTracingSceneRebuildReason SeedInvalidatingRebuildReasons =
+		RayTracingSceneRebuildReason.Bootstrap |
+		RayTracingSceneRebuildReason.Add |
+		RayTracingSceneRebuildReason.Remove;
 
 	internal static (uint X, uint Y, uint Z) GetActivityScatterDispatchGroupCount(uint instanceUpperBound)
 	{
@@ -224,6 +232,52 @@ public static class DdgiUtilities
 		return checked(visibilityRayCount + irradianceRayCount);
 	}
 
+	/// <summary>
+	/// The history weight of a probe update, warmed up from the probe's update count. A freshly seeded probe holds
+	/// one low-ray-count observation, so its first updates are averaged evenly (the cumulative mean) until the
+	/// configured <paramref name="historyWeight"/> takes over, instead of keeping that observation at full
+	/// hysteresis for hundreds of frames. Mirrors <c>DdgiWarmUpHistoryWeight</c> in ddgi_common.slang.
+	/// </summary>
+	public static float GetWarmUpHistoryWeight(float historyWeight, uint historyUpdateCount)
+	{
+		var count = (float)Math.Max(historyUpdateCount, 1u);
+
+		return Math.Min(historyWeight, count / (count + 1.0f));
+	}
+
+	/// <summary>The update count after one more update. Mirrors <c>DdgiNextWarmUpUpdateCount</c>.</summary>
+	public static uint GetNextWarmUpUpdateCount(uint historyUpdateCount)
+	{
+		return Math.Min(historyUpdateCount + 1u, WarmUpUpdateLimit);
+	}
+
+	/// <summary>
+	/// Whether this frame's probe update may blend with the probe volume's history. A volume seeded fewer than
+	/// <paramref name="probeUpdateFrames"/> frames ago, so before every probe has updated once on its own schedule,
+	/// is seeded again when the ray-tracing scene's instance set changed this frame. Content that joins the TLAS a
+	/// few frames after a world is bound, such as placed foliage that is added once the camera is known, would
+	/// otherwise stay in the seed: probes would keep the sky they saw through trees that were not there yet.
+	/// </summary>
+	/// <param name="historyValid">Whether the view's DDGI history holds a completed frame at the current shape.</param>
+	/// <param name="framesSinceSeed">Frames completed since the volume was last seeded.</param>
+	/// <param name="probeUpdateFrames">Frames between two scheduled updates of one probe.</param>
+	/// <param name="topLevelRebuildReason">Why this frame rebuilt the TLAS, or none.</param>
+	internal static bool CanBlendProbeHistory(
+		bool historyValid,
+		int framesSinceSeed,
+		int probeUpdateFrames,
+		RayTracingSceneRebuildReason topLevelRebuildReason)
+	{
+		if (historyValid == false) return false;
+
+		if (framesSinceSeed >= Math.Max(probeUpdateFrames, 1))
+		{
+			return true;
+		}
+
+		return (topLevelRebuildReason & SeedInvalidatingRebuildReasons) == RayTracingSceneRebuildReason.None;
+	}
+
 	internal static bool IsRelocationTraceEnabled(RenderConfig config)
 	{
 		return IsRayTracedDdgiEnabled(config) &&
@@ -274,6 +328,7 @@ public static class DdgiUtilities
 	{
 		var shortBlend = Math.Clamp(temporalBlendSpeed, 1.0f / 256.0f, 0.5f);
 		var meanBlend = Math.Clamp(temporalBlendSpeed * 0.5f, 0.01f, 0.1f);
+		meanBlend = 1.0f - GetWarmUpHistoryWeight(1.0f - meanBlend, data.UpdateCount);
 		var deviation = Vector3.SquareRoot(Vector3.Max(Vector3.Zero, data.Variance));
 		var highThreshold = Vector3.Max(data.Mean, data.ShortMean) * 1.5f +
 			Vector3.Max(new Vector3(0.005f), deviation * 6.0f);
@@ -282,6 +337,8 @@ public static class DdgiUtilities
 		data.Variance = Vector3.Lerp(data.Variance, residual * residual, shortBlend * 0.5f);
 		data.ShortMean = Vector3.Lerp(data.ShortMean, sampleValue, shortBlend);
 		data.Mean = Vector3.Lerp(data.Mean, filteredSample, meanBlend);
+		data.UpdateCount = GetNextWarmUpUpdateCount(data.UpdateCount);
+
 		return data;
 	}
 
@@ -778,10 +835,15 @@ public readonly record struct DdgiL1Sh(
 	}
 }
 
+/// <summary>
+/// One direction of a probe's irradiance estimator. <see cref="UpdateCount"/> defaults to a settled history; a probe
+/// that was just seeded starts from zero.
+/// </summary>
 public record struct DdgiVarianceData(
 	Vector3 Mean,
 	Vector3 ShortMean,
-	Vector3 Variance);
+	Vector3 Variance,
+	uint UpdateCount = DdgiUtilities.WarmUpUpdateLimit);
 
 public readonly record struct DdgiRelocationHit(
 	Vector3 Direction,

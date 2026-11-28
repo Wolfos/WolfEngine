@@ -1048,6 +1048,61 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
+	public void DdgiEstimatorAveragesItsFirstUpdatesAfterASeed()
+	{
+		// A probe seeded through a gap that later fills, as in the shader's seed path.
+		var seed = new Vector3(10);
+		var state = new DdgiVarianceData(seed, seed, Vector3.Zero, UpdateCount: 0);
+		state = DdgiUtilities.UpdateVarianceEstimator(seed, state, 0.2f);
+
+		Assert.That(state.UpdateCount, Is.EqualTo(1u));
+
+		for (var update = 0; update < 3; update++)
+		{
+			state = DdgiUtilities.UpdateVarianceEstimator(Vector3.Zero, state, 0.2f);
+		}
+
+		// The cumulative mean of one seed and three dark observations, where a settled estimator would still hold
+		// 0.9^3 of the seed.
+		Assert.That(state.Mean.X, Is.EqualTo(2.5f).Within(1e-5f));
+		Assert.That(state.UpdateCount, Is.EqualTo(4u));
+	}
+
+	[Test]
+	public void DdgiWarmUpHistoryWeightReachesTheConfiguredHysteresis()
+	{
+		Assert.That(DdgiUtilities.GetWarmUpHistoryWeight(0.97f, 0), Is.EqualTo(0.5f));
+		Assert.That(DdgiUtilities.GetWarmUpHistoryWeight(0.97f, 1), Is.EqualTo(0.5f));
+		Assert.That(DdgiUtilities.GetWarmUpHistoryWeight(0.97f, 3), Is.EqualTo(0.75f));
+		Assert.That(DdgiUtilities.GetWarmUpHistoryWeight(0.97f, DdgiUtilities.WarmUpUpdateLimit), Is.EqualTo(0.97f));
+		Assert.That(
+			DdgiUtilities.GetNextWarmUpUpdateCount(DdgiUtilities.WarmUpUpdateLimit),
+			Is.EqualTo(DdgiUtilities.WarmUpUpdateLimit));
+	}
+
+	[TestCase(false, 100, RayTracingSceneRebuildReason.None, false)]
+	[TestCase(true, 3, RayTracingSceneRebuildReason.Add, false)]
+	[TestCase(true, 3, RayTracingSceneRebuildReason.Remove | RayTracingSceneRebuildReason.Capacity, false)]
+	[TestCase(true, 0, RayTracingSceneRebuildReason.Bootstrap, false)]
+	[TestCase(true, 3, RayTracingSceneRebuildReason.Transform, true)]
+	[TestCase(true, 3, RayTracingSceneRebuildReason.None, true)]
+	[TestCase(true, 16, RayTracingSceneRebuildReason.Add, true)]
+	public void DdgiProbeVolumeIsSeededAgainWhenTheSceneChangesDuringItsFirstUpdateCycle(
+		bool historyValid,
+		int framesSinceSeed,
+		RayTracingSceneRebuildReason topLevelRebuildReason,
+		bool expected)
+	{
+		var canBlend = DdgiUtilities.CanBlendProbeHistory(
+			historyValid,
+			framesSinceSeed,
+			probeUpdateFrames: 16,
+			topLevelRebuildReason);
+
+		Assert.That(canBlend, Is.EqualTo(expected));
+	}
+
+	[Test]
 	public void DdgiEstimatorRecursiveBounceDecaysWithoutAReferenceTrigger()
 	{
 		var state = new DdgiVarianceData(new Vector3(10), new Vector3(10), Vector3.Zero);

@@ -81,6 +81,9 @@ public sealed class DdgiPass
 	{
 		public DdgiPassConfig Config;
 		public bool Valid;
+
+		/// <summary>Frames completed since this view's probe volume was last seeded.</summary>
+		public int FramesSinceSeed;
 	}
 
 	/// <summary>
@@ -189,15 +192,25 @@ public sealed class DdgiPass
 	{
 		var view = context.ViewState;
 		var state = view.GetPassState<ViewConfig>();
+		var rayTracingSceneResources = _rayTracingScene.Resources;
+		var historyValid = DdgiUtilities.CanBlendProbeHistory(
+			view.DdgiHistory.IsValid,
+			state.FramesSinceSeed,
+			DdgiUtilities.GetProbeUpdateFrames(view.FrameResources.Config.DiffuseGlobalIllumination),
+			rayTracingSceneResources.LastStats.TopLevelRebuildReason);
+		state.FramesSinceSeed = historyValid
+			? state.FramesSinceSeed + 1
+			: 0;
+
 		state.Config = BuildConfig(
 			context,
 			view.FrameResources,
 			context.Device,
 			_renderer,
 			_gpuDrawResources,
-			_rayTracingScene.Resources,
+			rayTracingSceneResources,
 			context.SceneData,
-			view.DdgiHistory.IsValid);
+			historyValid);
 		state.Valid = true;
 		RecordClassify(context, in state.Config);
 	}
