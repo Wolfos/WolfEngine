@@ -64,7 +64,10 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 				$"GPU BC compression does not support texture semantic '{importedTexture.Semantic}' for '{importedTexture.NameOrPath}'.");
 		}
 
-		var rawMips = TextureMipGenerator.GenerateMipChain(importedTexture.MipLevels[0], importedTexture.Format);
+		var rawMips = TextureMipGenerator.GenerateMipChain(
+			importedTexture.MipLevels[0],
+			importedTexture.Format,
+			importedTexture.AlphaCoverageCutoff);
 		var compressedMips = new TextureMipData[rawMips.Length];
 		for (var i = 0; i < rawMips.Length; i++)
 		{

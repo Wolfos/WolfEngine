@@ -48,6 +48,10 @@ public record struct ImportedMaterial(
 /// Pixel layout of <see cref="MipLevels"/>: <see cref="TextureFormat.Rgba8Unorm"/> for 8-bit sources, or
 /// <see cref="TextureFormat.Rgba16Float"/> for HDR sources, whose linear values are kept as half floats.
 /// </param>
+/// <param name="AlphaCoverageCutoff">
+/// When above zero, the alpha cutoff whose coverage generated mips preserve; see
+/// <see cref="WolfEngine.AssetPipeline.TextureImportSettings.PreserveAlphaCoverage"/>.
+/// </param>
 /// <param name="Dimension">
 /// <see cref="TextureDimension.Cube"/> once a source has been converted to six faces; <see cref="Width"/> and
 /// <see cref="Height"/> are then the face size and each mip holds the faces back to back.
@@ -60,7 +64,8 @@ public record struct ImportedTexture(
 	TextureSemantic Semantic,
 	TextureMipData[] MipLevels,
 	TextureFormat Format = TextureFormat.Rgba8Unorm,
-	TextureDimension Dimension = TextureDimension.Texture2D)
+	TextureDimension Dimension = TextureDimension.Texture2D,
+	float AlphaCoverageCutoff = 0.0f)
 {
 	public int Channels => 4;
 	public int MipCount => MipLevels?.Length ?? 0;

@@ -269,6 +269,16 @@ public sealed class TextureImportSettings
 	/// a quarter of an equirectangular source's width, or the face size of a strip, rounded to a power of two.
 	/// </summary>
 	public int CubemapFaceSize { get; set; }
+
+	/// <summary>
+	/// Scales each generated mip's alpha so the same fraction of texels passes <see cref="AlphaCoverageCutoff"/> as at
+	/// full size. Averaging thin leaves into the transparent background otherwise thins alpha-tested foliage out with
+	/// distance. Only for 8-bit 2D textures whose alpha is alpha-tested.
+	/// </summary>
+	public bool PreserveAlphaCoverage { get; set; }
+
+	/// <summary>The alpha cutoff coverage is preserved at; match it to the cutoff of the materials using the texture.</summary>
+	public float AlphaCoverageCutoff { get; set; } = 0.5f;
 }
 
 public enum TextureShape

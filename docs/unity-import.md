@@ -79,6 +79,7 @@ Beside it, per terrain:
   - Colours are converted from sRGB to linear.
   - The HDRP mask map (metallic, occlusion, detail mask, smoothness) is remapped and repacked as ORM.
   - The alpha-test and double-sided keywords carry over.
+  - An alpha-tested material's albedo preserves alpha coverage in its mips at the material's cutoff (`TextureImportSettings.PreserveAlphaCoverage`). The pack's leaf materials cut off at 0.65 to 0.85, where box-filtered mips lose most of their leaves by the time a tree is a few hundred pixels tall. Unity's own Mip Maps Preserve Coverage is not read: it preserves coverage at the texture's reference value, 0.5 in this pack, which those materials do not test at.
   - **Reported approximations:** other layers (bark, top cover, layered-lit layers), the per-instance dry colour, and texture tiling, which WolfEngine materials do not have.
 - **Detail** (`UnityDetailConversion`): WolfEngine grows detail from layers rather than storing a map per plant type (see `foliage.md`), so the detail maps are fitted to the layers.
   - Each mesh detail prototype becomes a foliage type named `<prefab> Detail`: drawn out to Unity's detail distance, shadowed to 25 m, never ray traced, fading over the last quarter of its distance.

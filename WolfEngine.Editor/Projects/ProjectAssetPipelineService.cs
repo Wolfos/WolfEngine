@@ -778,6 +778,16 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			LogLibraryBuildStage($"Converted texture '{relativeSourcePath}' to a cube ({importedTexture.Width}x{importedTexture.Height} faces).");
 		}
 
+		if (importSettings.PreserveAlphaCoverage &&
+		    importedTexture.Format == TextureFormat.Rgba8Unorm &&
+		    importedTexture.Dimension == TextureDimension.Texture2D)
+		{
+			importedTexture = importedTexture with
+			{
+				AlphaCoverageCutoff = Math.Clamp(importSettings.AlphaCoverageCutoff, 0.01f, 0.99f)
+			};
+		}
+
 		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Texture2D,
 			Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var relativeImportedPath = NormalizeRelativePath(Path.Combine(
@@ -2872,7 +2882,10 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		if (TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture, out _) == false)
 		{
 			// Uncompressed textures keep the decoded layout: 8-bit RGBA, or half floats for HDR sources.
-			var mips = TextureMipGenerator.GenerateMipChain(importedTexture.MipLevels[0], importedTexture.Format);
+			var mips = TextureMipGenerator.GenerateMipChain(
+				importedTexture.MipLevels[0],
+				importedTexture.Format,
+				importedTexture.AlphaCoverageCutoff);
 			if (importedTexture.Dimension == TextureDimension.Cube)
 			{
 				return Texture.CreateCube(

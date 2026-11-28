@@ -295,7 +295,13 @@ public sealed class UnityPrefabImporter
 		material.MetallicFactor = plan.MetallicFactor;
 		material.RoughnessFactor = plan.RoughnessFactor;
 		var albedoSemantic = plan.Type == MaterialAssetType.Opaque ? TextureSemantic.BaseColor : TextureSemantic.BaseColorTransparent;
-		material.Textures.Albedo = WriteTexture(session, plan.AlbedoPath, "Albedo", albedoSemantic, image => image);
+		// Box-filtered mips lose alpha-tested coverage with distance, the faster the higher the cutoff, so an
+		// alpha-tested albedo preserves it at the cutoff its material tests against. Unity's own setting is not used:
+		// it preserves coverage at the texture's reference value, which the pack's leaf materials do not test at.
+		var coverageCutoff = plan.Type == MaterialAssetType.AlphaTest
+			? Math.Clamp(plan.AlphaCutoff, 0.01f, 0.99f)
+			: 0.0f;
+		material.Textures.Albedo = WriteTexture(session, plan.AlbedoPath, "Albedo", albedoSemantic, image => image, coverageCutoff);
 		material.Textures.Normal = WriteTexture(session, plan.NormalPath, "Normal", TextureSemantic.Normal, image => image);
 		if (plan.Mask is { } mask)
 		{
@@ -360,11 +366,12 @@ public sealed class UnityPrefabImporter
 		string? unityPath,
 		string kind,
 		TextureSemantic semantic,
-		Func<RgbaImage, RgbaImage> convert)
+		Func<RgbaImage, RgbaImage> convert,
+		float alphaCoverageCutoff = 0.0f)
 	{
 		if (string.IsNullOrWhiteSpace(unityPath)) return default;
 
-		var key = $"{unityPath}|{kind}|{semantic}";
+		var key = $"{unityPath}|{kind}|{semantic}|{alphaCoverageCutoff:0.###}";
 		if (session.Textures.TryGetValue(key, out var known))
 		{
 			return new AssetRef<Texture> { NodeId = known };
@@ -380,7 +387,13 @@ public sealed class UnityPrefabImporter
 
 		var fileName = session.ReserveName("texture", $"{SanitizeFileName(Path.GetFileNameWithoutExtension(unityPath))}_{kind}");
 		var relativePath = $"{session.TargetFolder}/Textures/{fileName}.png";
-		var nodeId = GeneratedTextureWriter.Write(_projectService, _metadataStore, convert(RgbaImage.Load(source)), relativePath, semantic);
+		var nodeId = GeneratedTextureWriter.Write(
+			_projectService,
+			_metadataStore,
+			convert(RgbaImage.Load(source)),
+			relativePath,
+			semantic,
+			alphaCoverageCutoff);
 		_projectService.RefreshAssetSource(relativePath);
 		session.Textures.Add(key, nodeId);
 
