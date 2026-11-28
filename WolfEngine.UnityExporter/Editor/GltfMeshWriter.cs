@@ -11,9 +11,10 @@ namespace WolfEngine.UnityExporter
 	/// Writes a Unity mesh as a glTF 2.0 file with one glTF mesh per submesh, named <c>sub0</c>, <c>sub1</c> and so on.
 	/// </summary>
 	/// <remarks>
-	/// glTF is right-handed, so Z is negated (normals and tangents too, with the tangent's handedness flipped) and the
-	/// triangle order is kept, which turns Unity's clockwise front faces into glTF's counter-clockwise ones. V is flipped
-	/// because glTF's texture origin is the top left. An importer that converts glTF to a left-handed space by negating
+	/// glTF is right-handed, so Z is negated (normals and tangents too, with the tangent's handedness flipped). Mirroring
+	/// moves the viewer with the geometry, so a triangle Unity sees as clockwise, its front, still winds clockwise in glTF,
+	/// where the front is counter-clockwise; each triangle's order is therefore reversed. V is flipped because glTF's
+	/// texture origin is the top left. An importer that converts glTF to a left-handed space by negating
 	/// Z, as WolfEngine's does, therefore gets Unity's vertices back exactly, so Unity transforms apply to them unchanged.
 	/// </remarks>
 	internal static class GltfMeshWriter
@@ -65,6 +66,13 @@ namespace WolfEngine.UnityExporter
 					}
 
 					indices[i] = (uint)compact;
+				}
+
+				for (var i = 0; i + 2 < indices.Length; i += 3)
+				{
+					var second = indices[i + 1];
+					indices[i + 1] = indices[i + 2];
+					indices[i + 2] = second;
 				}
 
 				var min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);

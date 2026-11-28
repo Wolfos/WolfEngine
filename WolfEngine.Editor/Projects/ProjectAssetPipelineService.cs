@@ -2188,7 +2188,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return false;
 		}
 
-		if (fileSizeChanged == false && lastWriteChanged == false && importer.HasExternalInputs == false)
+		if (fileSizeChanged == false && lastWriteChanged == false && importer.HasExternalInputs(absoluteSourcePath) == false)
 		{
 			return true;
 		}
@@ -2668,7 +2668,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					       string.Equals(extension, ".obj", StringComparison.OrdinalIgnoreCase);
 				},
 				() => AssetPipelineSerialization.Serialize(new ModelImportSettings()),
-				ImportThreeDSource)
+				ImportThreeDSource,
+				GltfSourceInputs.ComputeInputsHash,
+				GltfSourceInputs.HasExternalInputs)
 		];
 	}
 
@@ -3459,11 +3461,16 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		private readonly Func<string> _createDefaultSettingsJson;
 		private readonly ImportSourceDelegate _import;
 		private readonly Func<string, string>? _computeInputsHash;
+		private readonly Func<string, bool>? _hasExternalInputs;
 
 		/// <param name="computeInputsHash">
 		/// For a source that compiles other files with it, such as a Yarn project and its <c>.yarn</c> files: hashes the
 		/// source together with everything it reads, from its absolute path. The source is then rechecked on every
 		/// refresh, because its own size and write time don't change when only an input does.
+		/// </param>
+		/// <param name="hasExternalInputs">
+		/// Which sources <paramref name="computeInputsHash"/> applies to, for an importer whose formats only sometimes read
+		/// other files; a <c>.gltf</c> does, an <c>.fbx</c> does not. Every source when omitted.
 		/// </param>
 		public AssetImporterDescriptor(
 			string id,
@@ -3471,7 +3478,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			Func<string, bool> canImport,
 			Func<string> createDefaultSettingsJson,
 			ImportSourceDelegate import,
-			Func<string, string>? computeInputsHash = null)
+			Func<string, string>? computeInputsHash = null,
+			Func<string, bool>? hasExternalInputs = null)
 		{
 			Id = id;
 			Version = version;
@@ -3480,20 +3488,24 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			                             throw new ArgumentNullException(nameof(createDefaultSettingsJson));
 			_import = import ?? throw new ArgumentNullException(nameof(import));
 			_computeInputsHash = computeInputsHash;
+			_hasExternalInputs = hasExternalInputs;
 		}
 
 		public string Id { get; }
 		public int Version { get; }
 
 		/// <summary>Whether the source reads other files, so only <see cref="ComputeSourceContentHash"/> can tell it changed.</summary>
-		public bool HasExternalInputs => _computeInputsHash is not null;
+		public bool HasExternalInputs(string absoluteSourcePath) =>
+			_computeInputsHash is not null && (_hasExternalInputs?.Invoke(absoluteSourcePath) ?? true);
 
 		public bool CanImport(string relativePath) => _canImport(relativePath);
 		public string CreateDefaultSettingsJson() => _createDefaultSettingsJson();
 
 		/// <summary>The hash a source's staleness is judged by: its own content, plus its inputs' when it has any.</summary>
 		public string ComputeSourceContentHash(string absoluteSourcePath) =>
-			_computeInputsHash?.Invoke(absoluteSourcePath) ?? AssetHashing.ComputeFileHash(absoluteSourcePath);
+			HasExternalInputs(absoluteSourcePath)
+				? _computeInputsHash!(absoluteSourcePath)
+				: AssetHashing.ComputeFileHash(absoluteSourcePath);
 
 		public ImportGraph Import(
 			string projectRootPath,
