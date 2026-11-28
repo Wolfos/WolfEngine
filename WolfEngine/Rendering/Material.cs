@@ -23,6 +23,8 @@ public sealed class Material
     private AlphaMode _alphaMode;
     private float _alphaCutoff;
     private bool _doubleSided;
+	private FoliageShading? _foliage;
+	private MaterialWind _wind = new();
     private IMaterialResources? _resources;
     private int _contentRevision = 1;
     private int _resourceRevision;
@@ -131,6 +133,23 @@ public sealed class Material
         get => _doubleSided;
         set => SetField(ref _doubleSided, value);
     }
+
+	/// <summary>
+	/// The foliage shading model, or null for the standard surface model. Foliage writes its translucency to the
+	/// G-buffer so the deferred lighting pass adds light transmitted through the leaf; see docs/foliage.md.
+	/// </summary>
+	public FoliageShading? Foliage
+	{
+		get => _foliage;
+		set => SetField(ref _foliage, value);
+	}
+
+	/// <summary>How the material's vertices move in the scene's wind, in every pass that rasterises it.</summary>
+	public MaterialWind Wind
+	{
+		get => _wind;
+		set => SetField(ref _wind, value);
+	}
 
     internal IMaterialResources? Resources
     {

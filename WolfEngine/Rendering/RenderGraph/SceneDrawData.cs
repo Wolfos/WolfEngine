@@ -1,5 +1,6 @@
 using System.Numerics;
 using WolfEngine.Mathematics;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering;
 
@@ -96,6 +97,12 @@ public sealed class SceneDrawData
 
 	/// <summary>How this view's sky dims and tints its directional lights.</summary>
 	public SunLightAttenuation SunLightAttenuation { get; init; }
+
+	/// <summary>This frame's wind, from <see cref="WindConfig"/>.</summary>
+	public WindFrameState Wind { get; init; } = WindFrameState.Calm;
+
+	/// <summary>The wind the view rendered with last frame, for motion vectors; equal to <see cref="Wind"/> after a reset.</summary>
+	public WindFrameState PreviousWind { get; init; } = WindFrameState.Calm;
 
 	public IReadOnlyList<LightPacket> Lights { get; }
 

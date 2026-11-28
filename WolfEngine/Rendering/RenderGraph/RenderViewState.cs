@@ -86,6 +86,7 @@ internal sealed class RenderViewState
 		HasPreviousResolvedProjection = false;
 		PreviousResolvedProjection = Matrix4x4.Identity;
 		PreviousJitterPhaseCount = 0;
+		HasPreviousWind = false;
 		HistoryBindingGeneration = BindingGeneration;
 	}
 
@@ -191,6 +192,10 @@ internal sealed class RenderViewState
 	public bool HasPreviousResolvedProjection;
 
 	public int PreviousJitterPhaseCount;
+
+	/// <summary>The wind this view last rendered with, which motion vectors evaluate previous positions in.</summary>
+	public WindFrameState PreviousWind = WindFrameState.Calm;
+	public bool HasPreviousWind;
 	public bool SceneDataPreviousTaaEnabled;
 	public AntiAliasingMode SceneDataPreviousAntiAliasingMode;
 
@@ -312,6 +317,7 @@ internal sealed class RenderViewState
 		SceneRenderSize = Int2.Zero;
 		SceneDisplaySize = Int2.Zero;
 		PreviousJitterPhaseCount = 0;
+		HasPreviousWind = false;
 		ResolvedProjection = Matrix4x4.Identity;
 		PreviousResolvedProjection = Matrix4x4.Identity;
 		HasPreviousResolvedProjection = false;

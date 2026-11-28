@@ -128,6 +128,13 @@ public static class GpuMaterialFlags
 	/// </summary>
 	public const uint DoubleSided = 1u << 0;
 
+	/// <summary>The material uses the foliage shading model; <see cref="GpuFoliageMaterial"/> holds its parameters.</summary>
+	public const uint Foliage = 1u << 1;
+
+	/// <summary>The <see cref="FoliageNormalMode"/> of a foliage material, in two bits from here.</summary>
+	public const int FoliageNormalModeShift = 2;
+	public const uint FoliageNormalModeMask = 0x3u;
+
 	public static uint FromMaterial(Material material)
 	{
 		var flags = 0u;
@@ -136,7 +143,89 @@ public static class GpuMaterialFlags
 			flags |= DoubleSided;
 		}
 
+		if (material.Foliage is { } foliage)
+		{
+			flags |= Foliage;
+			flags |= ((uint)foliage.NormalMode & FoliageNormalModeMask) << FoliageNormalModeShift;
+		}
+
 		return flags;
+	}
+}
+
+/// <summary>
+/// A foliage material's parameters as the material table stores them. All zero for any other material.
+/// </summary>
+public readonly struct GpuFoliageMaterial
+{
+	public GpuFoliageMaterial(Vector4 parameters, uint healthyTint, uint dryTint)
+	{
+		Parameters = parameters;
+		HealthyTint = healthyTint;
+		DryTint = dryTint;
+	}
+
+	/// <summary>Translucency, normal blend, tint variation, and zero.</summary>
+	public Vector4 Parameters { get; }
+
+	/// <summary>The healthy tint as RGBA8 unorm, red in the low byte.</summary>
+	public uint HealthyTint { get; }
+
+	public uint DryTint { get; }
+
+	public static GpuFoliageMaterial FromMaterial(Material material)
+	{
+		if (material.Foliage is not { } foliage)
+		{
+			return default;
+		}
+
+		var parameters = new Vector4(
+			foliage.Translucency,
+			foliage.NormalBlend,
+			foliage.TintVariation,
+			0.0f);
+
+		return new GpuFoliageMaterial(
+			parameters,
+			PackUnorm4x8(foliage.HealthyTint),
+			PackUnorm4x8(foliage.DryTint));
+	}
+
+	public static uint PackUnorm4x8(ColorRGBA color)
+	{
+		return PackUnorm8(color.R) |
+		       (PackUnorm8(color.G) << 8) |
+		       (PackUnorm8(color.B) << 16) |
+		       (PackUnorm8(color.A) << 24);
+	}
+
+	private static uint PackUnorm8(float value)
+	{
+		var clamped = float.IsFinite(value) ? Math.Clamp(value, 0.0f, 1.0f) : 0.0f;
+
+		return (uint)MathF.Round(clamped * 255.0f);
+	}
+}
+
+/// <summary>
+/// Packs a material's <see cref="MaterialWind"/> into <see cref="GpuMaterialData.WindMode"/> and
+/// <see cref="GpuMaterialData.WindScales"/>. Mirrors GetMaterialWindMode and GetMaterialWindScales in wind.slang.
+/// </summary>
+public static class GpuMaterialWind
+{
+	public static uint PackMode(Material material)
+	{
+		return (uint)material.Wind.Mode;
+	}
+
+	public static uint PackScales(Material material)
+	{
+		var wind = material.Wind;
+		var strength = BitConverter.HalfToUInt16Bits((Half)Math.Max(0.0f, wind.StrengthScale));
+		var flutter = BitConverter.HalfToUInt16Bits((Half)Math.Max(0.0f, wind.FlutterScale));
+
+		return strength | ((uint)flutter << 16);
 	}
 }
 
@@ -153,7 +242,10 @@ public readonly struct GpuMaterialData
 		uint normalHandle,
 		uint emissiveHandle,
 		uint samplerHandle,
-		uint materialFlags = 0u)
+		uint materialFlags = 0u,
+		GpuFoliageMaterial foliage = default,
+		uint windMode = 0u,
+		uint windScales = 0u)
 	{
 		BaseColor = baseColor;
 		MetallicRoughness = metallicRoughness;
@@ -165,8 +257,11 @@ public readonly struct GpuMaterialData
 		EmissiveHandle = emissiveHandle;
 		SamplerHandle = samplerHandle;
 		MaterialFlags = materialFlags;
-		_pad1 = 0;
-		_pad2 = 0;
+		FoliageHealthyTint = foliage.HealthyTint;
+		FoliageDryTint = foliage.DryTint;
+		FoliageParameters = foliage.Parameters;
+		WindMode = windMode;
+		WindScales = windScales;
 	}
 
 	public readonly ColorRGBA BaseColor;
@@ -181,8 +276,21 @@ public readonly struct GpuMaterialData
 
 	/// <summary>Bits from <see cref="GpuMaterialFlags"/>.</summary>
 	public readonly uint MaterialFlags;
-	private readonly uint _pad1;
-	private readonly uint _pad2;
+
+	/// <summary>See <see cref="GpuFoliageMaterial"/>; zero for a material that is not foliage.</summary>
+	public readonly uint FoliageHealthyTint;
+	public readonly uint FoliageDryTint;
+	public readonly Vector4 FoliageParameters;
+
+	/// <summary>A <see cref="WindMode"/> value; see <see cref="GpuMaterialWind"/>.</summary>
+	public readonly uint WindMode;
+
+	/// <summary>Strength and flutter scale as two halves; see <see cref="GpuMaterialWind"/>.</summary>
+	public readonly uint WindScales;
+
+	/// <summary>Keeps the wind row 16 bytes, as Slang lays it out.</summary>
+	public readonly uint WindPad0;
+	public readonly uint WindPad1;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -497,7 +605,10 @@ public readonly struct GpuDrawMaterialUpdateData
 		uint normalHandle,
 		uint emissiveHandle,
 		uint samplerHandle,
-		uint materialFlags)
+		uint materialFlags,
+		GpuFoliageMaterial foliage = default,
+		uint windMode = 0u,
+		uint windScales = 0u)
 	{
 		MaterialHandle = materialHandle;
 		_pad0 = 0;
@@ -513,8 +624,11 @@ public readonly struct GpuDrawMaterialUpdateData
 		EmissiveHandle = emissiveHandle;
 		SamplerHandle = samplerHandle;
 		MaterialFlags = materialFlags;
-		_pad4 = 0;
-		_pad5 = 0;
+		FoliageHealthyTint = foliage.HealthyTint;
+		FoliageDryTint = foliage.DryTint;
+		FoliageParameters = foliage.Parameters;
+		WindMode = windMode;
+		WindScales = windScales;
 	}
 
 	public readonly uint MaterialHandle;
@@ -533,8 +647,19 @@ public readonly struct GpuDrawMaterialUpdateData
 
 	/// <summary>Bits from <see cref="GpuMaterialFlags"/>.</summary>
 	public readonly uint MaterialFlags;
-	private readonly uint _pad4;
-	private readonly uint _pad5;
+	public readonly uint FoliageHealthyTint;
+	public readonly uint FoliageDryTint;
+	public readonly Vector4 FoliageParameters;
+
+	/// <summary>A <see cref="WindMode"/> value; see <see cref="GpuMaterialWind"/>.</summary>
+	public readonly uint WindMode;
+
+	/// <summary>Strength and flutter scale as two halves; see <see cref="GpuMaterialWind"/>.</summary>
+	public readonly uint WindScales;
+
+	/// <summary>Keeps the wind row 16 bytes, as Slang lays it out.</summary>
+	public readonly uint WindPad0;
+	public readonly uint WindPad1;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

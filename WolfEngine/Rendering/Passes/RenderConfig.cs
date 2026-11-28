@@ -30,6 +30,7 @@ public class RenderConfig: IDataAsset
 	public VolumetricFogConfig VolumetricFog { get; set; } = new();
 	public SkyConfig Sky { get; set; } = new();
 	public CloudConfig Clouds { get; set; } = new();
+	public WindConfig Wind { get; set; } = new();
 	// Keep the serialized key for existing render-config assets while presenting the
 	// renderer that actually owns these settings in the editor.
 	[JsonPropertyName("TemporalAntiAliasing")]

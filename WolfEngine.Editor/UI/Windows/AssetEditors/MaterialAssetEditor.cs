@@ -245,6 +245,12 @@ public sealed class MaterialAssetEditor
 			});
 		}
 
+		if (HasProperty(propertyDefinitions, MaterialPropertyKind.FoliageTranslucency))
+		{
+			DrawFoliageEditor(asset, materialAsset.Foliage);
+		}
+		DrawWindEditor(asset, materialAsset);
+
 		ImGui.Separator();
 		ImGui.TextUnformatted("Textures");
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo);
@@ -280,7 +286,9 @@ public sealed class MaterialAssetEditor
 		              !ReferenceEquals(material.EmissiveTexture, emissive) ||
 		              material.AlphaMode != descriptor.RuntimeAlphaMode ||
 		              material.AlphaCutoff != asset.AlphaCutoff ||
-		              material.DoubleSided != asset.DoubleSided;
+		              material.DoubleSided != asset.RendersDoubleSided() ||
+		              material.Foliage != asset.GetFoliageShading() ||
+		              material.Wind != asset.Wind;
 		material.Color = properties.BaseColor;
 		material.UvOffsetScale = properties.UvOffsetScale;
 		material.MetallicFactor = properties.MetallicFactor;
@@ -294,7 +302,9 @@ public sealed class MaterialAssetEditor
 		material.EmissiveTexture = emissive;
 		material.AlphaMode = descriptor.RuntimeAlphaMode;
 		material.AlphaCutoff = asset.AlphaCutoff;
-		material.DoubleSided = asset.DoubleSided;
+		material.DoubleSided = asset.RendersDoubleSided();
+		material.Foliage = asset.GetFoliageShading();
+		material.Wind = asset.Wind;
 		if (changed) _renderGraph.EnsureMaterialResources(material);
 		return material;
 	}
@@ -372,6 +382,69 @@ public sealed class MaterialAssetEditor
 		}
 	}
 
+	private void DrawFoliageEditor(AssetDatabaseEntry asset, FoliageMaterialSettings foliage)
+	{
+		ImGui.Separator();
+		ImGui.TextUnformatted("Foliage");
+
+		DrawFloatEditor("Translucency", foliage.Translucency, value =>
+		{
+			BeginPendingChange(asset);
+			foliage.Translucency = Math.Clamp(value, 0.0f, 1.0f);
+			_hasPendingChanges = true;
+		});
+
+		EditorUIUtility.Combo("Normal Mode", foliage.NormalMode.ToString(), () =>
+		{
+			var modes = Enum.GetValues<FoliageNormalMode>();
+			for (var i = 0; i < modes.Length; i++)
+			{
+				var mode = modes[i];
+				var isSelected = mode == foliage.NormalMode;
+				if (ImGui.Selectable(mode.ToString(), isSelected))
+				{
+					BeginPendingChange(asset);
+					foliage.NormalMode = mode;
+					_hasPendingChanges = true;
+				}
+
+				if (isSelected)
+				{
+					ImGui.SetItemDefaultFocus();
+				}
+			}
+		});
+
+		DrawFloatEditor("Normal Blend", foliage.NormalBlend, value =>
+		{
+			BeginPendingChange(asset);
+			foliage.NormalBlend = Math.Clamp(value, 0.0f, 1.0f);
+			_hasPendingChanges = true;
+		});
+		DrawFloatEditor("Tint Variation", foliage.TintVariation, value =>
+		{
+			BeginPendingChange(asset);
+			foliage.TintVariation = Math.Clamp(value, 0.0f, 1.0f);
+			_hasPendingChanges = true;
+		});
+
+		var healthy = foliage.HealthyTint.ToVector3();
+		if (EditorUIUtility.ColorEdit3("Healthy Tint", ref healthy))
+		{
+			BeginPendingChange(asset);
+			foliage.HealthyTint = new ColorRGBA(healthy.X, healthy.Y, healthy.Z, 1.0f);
+			_hasPendingChanges = true;
+		}
+
+		var dry = foliage.DryTint.ToVector3();
+		if (EditorUIUtility.ColorEdit3("Dry Tint", ref dry))
+		{
+			BeginPendingChange(asset);
+			foliage.DryTint = new ColorRGBA(dry.X, dry.Y, dry.Z, 1.0f);
+			_hasPendingChanges = true;
+		}
+	}
+
 	private void DrawEmissiveFactorEditor(AssetDatabaseEntry asset, MaterialSurfaceProperties properties)
 	{
 		var emissiveColor = properties.EmissiveFactor;
@@ -381,6 +454,38 @@ public sealed class MaterialAssetEditor
 			properties.EmissiveFactor = emissiveColor;
 			_hasPendingChanges = true;
 		}
+	}
+
+	private void DrawWindEditor(AssetDatabaseEntry asset, MaterialAsset materialAsset)
+	{
+		ImGui.Separator();
+		ImGui.TextUnformatted("Wind");
+		var wind = materialAsset.Wind;
+		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext("Wind Mode", typeof(WindMode), wind.Mode));
+		if (drawResult.Changed && drawResult.Value is WindMode mode)
+		{
+			BeginPendingChange(asset);
+			materialAsset.Wind = wind with { Mode = mode };
+			_hasPendingChanges = true;
+		}
+
+		if (wind.Mode == WindMode.None)
+		{
+			return;
+		}
+
+		DrawFloatEditor("Wind Strength Scale", wind.StrengthScale, value =>
+		{
+			BeginPendingChange(asset);
+			materialAsset.Wind = materialAsset.Wind with { StrengthScale = MathF.Max(0.0f, value) };
+			_hasPendingChanges = true;
+		});
+		DrawFloatEditor("Wind Flutter Scale", wind.FlutterScale, value =>
+		{
+			BeginPendingChange(asset);
+			materialAsset.Wind = materialAsset.Wind with { FlutterScale = MathF.Max(0.0f, value) };
+			_hasPendingChanges = true;
+		});
 	}
 
 	private void DrawFloatEditor(string label, float currentValue, Action<float> setter)

@@ -56,6 +56,7 @@ public static class GBufferPass
 		cameraWriter.SetFloat("nearPlane", sceneData.NearPlane);
 		cameraWriter.SetFloat("farPlane", sceneData.FarPlane);
 		cameraWriter.SetFloat("materialMipBias", sceneData.MaterialMipBias);
+		WindFrameState.Write(cameraWriter, sceneData.Wind, sceneData.PreviousWind, includePrevious: true);
 		UploadCameraConstants(config, commandList, cameraWriter);
 
 		if (config.InstanceBuffer is null ||

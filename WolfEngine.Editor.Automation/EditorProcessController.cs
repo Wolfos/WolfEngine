@@ -477,6 +477,27 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<string> SetMeshLodAsync(bool? enabled, float? bias, float? shadowBias, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetMeshLodAsync(enabled, bias, shadowBias, cancellationToken);
 
+	public Task<string> SetWindAsync(
+		bool? enabled,
+		float? directionDegrees,
+		float? strength,
+		float? gustStrength,
+		float? gustFrequency,
+		float? gustScale,
+		float? timeSeconds,
+		bool releaseTime,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SetWindAsync(
+			enabled,
+			directionDegrees,
+			strength,
+			gustStrength,
+			gustFrequency,
+			gustScale,
+			timeSeconds,
+			releaseTime,
+			cancellationToken);
+
 	public Task<string> SetShadowVertexWeldingAsync(bool enabled, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetShadowVertexWeldingAsync(enabled, cancellationToken);
 

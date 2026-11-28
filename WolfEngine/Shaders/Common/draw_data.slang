@@ -48,6 +48,13 @@ static const uint LOD_PARAMS_LEVEL_MASK = 0x7u;
 
 // Bits of GpuMaterialData.materialFlags. Mirrors GpuMaterialFlags in GpuDrawData.cs.
 static const uint GPU_MATERIAL_FLAG_DOUBLE_SIDED = 1u << 0;
+static const uint GPU_MATERIAL_FLAG_FOLIAGE = 1u << 1;
+static const uint GPU_MATERIAL_FOLIAGE_NORMAL_MODE_SHIFT = 2u;
+static const uint GPU_MATERIAL_FOLIAGE_NORMAL_MODE_MASK = 0x3u;
+// Mirrors FoliageNormalMode.
+static const uint GPU_MATERIAL_FOLIAGE_NORMAL_MESH = 0u;
+static const uint GPU_MATERIAL_FOLIAGE_NORMAL_SPHERICAL = 1u;
+static const uint GPU_MATERIAL_FOLIAGE_NORMAL_UP = 2u;
 
 // metallicRoughness is (metallic, roughness, alpha cutoff, normal scale). The cutoff is zero for materials
 // that are not alpha tested.
@@ -63,8 +70,16 @@ struct GpuMaterialData
     uint emissiveHandle;
     uint samplerHandle;
     uint materialFlags;
-    uint pad1;
-    uint pad2;
+    // Foliage only, zero otherwise: RGBA8 unorm tints, and (translucency, normal blend, tint variation, 0).
+    uint foliageHealthyTint;
+    uint foliageDryTint;
+    float4 foliageParams;
+    // WIND_MODE_ in wind.slang; zero for no wind.
+    uint windMode;
+    // Strength scale and flutter scale, as two halves.
+    uint windScales;
+    uint windPad0;
+    uint windPad1;
 };
 
 bool IsMaterialDoubleSided(GpuMaterialData material)
@@ -257,8 +272,13 @@ struct GpuDrawMaterialUpdateData
     uint32_t emissiveHandle;
     uint32_t samplerHandle;
     uint32_t materialFlags;
-    uint32_t pad4;
-    uint32_t pad5;
+    uint32_t foliageHealthyTint;
+    uint32_t foliageDryTint;
+    float4 foliageParams;
+    uint32_t windMode;
+    uint32_t windScales;
+    uint32_t windPad0;
+    uint32_t windPad1;
 };
 
 struct GpuTerrainMaterialUpdateData

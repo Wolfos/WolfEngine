@@ -440,6 +440,80 @@ public sealed partial class EditorRemoteAutomationController
 			return $"Mesh LOD enabled: {settings.Enabled}, bias: {settings.Bias}, shadow bias: {settings.ShadowBias}. Changed in memory only.";
 		}, cancellationToken);
 
+	public Task<string> SetWindAsync(
+		bool? enabled,
+		float? directionDegrees,
+		float? strength,
+		float? gustStrength,
+		float? gustFrequency,
+		float? gustScale,
+		float? timeSeconds,
+		bool releaseTime,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+			{
+				config = entry.First.RenderConfigAsset.Asset;
+			}
+
+			if (config is null)
+			{
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			}
+
+			var settings = config.Wind;
+			if (enabled.HasValue)
+			{
+				settings.Enabled = enabled.Value;
+			}
+
+			if (directionDegrees.HasValue)
+			{
+				settings.DirectionDegrees = directionDegrees.Value;
+			}
+
+			if (strength.HasValue)
+			{
+				settings.Strength = strength.Value;
+			}
+
+			if (gustStrength.HasValue)
+			{
+				settings.GustStrength = gustStrength.Value;
+			}
+
+			if (gustFrequency.HasValue)
+			{
+				settings.GustFrequency = gustFrequency.Value;
+			}
+
+			if (gustScale.HasValue)
+			{
+				settings.GustScale = gustScale.Value;
+			}
+
+			config.Wind = settings;
+			if (releaseTime)
+			{
+				_renderGraph.SetWindTimeOverride(null);
+			}
+			else if (timeSeconds.HasValue)
+			{
+				_renderGraph.SetWindTimeOverride(timeSeconds.Value);
+			}
+
+			var held = _renderGraph.WindTimeOverride;
+			var clock = held.HasValue
+				? FormattableString.Invariant($"held at {held.Value} s")
+				: "running";
+
+			return FormattableString.Invariant(
+				$"Wind enabled: {settings.Enabled}, direction: {settings.DirectionDegrees} degrees, strength: {settings.Strength}, gust strength: {settings.GustStrength}, gust frequency: {settings.GustFrequency}, gust scale: {settings.GustScale} m, clock {clock}. Changed in memory only.");
+		}, cancellationToken);
+
 	public Task<string> SetShadowVertexWeldingAsync(bool enabled, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{

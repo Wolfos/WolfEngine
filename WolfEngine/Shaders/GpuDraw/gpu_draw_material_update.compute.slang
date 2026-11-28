@@ -52,6 +52,11 @@ void CSUpdateMaterial(uint3 dispatchThreadId : SV_DispatchThreadID)
     materialData.emissiveHandle = update.emissiveHandle;
     materialData.samplerHandle = update.samplerHandle;
     materialData.materialFlags = update.materialFlags;
+    materialData.foliageHealthyTint = update.foliageHealthyTint;
+    materialData.foliageDryTint = update.foliageDryTint;
+    materialData.foliageParams = update.foliageParams;
+    materialData.windMode = update.windMode;
+    materialData.windScales = update.windScales;
     g_MaterialTable[materialIndex] = materialData;
     g_MaterialGenerations[materialIndex] = materialGeneration;
 }

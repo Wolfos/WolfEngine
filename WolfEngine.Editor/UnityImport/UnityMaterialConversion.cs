@@ -1,5 +1,6 @@
 using System.Numerics;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.UnityImport;
 
@@ -10,8 +11,20 @@ public sealed record UnityMaskConversion(
 	Vector2 OcclusionRange,
 	Vector2 SmoothnessRange);
 
+/// <summary>What a prefab is in the scene, which decides how its foliage materials shade and move.</summary>
+public enum UnityPrefabRole
+{
+	/// <summary>A tree, bush or prop: leaves sway with the tree and shade as one crown.</summary>
+	Tree = 0,
+
+	/// <summary>Terrain detail such as grass, ferns and flowers: plants bend from their base and shade like the ground.</summary>
+	GroundCover = 1
+}
+
 /// <summary>A Unity material as a WolfEngine material, before any texture is written.</summary>
 /// <param name="BaseColor">Linear RGBA.</param>
+/// <param name="Foliage">The foliage shading settings, for a <see cref="MaterialAssetType.Foliage"/> material; null otherwise.</param>
+/// <param name="Wind">How the material moves in the scene's wind.</param>
 /// <param name="Approximations">What the WolfEngine material leaves out or simplifies, for the import report.</param>
 public sealed record UnityMaterialPlan(
 	string Name,
@@ -25,6 +38,8 @@ public sealed record UnityMaterialPlan(
 	string? AlbedoPath,
 	string? NormalPath,
 	UnityMaskConversion? Mask,
+	FoliageMaterialSettings? Foliage,
+	MaterialWind Wind,
 	IReadOnlyList<string> Approximations);
 
 /// <summary>
@@ -39,7 +54,7 @@ public sealed record UnityMaterialPlan(
 /// </remarks>
 public static class UnityMaterialConversion
 {
-	public static UnityMaterialPlan Describe(UnityMaterialExport material)
+	public static UnityMaterialPlan Describe(UnityMaterialExport material, UnityPrefabRole role = UnityPrefabRole.Tree)
 	{
 		ArgumentNullException.ThrowIfNull(material);
 
@@ -90,10 +105,22 @@ public static class UnityMaterialConversion
 			approximations.Add($"only the {layer.Description} layer is converted; {string.Join(", ", layer.OtherLayers)} left out");
 		}
 
-		if (material.Colors.ContainsKey("_DryColor") && material.Colors.ContainsKey("_HealthyColor"))
+		var shader = material.Shader ?? string.Empty;
+		var isFoliage = shader.EndsWith("/Foliage/Foliage", StringComparison.Ordinal) ||
+		                shader.EndsWith("/Foliage/Cross", StringComparison.Ordinal);
+		var isBark = shader.EndsWith("/Foliage/Bark", StringComparison.Ordinal);
+		FoliageMaterialSettings? foliage = null;
+		if (isFoliage)
+		{
+			type = MaterialAssetType.Foliage;
+			foliage = DescribeFoliage(material, role, color);
+		}
+		else if (material.Colors.ContainsKey("_DryColor") && material.Colors.ContainsKey("_HealthyColor"))
 		{
 			approximations.Add("tinted with the healthy colour only; Unity varies it towards the dry colour per instance");
 		}
+
+		var wind = DescribeWind(material, role, isFoliage, isBark);
 
 		return new UnityMaterialPlan(
 			material.Name,
@@ -107,7 +134,70 @@ public static class UnityMaterialConversion
 			albedo?.Path,
 			normal?.Path,
 			maskConversion,
+			foliage,
+			wind,
 			approximations);
+	}
+
+	/// <summary>
+	/// NatureManufacture's foliage and cross shaders as the foliage shading model. Their thickness (0 thin, 1 thick)
+	/// lowers translucency. The base colour is already the healthy colour, so the tints are white and the dry colour
+	/// relative to it, varied fully per instance as Unity does.
+	/// </summary>
+	private static FoliageMaterialSettings DescribeFoliage(UnityMaterialExport material, UnityPrefabRole role, Vector4 healthy)
+	{
+		var thickness = Math.Clamp(FindFloat(material, "_Thickness") ?? 0.5f, 0.0f, 1.0f);
+		var settings = new FoliageMaterialSettings
+		{
+			Translucency = 0.6f * (1.0f - (0.5f * thickness)),
+			NormalMode = role == UnityPrefabRole.GroundCover ? FoliageNormalMode.Up : FoliageNormalMode.Spherical,
+			NormalBlend = role == UnityPrefabRole.GroundCover ? 0.7f : 0.5f
+		};
+
+		if (FindColor(material, "_DryColor") is { } dry && material.Colors.ContainsKey("_HealthyColor"))
+		{
+			settings.TintVariation = 1.0f;
+			settings.HealthyTint = ColorRGBA.White;
+			settings.DryTint = new ColorRGBA(
+				Ratio(SrgbToLinear(dry.X), SrgbToLinear(healthy.X)),
+				Ratio(SrgbToLinear(dry.Y), SrgbToLinear(healthy.Y)),
+				Ratio(SrgbToLinear(dry.Z), SrgbToLinear(healthy.Z)),
+				1.0f);
+		}
+
+		return settings;
+	}
+
+	private static float Ratio(float value, float reference)
+	{
+		return reference > 1e-4f ? Math.Clamp(value / reference, 0.0f, 1.0f) : 1.0f;
+	}
+
+	/// <summary>
+	/// Leaves and cross cards sway with their tree and flutter; bark sways without fluttering so trunks carry the
+	/// crown; ground cover bends from its base. The pack's <c>_no_wind</c> variants stay still.
+	/// </summary>
+	private static MaterialWind DescribeWind(UnityMaterialExport material, UnityPrefabRole role, bool isFoliage, bool isBark)
+	{
+		if ((isFoliage || isBark) == false ||
+		    material.Name.Contains("no_wind", StringComparison.OrdinalIgnoreCase))
+		{
+			return new MaterialWind();
+		}
+
+		if (isBark)
+		{
+			return new MaterialWind
+			{
+				Mode = WindMode.Tree,
+				FlutterScale = 0.0f
+			};
+		}
+
+		return new MaterialWind
+		{
+			Mode = role == UnityPrefabRole.GroundCover ? WindMode.Grass : WindMode.Tree
+		};
 	}
 
 	public static float SrgbToLinear(float value)

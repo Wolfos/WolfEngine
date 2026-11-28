@@ -37,6 +37,7 @@ public sealed class MaterialAssetStore : IMaterialAssetStore
 		}
 
 		assetFile.Textures ??= new MaterialTextureAssignments();
+		assetFile.Foliage ??= new FoliageMaterialSettings();
 		return assetFile;
 	}
 

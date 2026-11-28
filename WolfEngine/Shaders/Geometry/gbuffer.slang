@@ -1,7 +1,9 @@
 #define WOLF_NO_RW_TEXTURES 1
 import "../Common/common_bindless.slang";
 import "../Common/draw_data.slang";
+import "../Common/wind.slang";
 import "../Common/normal_decode.slang";
+import "../Common/foliage_shading.slang";
 #ifdef WOLF_GBUFFER_SKINNED
 import "../Animation/skinning_common.slang";
 #endif
@@ -49,6 +51,11 @@ cbuffer CameraParams : register(b2)
     // LOD bias for material textures; see SceneDrawData.MaterialMipBias.
     float materialMipBias;
     float _cameraPadding;
+    // This and the previous frame's wind; see wind.slang.
+    float4 windDirectionStrength;
+    float4 windGustParams;
+    float4 previousWindDirectionStrength;
+    float4 previousWindGustParams;
 };
 
 struct VSInput
@@ -70,6 +77,8 @@ struct VSOutput
     uint instanceId : TEXCOORD3;
     float4 currentClip : TEXCOORD4;
     float4 previousClip : TEXCOORD5;
+    // World position relative to the instance's bounds centre, for the Spherical foliage normal mode.
+    float3 offsetFromBoundsCentre : TEXCOORD6;
 };
 
 #ifdef WOLF_GBUFFER_SKINNED
@@ -105,6 +114,22 @@ float3 ResolvePreviousObjectPosition(VSInput input, GpuInstanceData instanceData
 
 #endif
 
+uint ResolveVertexMaterialIndex(uint materialHandle)
+{
+    if (IsPackedHandleValid(materialHandle))
+    {
+        uint candidateIndex = GetHandleIndex(materialHandle);
+        uint candidateGeneration = GetHandleGeneration(materialHandle);
+        if (candidateIndex < WOLF_MAX_MATERIAL_COUNT &&
+            g_MaterialGenerations[candidateIndex] == candidateGeneration)
+        {
+            return candidateIndex;
+        }
+    }
+
+    return 0;
+}
+
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
@@ -127,18 +152,40 @@ VSOutput vertexShader(VSInput input)
         output.instanceId = 0;
         output.currentClip = output.position;
         output.previousClip = output.position;
+        output.offsetFromBoundsCentre = float3(0.0f, 0.0f, 0.0f);
         return output;
     }
 
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
-    worldPosition.xyz -= cameraPosition;
+    output.offsetFromBoundsCentre = worldPosition.xyz - instanceData.boundsCenterRadius.xyz;
 #ifdef WOLF_GBUFFER_SKINNED
     float3 previousObjectPosition = ResolvePreviousObjectPosition(input, instanceData);
 #else
     float3 previousObjectPosition = input.position;
 #endif
     float4 previousWorldPosition = mul(float4(previousObjectPosition, 1.0f), instanceData.previousWorld);
+    GpuMaterialData vertexMaterial = g_MaterialTable[ResolveVertexMaterialIndex(instanceData.materialHandle)];
+    uint windMode = GetMaterialWindMode(vertexMaterial);
+    if (windMode != WIND_MODE_NONE)
+    {
+        // Each position moves in its own frame's wind, so the motion vector carries the wind's motion.
+        float2 windScales = GetMaterialWindScales(vertexMaterial);
+        worldPosition.xyz += EvaluateWindOffset(
+            worldPosition.xyz,
+            GetWindInstanceOrigin(instanceData.world),
+            windMode,
+            windScales,
+            MakeWindFrame(windDirectionStrength, windGustParams));
+        previousWorldPosition.xyz += EvaluateWindOffset(
+            previousWorldPosition.xyz,
+            GetWindInstanceOrigin(instanceData.previousWorld),
+            windMode,
+            windScales,
+            MakeWindFrame(previousWindDirectionStrength, previousWindGustParams));
+    }
+
+    worldPosition.xyz -= cameraPosition;
     previousWorldPosition.xyz -= previousCameraPosition;
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);
     float3 worldTangent = mul(float4(input.tangent.xyz, 0.0f), instanceData.world).xyz;
@@ -238,6 +285,7 @@ PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
     float3 B = normalize(cross(N, T) * input.tangent.w);
     float3x3 TBN = float3x3(T, B, N);
     normal = normalize(mul(tangentNormal, TBN));
+    normal = ApplyFoliageNormalMode(materialData, normal, input.offsetFromBoundsCentre);
    
     float occlusion = saturate(ormSample.r);
     float roughness = saturate(ormSample.g * materialData.metallicRoughness.y);
@@ -252,7 +300,8 @@ PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
     float4 materialParams = float4(occlusion, roughness, metallic, alphaTestReactiveMask);
 
     output.albedo = materialData.baseColor * albedoSample;
-    output.normal = float4(normal * 0.5f + 0.5f, 1.0f);
+    output.albedo.rgb *= EvaluateFoliageTint(materialData, instanceData.world[3].xyz);
+    output.normal = float4(normal * 0.5f + 0.5f, EncodeGBufferShadingModel(materialData));
     output.material = materialParams;
     output.emissive = float4(emissive, 1.0f);
     uint2 frameSize = uint2(max(frameSizeX, 1u), max(frameSizeY, 1u));

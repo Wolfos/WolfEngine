@@ -596,6 +596,28 @@ public sealed class EditorAutomationTools
 		[Description("Optional multiplier on the bias for shadow casters. Below one makes shadows coarser.")] float? shadowBias = null) =>
 		_controller.SetMeshLodAsync(enabled, bias, shadowBias, cancellationToken);
 
+	[McpServerTool(Name = "set_wind"), Description("Change the active scene's wind in memory, without saving the render config, and optionally hold the wind clock at a time so captures compare the same wind pose. Returns the resulting settings.")]
+	public Task<string> SetWind(
+		CancellationToken cancellationToken,
+		[Description("Optional: wind on (true) or every material at rest (false).")] bool? enabled = null,
+		[Description("Optional direction the wind blows towards, in degrees from +Z towards +X.")] float? directionDegrees = null,
+		[Description("Optional strength; one bends a 20 m tree about a metre.")] float? strength = null,
+		[Description("Optional gust strength, as a fraction of the strength.")] float? gustStrength = null,
+		[Description("Optional gust scroll speed, in gust cells per second.")] float? gustFrequency = null,
+		[Description("Optional gust cell size in metres.")] float? gustScale = null,
+		[Description("Optional: hold the wind clock at this many seconds.")] float? timeSeconds = null,
+		[Description("Optional: release a held wind clock so it runs again.")] bool releaseTime = false) =>
+		_controller.SetWindAsync(
+			enabled,
+			directionDegrees,
+			strength,
+			gustStrength,
+			gustFrequency,
+			gustScale,
+			timeSeconds,
+			releaseTime,
+			cancellationToken);
+
 	[McpServerTool(Name = "set_shadow_vertex_welding"), Description("Enable or disable lossless shadow vertex welding in memory without saving the render config. Use for identical-scene capture and GPU timing comparisons.")]
 	public Task<string> SetShadowVertexWelding(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetShadowVertexWeldingAsync(enabled, cancellationToken);

@@ -390,6 +390,7 @@ public sealed class ShadowMapPass
 		cameraWriter.SetMatrix4x4("viewProjection2", _currentFrameData.CascadeViewProjection2);
 		var sceneData = context.SceneData;
 		cameraWriter.SetVector3("cameraPosition", sceneData.CameraOrigin);
+		WindFrameState.Write(cameraWriter, sceneData.Wind, sceneData.Wind, includePrevious: false);
 
 		if (config.CameraBuffer is IWritableGpuBuffer writableCameraBuffer)
 		{

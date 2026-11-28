@@ -140,7 +140,19 @@ public sealed class UnitySceneImporter
 			prefabPaths = prefabPaths.Concat(export.PrefabInstances.Select(instance => instance.PrefabPath));
 		}
 
-		context.ConvertedPrefabs = _prefabImporter.Import(export, request.UnityProjectPath, targetFolder, prefabPaths, context.Warnings);
+		var groundCoverPrefabPaths = export.Terrains
+			.SelectMany(terrain => terrain.DetailPrototypes)
+			.Where(prototype => prototype.UsePrototypeMesh)
+			.Select(prototype => prototype.Prefab)
+			.OfType<string>()
+			.ToHashSet(StringComparer.Ordinal);
+		context.ConvertedPrefabs = _prefabImporter.Import(
+			export,
+			request.UnityProjectPath,
+			targetFolder,
+			prefabPaths,
+			context.Warnings,
+			groundCoverPrefabPaths);
 
 		foreach (var terrain in export.Terrains)
 		{

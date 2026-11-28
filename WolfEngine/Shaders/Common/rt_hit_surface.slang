@@ -2,6 +2,7 @@ import "common_bindless.slang";
 import "draw_data.slang";
 import "packed_vertex.slang";
 import "rt_alpha_test.slang";
+import "foliage_shading.slang";
 import "../Terrain/terrain_layer_blend.slang";
 
 // Resolves a hardware ray hit into the surface a diffuse bounce needs: position, shading and
@@ -609,6 +610,13 @@ bool RtTryResolveHitSurface(
         surface.worldNormal = -surface.worldNormal;
     }
 
+    // Foliage bends its shading normal and tints its albedo per instance exactly as gbuffer.slang does, so a
+    // leaf bounces and reflects the colour it is drawn with.
+    surface.worldNormal = ApplyFoliageNormalMode(
+        material,
+        surface.worldNormal,
+        surface.worldPosition - instanceData.boundsCenterRadius.xyz);
+
     SamplerState materialSampler = GetSampler(material.samplerHandle);
     float2 materialUv = surface.uv * material.uvOffsetScale.zw + material.uvOffsetScale.xy;
     Texture2D<float4> albedoTexture = GetTexture(material.albedoHandle);
@@ -630,6 +638,7 @@ bool RtTryResolveHitSurface(
         .SampleLevel(materialSampler, materialUv, RtTextureLod(emissiveTexture, triangleLodBias, coneWidth))
         .rgb;
     surface.albedo = max(material.baseColor.rgb * albedoSample, 0.0f.xxx);
+    surface.albedo *= EvaluateFoliageTint(material, instanceData.world[3].xyz);
     surface.emissive =
         emissiveSample *
         material.emissiveFactorIntensity.rgb *

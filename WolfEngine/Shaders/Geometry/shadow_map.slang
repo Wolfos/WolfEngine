@@ -1,6 +1,7 @@
 #define WOLF_NO_RW_TEXTURES 1
 import "../Common/common_bindless.slang";
 import "../Common/draw_data.slang";
+import "../Common/wind.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 1048576
 #define WOLF_MAX_MATERIAL_COUNT 1048576
@@ -32,6 +33,9 @@ cbuffer CameraParams : register(b4)
     row_major float4x4 viewProjection2;
     float3 cameraPosition;
     float padding;
+    // This frame's wind; see wind.slang.
+    float4 windDirectionStrength;
+    float4 windGustParams;
 };
 
 #ifndef WOLF_SHADOW_CASCADE_INDEX
@@ -163,6 +167,17 @@ VSOutput vertexShader(VSInput input)
 #endif
 
     float4 worldPosition = mul(float4(localPosition, 1.0f), instanceData.world);
+#ifndef WOLF_SHADOW_TERRAIN
+    {
+        GpuMaterialData vertexMaterial = g_MaterialTable[ResolveMaterialIndex(instanceData.materialHandle)];
+        worldPosition.xyz += EvaluateWindOffset(
+            worldPosition.xyz,
+            GetWindInstanceOrigin(instanceData.world),
+            GetMaterialWindMode(vertexMaterial),
+            GetMaterialWindScales(vertexMaterial),
+            MakeWindFrame(windDirectionStrength, windGustParams));
+    }
+#endif
     worldPosition.xyz -= cameraPosition;
 
     row_major float4x4 viewProjection = viewProjection0;

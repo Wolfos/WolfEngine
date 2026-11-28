@@ -300,6 +300,7 @@ public sealed class RenderViewSnapshot
 		Config.VolumetricFog = config.VolumetricFog;
 		Config.Sky = config.Sky;
 		Config.Clouds = config.Clouds;
+		Config.Wind = config.Wind;
 		Config.AntiAliasing = config.AntiAliasing;
 		Config.Tonemapping = config.Tonemapping;
 		Config.ColorGrading = config.ColorGrading;

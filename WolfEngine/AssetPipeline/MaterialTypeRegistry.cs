@@ -13,7 +13,13 @@ public enum MaterialPropertyKind
 	AlbedoTexture,
 	OrmTexture,
 	NormalTexture,
-	EmissiveTexture
+	EmissiveTexture,
+	FoliageTranslucency,
+	FoliageNormalMode,
+	FoliageNormalBlend,
+	FoliageTintVariation,
+	FoliageHealthyTint,
+	FoliageDryTint
 }
 
 public sealed class MaterialPropertyDefinition
@@ -86,6 +92,28 @@ public sealed class MaterialTypeRegistry : IMaterialTypeRegistry
 		new() { Kind = MaterialPropertyKind.EmissiveTexture, DisplayName = "Emissive" }
 	];
 
+	// Foliage is always double-sided, so it has no Double Sided toggle.
+	private static readonly IReadOnlyList<MaterialPropertyDefinition> FoliageProperties =
+	[
+		new() { Kind = MaterialPropertyKind.BaseColor, DisplayName = "Base Color" },
+		new() { Kind = MaterialPropertyKind.MetallicFactor, DisplayName = "Metallic" },
+		new() { Kind = MaterialPropertyKind.RoughnessFactor, DisplayName = "Roughness" },
+		new() { Kind = MaterialPropertyKind.NormalScale, DisplayName = "Normal Strength" },
+		new() { Kind = MaterialPropertyKind.EmissiveFactor, DisplayName = "Emissive Factor" },
+		new() { Kind = MaterialPropertyKind.EmissiveIntensity, DisplayName = "Emissive Intensity" },
+		new() { Kind = MaterialPropertyKind.AlphaCutoff, DisplayName = "Alpha Cutoff" },
+		new() { Kind = MaterialPropertyKind.FoliageTranslucency, DisplayName = "Translucency" },
+		new() { Kind = MaterialPropertyKind.FoliageNormalMode, DisplayName = "Normal Mode" },
+		new() { Kind = MaterialPropertyKind.FoliageNormalBlend, DisplayName = "Normal Blend" },
+		new() { Kind = MaterialPropertyKind.FoliageTintVariation, DisplayName = "Tint Variation" },
+		new() { Kind = MaterialPropertyKind.FoliageHealthyTint, DisplayName = "Healthy Tint" },
+		new() { Kind = MaterialPropertyKind.FoliageDryTint, DisplayName = "Dry Tint" },
+		new() { Kind = MaterialPropertyKind.AlbedoTexture, DisplayName = "Albedo" },
+		new() { Kind = MaterialPropertyKind.OrmTexture, DisplayName = "ORM" },
+		new() { Kind = MaterialPropertyKind.NormalTexture, DisplayName = "Normal" },
+		new() { Kind = MaterialPropertyKind.EmissiveTexture, DisplayName = "Emissive" }
+	];
+
 	private readonly IReadOnlyList<MaterialTypeDescriptor> _descriptors =
 	[
 		new()
@@ -111,6 +139,14 @@ public sealed class MaterialTypeRegistry : IMaterialTypeRegistry
 			ShaderPath = "gbuffer.slang",
 			RuntimeAlphaMode = AlphaMode.AlphaBlend,
 			Properties = AlphaBlendProperties
+		},
+		new()
+		{
+			Type = MaterialAssetType.Foliage,
+			DisplayName = "Foliage",
+			ShaderPath = "gbuffer.slang",
+			RuntimeAlphaMode = AlphaMode.AlphaTest,
+			Properties = FoliageProperties
 		}
 	];
 

@@ -36,7 +36,12 @@ public enum MaterialAssetType
 {
 	Opaque,
 	AlphaTest,
-	AlphaBlend
+	AlphaBlend,
+
+	/// <summary>
+	/// Alpha-tested, two-sided leaves and grass that let light through from behind. See <see cref="FoliageMaterialSettings"/>.
+	/// </summary>
+	Foliage
 }
 
 public sealed class AssetDatabase
@@ -345,8 +350,52 @@ public sealed class MaterialAsset : MaterialSurfaceProperties
 	public float AlphaCutoff { get; set; } = 0.5f;
 	public bool DoubleSided { get; set; }
 
+	/// <summary>The foliage shading settings. Read only when <see cref="MaterialType"/> is Foliage.</summary>
+	public FoliageMaterialSettings Foliage { get; set; } = new();
+
+	/// <summary>Whether the material renders both faces. Foliage always does, since it lights back faces.</summary>
+	public bool RendersDoubleSided()
+	{
+		return DoubleSided || MaterialType == MaterialAssetType.Foliage;
+	}
+
+	/// <summary>The runtime foliage shading model, or null when the material is not Foliage.</summary>
+	public FoliageShading? GetFoliageShading()
+	{
+		if (MaterialType != MaterialAssetType.Foliage)
+		{
+			return null;
+		}
+
+		return Foliage.ToShading();
+	}
+
+	/// <summary>How the material moves in the scene's wind. Any material type can use it.</summary>
+	public MaterialWind Wind { get; set; } = new();
+
 	// Retained as a compatibility convenience for callers that operate on surface properties.
 	public MaterialSurfaceProperties GetActiveProperties() => this;
+}
+
+public sealed class FoliageMaterialSettings
+{
+	public float Translucency { get; set; } = 0.5f;
+	public FoliageNormalMode NormalMode { get; set; } = FoliageNormalMode.Mesh;
+	public float NormalBlend { get; set; } = 0.5f;
+	public float TintVariation { get; set; }
+	public ColorRGBA HealthyTint { get; set; } = ColorRGBA.White;
+	public ColorRGBA DryTint { get; set; } = new(1.0f, 0.8f, 0.45f, 1.0f);
+
+	public FoliageShading ToShading()
+	{
+		return new FoliageShading(
+			Math.Clamp(Translucency, 0.0f, 1.0f),
+			NormalMode,
+			Math.Clamp(NormalBlend, 0.0f, 1.0f),
+			Math.Clamp(TintVariation, 0.0f, 1.0f),
+			HealthyTint,
+			DryTint);
+	}
 }
 
 public sealed class DataAssetFile

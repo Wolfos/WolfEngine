@@ -358,6 +358,9 @@ public sealed partial class GpuDrawPass
 			var emissiveFactorIntensity = Vector4.Zero;
 			var uvOffsetScale = new Vector4(0.0f, 0.0f, 1.0f, 1.0f);
 			var materialFlags = 0u;
+			var foliageMaterial = default(GpuFoliageMaterial);
+			var windMode = 0u;
+			var windScales = 0u;
 			var bucketId = GpuDrawBucketId.Opaque;
 			var sidedness = GpuDrawSidedness.SingleSided;
 			var executionLaneIndex = 0;
@@ -517,6 +520,9 @@ public sealed partial class GpuDrawPass
 				emissiveFactorIntensity = new Vector4(material.EmissiveFactor, material.EmissiveIntensity);
 				uvOffsetScale = material.UvOffsetScale;
 				materialFlags = GpuMaterialFlags.FromMaterial(material);
+				foliageMaterial = GpuFoliageMaterial.FromMaterial(material);
+				windMode = GpuMaterialWind.PackMode(material);
+				windScales = GpuMaterialWind.PackScales(material);
 			}
 			else if (material is not null && GpuDrawClassification.SupportsUnlitTintMaterialInterpretation(drawKind))
 			{
@@ -568,7 +574,10 @@ public sealed partial class GpuDrawPass
 					normalHandle,
 					emissiveHandle,
 					samplerHandle,
-					materialFlags));
+					materialFlags,
+					foliageMaterial,
+					windMode,
+					windScales));
 
 				if (GpuDrawClassification.SupportsTerrainMaterialInterpretation(drawKind) &&
 				    update.TerrainSurface is { } terrainSurface)

@@ -1,6 +1,7 @@
 #define WOLF_NO_RW_TEXTURES 1
 import "../Common/common_bindless.slang";
 import "../Common/draw_data.slang";
+import "../Common/wind.slang";
 import "../Common/common_lighting.slang";
 import "../Common/normal_decode.slang";
 import "../Common/volumetric_fog.slang";
@@ -66,6 +67,11 @@ cbuffer CameraParams : register(b2)
     // LOD bias for material textures; see SceneDrawData.MaterialMipBias.
     float materialMipBias;
     float _cameraPadding;
+    // This and the previous frame's wind; see wind.slang.
+    float4 windDirectionStrength;
+    float4 windGustParams;
+    float4 previousWindDirectionStrength;
+    float4 previousWindGustParams;
 };
 
 cbuffer LightingParams : register(b3)
@@ -108,6 +114,22 @@ struct VSOutput
     uint instanceId : TEXCOORD5;
 };
 
+uint ResolveVertexMaterialIndex(uint materialHandle)
+{
+    if (IsPackedHandleValid(materialHandle))
+    {
+        uint candidateIndex = GetHandleIndex(materialHandle);
+        uint candidateGeneration = GetHandleGeneration(materialHandle);
+        if (candidateIndex < WOLF_MAX_MATERIAL_COUNT &&
+            g_MaterialGenerations[candidateIndex] == candidateGeneration)
+        {
+            return candidateIndex;
+        }
+    }
+
+    return 0;
+}
+
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
@@ -135,6 +157,13 @@ VSOutput vertexShader(VSInput input)
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
 
     float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
+    GpuMaterialData vertexMaterial = g_MaterialTable[ResolveVertexMaterialIndex(instanceData.materialHandle)];
+    worldPosition.xyz += EvaluateWindOffset(
+        worldPosition.xyz,
+        GetWindInstanceOrigin(instanceData.world),
+        GetMaterialWindMode(vertexMaterial),
+        GetMaterialWindScales(vertexMaterial),
+        MakeWindFrame(windDirectionStrength, windGustParams));
     worldPosition.xyz -= cameraPosition;
     float4 viewPosition = mul(float4(worldPosition.xyz, 1.0f), viewMatrix);
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);

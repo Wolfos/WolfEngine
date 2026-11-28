@@ -82,7 +82,9 @@ public sealed class MaterialRuntimeAssetResolver : IMaterialRuntimeAssetResolver
 			alphaMode: descriptor.RuntimeAlphaMode,
 			alphaCutoff: materialAsset.AlphaCutoff,
 			uvOffsetScale: properties.UvOffsetScale,
-			doubleSided: materialAsset.DoubleSided);
+			doubleSided: materialAsset.RendersDoubleSided(),
+			foliage: materialAsset.GetFoliageShading(),
+			wind: materialAsset.Wind);
 	}
 
 	private static Texture? ResolveTexture(AssetRef<Texture> reference)

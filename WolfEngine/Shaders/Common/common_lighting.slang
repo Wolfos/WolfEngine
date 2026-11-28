@@ -512,6 +512,90 @@ float3 EvaluateDirectionalLights(
     return color;
 }
 
+/// Sunlight transmitted through a thin foliage surface from behind: the back face's diffuse term plus a
+/// forward-scattering lobe toward a viewer looking into the light, tinted by albedo and scaled by translucency.
+/// The shadow is looked up from the light's side of the leaf (the flipped normal), so the leaf itself does not
+/// shadow its own transmission while leaves between it and the sun still do.
+float3 EvaluateDirectionalTransmission(
+    SurfaceLightingInput surface,
+    float3 viewDir,
+    float translucency,
+    uint directionalLightCount,
+    DirectionalLightData directionalLights[MAX_DIRECTIONAL_LIGHTS],
+    float4x4 shadowViewProjection0,
+    float4x4 shadowViewProjection1,
+    float4x4 shadowViewProjection2,
+    uint shadowMapHandle0,
+    uint shadowMapHandle1,
+    uint shadowMapHandle2,
+    uint shadowSamplerHandle,
+    float3 shadowSplits,
+    float shadowCascadeBlendDistance,
+    uint shadowLightIndex,
+    float2 shadowTexelSize,
+    float3 shadowDepthBiases,
+    float3 shadowNormalOffsets,
+    float shadowStrength,
+    uint shadowsEnabled,
+    float shadowMaxDistance)
+{
+    float3 color = 0.0f.xxx;
+    if (translucency <= 0.0f)
+    {
+        return color;
+    }
+
+    float3 backNormal = -normalize(surface.normal);
+    [unroll]
+    for (uint i = 0; i < directionalLightCount && i < MAX_DIRECTIONAL_LIGHTS; ++i)
+    {
+        DirectionalLightData light = directionalLights[i];
+        float3 L = -normalize(light.directionAndType.xyz);
+        float backNdotL = saturate(dot(backNormal, L));
+        float forwardScatter = pow(saturate(dot(viewDir, -L)), 8.0f);
+        // Thin leaves scatter light forward strongly; the lobe still needs light on the back face to exist.
+        float transmittance = backNdotL + forwardScatter * saturate(backNdotL + 0.5f) * 2.0f;
+        if (transmittance <= 0.0f)
+        {
+            continue;
+        }
+
+        float shadow = 1.0f;
+        if (shadowsEnabled != 0u && i == shadowLightIndex)
+        {
+            float maxShadowDistanceSq = shadowMaxDistance * shadowMaxDistance;
+            float receiverDistanceSq = dot(surface.worldPos, surface.worldPos);
+            if (shadowMaxDistance <= 0.0f || receiverDistanceSq <= maxShadowDistanceSq)
+            {
+                float receiverDistance = sqrt(receiverDistanceSq);
+                float pcf = ComputeCascadedDirectionalShadow(
+                    surface.worldPos,
+                    backNormal,
+                    L,
+                    receiverDistance,
+                    shadowViewProjection0,
+                    shadowViewProjection1,
+                    shadowViewProjection2,
+                    shadowMapHandle0,
+                    shadowMapHandle1,
+                    shadowMapHandle2,
+                    shadowSamplerHandle,
+                    shadowSplits,
+                    shadowCascadeBlendDistance,
+                    shadowTexelSize,
+                    shadowDepthBiases,
+                    shadowNormalOffsets);
+                shadow = lerp(1.0f, pcf, saturate(shadowStrength));
+            }
+        }
+
+        float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a;
+        color += surface.albedo * translucency * (1.0f - surface.metallic) * lightColor * transmittance * shadow / PI;
+    }
+
+    return color;
+}
+
 float3 EvaluatePointLight(
     SurfaceLightingInput surface,
     float3 viewDir,

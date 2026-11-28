@@ -32,6 +32,9 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	private readonly Queue<RenderGraphPass> _passPool = new();
 	private readonly RenderGraphCompiler _compiler;
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
+	private const double WindClockWrapSeconds = 16384.0;
+	private readonly System.Diagnostics.Stopwatch _windClock = System.Diagnostics.Stopwatch.StartNew();
+	private float _windTimeOverrideSeconds = float.NaN;
 	// Views the current Execute runs, and the scene data built for each.
 	private readonly List<RenderViewId> _executedViews = new();
 	// Which view's encoded scene colour a scene-colour frame capture reads back. Written by automation on the game
@@ -436,6 +439,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				                        _view.ResolvedProjection,
 				                        previousProjection);
 
+			var wind = WindFrameState.FromConfig(snapshot.Config.Wind, GetWindTimeSeconds());
 			sceneData = new(
 				view,
 				viewProjection,
@@ -467,8 +471,13 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				MaterialMipBias = snapshot.Config.AntiAliasing.UsesFsr3
 					? Fsr3Constants.GetMaterialMipBias(_view.SceneRenderSize.X, _view.SceneDisplaySize.X)
 					: 0.0f,
-				SunLightAttenuation = SunLightAttenuation.ForSky(snapshot.Config.Sky, cameraPosition.Y)
+				SunLightAttenuation = SunLightAttenuation.ForSky(snapshot.Config.Sky, cameraPosition.Y),
+				Wind = wind,
+				PreviousWind = _view.HasPreviousWind ? _view.PreviousWind : wind
 			};
+
+			_view.PreviousWind = wind;
+			_view.HasPreviousWind = true;
 
 			_view.PreviousResolvedProjection = _view.ResolvedProjection;
 			_view.HasPreviousResolvedProjection = true;
@@ -478,6 +487,41 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		}
 
 		return true;
+	}
+
+	/// <summary>
+	/// Holds the wind clock at <paramref name="seconds"/>, or releases it with null, so captures and timings can
+	/// compare the same wind pose. In memory only.
+	/// </summary>
+	public void SetWindTimeOverride(float? seconds)
+	{
+		var value = seconds.HasValue && float.IsFinite(seconds.Value) ? seconds.Value : float.NaN;
+		Volatile.Write(ref _windTimeOverrideSeconds, value);
+	}
+
+	/// <summary>The held wind time, or null while the wind clock runs.</summary>
+	public float? WindTimeOverride
+	{
+		get
+		{
+			var value = Volatile.Read(ref _windTimeOverrideSeconds);
+
+			return float.IsNaN(value) ? null : value;
+		}
+	}
+
+	/// <summary>
+	/// Seconds on the wind clock, shared by every view so they agree. Wrapped well before float precision suffers.
+	/// </summary>
+	private float GetWindTimeSeconds()
+	{
+		var held = Volatile.Read(ref _windTimeOverrideSeconds);
+		if (float.IsNaN(held) == false)
+		{
+			return held;
+		}
+
+		return (float)(_windClock.Elapsed.TotalSeconds % WindClockWrapSeconds);
 	}
 
 	/// <summary>

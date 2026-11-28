@@ -44,14 +44,19 @@ public sealed class UnityPrefabImporter
 		_sceneFactory = sceneFactory ?? throw new ArgumentNullException(nameof(sceneFactory));
 	}
 
-	/// <summary>Converts the prefabs at <paramref name="prefabPaths"/>, each once.</summary>
+	/// <summary>
+	/// Converts the prefabs at <paramref name="prefabPaths"/>, each once. Those also in
+	/// <paramref name="groundCoverPrefabPaths"/> are terrain detail, whose foliage materials shade and move as ground
+	/// cover rather than as trees.
+	/// </summary>
 	/// <returns>The WolfEngine prefab each Unity prefab path became.</returns>
 	public IReadOnlyDictionary<string, UnityConvertedPrefab> Import(
 		UnitySceneExport export,
 		string unityProjectPath,
 		string targetFolder,
 		IEnumerable<string> prefabPaths,
-		ICollection<string> warnings)
+		ICollection<string> warnings,
+		IReadOnlySet<string>? groundCoverPrefabPaths = null)
 	{
 		ArgumentNullException.ThrowIfNull(export);
 		ArgumentNullException.ThrowIfNull(warnings);
@@ -67,6 +72,7 @@ public sealed class UnityPrefabImporter
 				continue;
 			}
 
+			session.Role = groundCoverPrefabPaths?.Contains(path) == true ? UnityPrefabRole.GroundCover : UnityPrefabRole.Tree;
 			converted.Add(path, ImportPrefab(session, prefab));
 		}
 
@@ -271,17 +277,19 @@ public sealed class UnityPrefabImporter
 
 	private Guid GetMaterial(Session session, string materialKey)
 	{
-		if (session.Materials.TryGetValue(materialKey, out var known)) return known;
+		// A material shared by a tree and ground cover becomes two, since they shade and move differently.
+		var cacheKey = $"{materialKey}|{session.Role}";
+		if (session.Materials.TryGetValue(cacheKey, out var known)) return known;
 
 		var exported = session.Export.Materials.FirstOrDefault(material => material.Key == materialKey);
 		if (exported is null)
 		{
 			session.Warnings.Add($"Material '{materialKey}' is not in the export; its renderers use the default material.");
-			session.Materials.Add(materialKey, Guid.Empty);
+			session.Materials.Add(cacheKey, Guid.Empty);
 			return Guid.Empty;
 		}
 
-		var plan = UnityMaterialConversion.Describe(exported);
+		var plan = UnityMaterialConversion.Describe(exported, session.Role);
 		if (plan.Approximations.Count > 0)
 		{
 			session.MaterialApproximations[plan.Name] = plan.Approximations;
@@ -294,11 +302,17 @@ public sealed class UnityPrefabImporter
 		material.NormalScale = plan.NormalScale;
 		material.MetallicFactor = plan.MetallicFactor;
 		material.RoughnessFactor = plan.RoughnessFactor;
+		material.Wind = plan.Wind;
+		if (plan.Foliage is { } foliage)
+		{
+			material.Foliage = foliage;
+		}
+
 		var albedoSemantic = plan.Type == MaterialAssetType.Opaque ? TextureSemantic.BaseColor : TextureSemantic.BaseColorTransparent;
 		// Box-filtered mips lose alpha-tested coverage with distance, the faster the higher the cutoff, so an
 		// alpha-tested albedo preserves it at the cutoff its material tests against. Unity's own setting is not used:
 		// it preserves coverage at the texture's reference value, which the pack's leaf materials do not test at.
-		var coverageCutoff = plan.Type == MaterialAssetType.AlphaTest
+		var coverageCutoff = plan.Type is MaterialAssetType.AlphaTest or MaterialAssetType.Foliage
 			? Math.Clamp(plan.AlphaCutoff, 0.01f, 0.99f)
 			: 0.0f;
 		material.Textures.Albedo = WriteTexture(session, plan.AlbedoPath, "Albedo", albedoSemantic, image => image, coverageCutoff);
@@ -316,7 +330,7 @@ public sealed class UnityPrefabImporter
 		_materialAssetStore.SaveAsset(absolutePath, material);
 		_metadataStore.Save(AssetFileExtensions.GetMetaPath(absolutePath), CreateMaterialMetadata(fileName, nodeId));
 		_projectService.RefreshAssetSource(relativePath);
-		session.Materials.Add(materialKey, nodeId);
+		session.Materials.Add(cacheKey, nodeId);
 
 		return nodeId;
 	}
@@ -438,6 +452,9 @@ public sealed class UnityPrefabImporter
 		public Dictionary<string, Guid> Materials { get; } = new(StringComparer.Ordinal);
 		public Dictionary<string, Guid> Textures { get; } = new(StringComparer.Ordinal);
 		public Dictionary<string, IReadOnlyList<string>> MaterialApproximations { get; } = new(StringComparer.Ordinal);
+
+		/// <summary>The role of the prefab being converted.</summary>
+		public UnityPrefabRole Role { get; set; }
 		private readonly HashSet<string> _reservedNames = new(StringComparer.OrdinalIgnoreCase);
 
 		/// <summary>

@@ -172,6 +172,32 @@ A global wind state (direction, strength, and a scrolling gust texture) goes int
 
 Motion vectors need the previous frame's wind state, kept alongside the current one. BLAS stay static, so ray-traced reflections and GI see foliage at rest, which is accepted.
 
+### Shading
+
+Leaves and grass use a Foliage material type rather than a shading-model switch on every type. Material types already own which properties a material shows and its runtime alpha mode, and a foliage material is always alpha tested and two-sided, so a type states that once instead of leaving a combination of toggles that make no sense together (an opaque, single-sided foliage material). At runtime the type becomes a `FoliageShading` value on `Material`, null for every other material, so the renderer has one question to ask.
+
+A foliage material has:
+
+- **Translucency** (0 to 1): how much of the sunlight reaching the back of a leaf comes through it, tinted by albedo.
+- **Normal mode**: Mesh (as authored), Spherical (bent away from the instance's bounds centre so a crown shades as one volume), or Up (world up, for grass). **Normal blend** sets how far the normal moves from the mesh normal toward the mode's.
+- **Tint variation** with a **healthy** and a **dry** tint: each instance multiplies its albedo by a colour between the two, picked by a hash of its world position.
+
+The G-buffer has no spare channel for a shading model or a translucency value except one: the normal target is `Rgba16Float` and its alpha was always written as 1 and never read. Foliage writes 2 plus its translucency there; the lighting pass reads alpha of 1.5 or more as foliage. Decals already keep the stored alpha, so they leave it intact. No target was added or widened.
+
+Light through a leaf is added in the deferred lighting pass for every directional light: the back face's diffuse term plus a forward-scattering lobe toward a viewer looking into the light, times albedo, translucency and the light. The sun's shadow is looked up with the flipped normal, from the light's side of the leaf, so the leaf does not shadow its own transmission and leaves between it and the sun still do. Point lights do not transmit.
+
+Ray-traced hits apply the same normal mode and tint through `foliage_shading.slang`, which `rt_hit_surface.slang` and `gbuffer.slang` share, and they flip back-face normals as any double-sided material does. Hits do not add transmission.
+
+#### As built
+
+- `MaterialAssetType.Foliage`, with `FoliageMaterialSettings` on `MaterialAsset` and its properties in `MaterialTypeRegistry`; the material asset editor shows them in a Foliage section. Foliage always renders double-sided (`MaterialAsset.RendersDoubleSided`).
+- `FoliageShading` and `FoliageNormalMode` on `Material`, passed through `MaterialFactory`, the editor and runtime material resolvers, and the editor's live material refresh.
+- `GpuMaterialData` and `GpuDrawMaterialUpdateData` grew by 16 bytes: the two tints as RGBA8 in the former padding, and a `float4` of translucency, normal blend and tint variation. `GpuMaterialFlags.Foliage` and two normal-mode bits sit in the material flags.
+- `Shaders/Common/foliage_shading.slang`: tint hash, normal modes, and the normal-alpha encoding. Spherical uses a new interpolant, the world position relative to the instance's bounds centre.
+- `EvaluateDirectionalTransmission` in `common_lighting.slang`, called from `deferred_lighting.compute.slang` for foliage pixels only.
+- Up mode uses world up, not the terrain normal: the G-buffer pass has no terrain binding, and placed foliage stores no ground normal.
+- The tint hash uses the instance's translation quantised to 25 cm, so it reads the same in rasterisation and ray tracing.
+
 ### Quality settings
 
 `RenderConfig` gains a `Foliage` section: a detail density scale, a detail distance scale, and a placed cull distance scale. An automation tool sets them in memory for A/B captures and timings, like `set_mesh_lod`.
@@ -245,6 +271,18 @@ Terrain trees and detail are imported by the Unity scene import; see `unity-impo
    - **Measured** on the Forest demo from the gameplay camera: the draw update, which now includes 15 generation dispatches, takes 0.33 ms of GPU time; the foliage cull is 0.09 ms for the camera and 0.22 ms for the shadow cascades.
    - **Not built:** placed foliage exclusion, override paint, the quality settings' density scale (generation takes a scale, always 1), reading back the dropped-instance counter, terrains with a non-uniform or non-unit scale (the window is sized in local metres), and the D3D12 backend, which compiles but was not run.
 3. **Wind.** Wind state, the vertex function, material wind modes, and previous-frame wind for motion vectors.
+
+   As built:
+   - **Global state.** `RenderConfig.Wind` (`WindConfig`) sits beside fog and sky: on/off, direction in degrees from +Z towards +X, strength, gust strength, gust frequency (how fast the gust field scrolls downwind, in cells per second) and gust scale (cell size in metres). Gusts are procedural value noise sampled at each instance's origin, so no texture is loaded. The render graph turns it into a `WindFrameState`, two float4 values, on a clock shared by every view, and keeps each view's previous state for motion vectors; a reset makes the previous state equal the current one.
+   - **Constants.** The G-buffer camera constants, which the transparent forward pass shares, carry the current and previous state; the shadow camera constants carry the current one. Terrain and debug primitive shaders declare the same buffer without the trailing wind fields.
+   - **Materials.** Every material has `Wind` (`MaterialWind`: mode `None`, `Tree` or `Grass`, strength scale, flutter scale), saved in the material file and edited in the material editor's Wind section. It travels in the two padding words of `GpuMaterialData`, the mode in one and the scales as two halves in the other, so the material table's layout did not change.
+   - **Vertex function.** `Common/wind.slang` `EvaluateWindOffset` runs in the G-buffer (static and skinned), shadow map (every cascade and alpha-clip variant, not terrain) and transparent forward vertex shaders. They now read the instance's material in the vertex stage. `Tree` bends the whole object by the square of the height above its instance origin, with a slow sway along and across the wind, shortens the bent height so a trunk keeps its length, and flutters vertices by a weight that grows with distance from the vertical axis through the origin. `Grass` bends each plant from its base by the square of its height, with a faster per-plant sway and a little flutter. A bark material set to `Tree` sways with its leaves because both bend around the same origin by height alone. The G-buffer evaluates the previous position with the previous frame's state and `previousWorld`.
+   - **Per-vertex weights are derived, not authored.** The NatureManufacture shaders (`NMWind.cginc`, `NM_Foliage.shader`) read wind weights from vertex colour (alpha scales bending), but `GltfMeshWriter` writes only position, normal, tangent and the first UV set, and the engine's 48-byte packed vertex has no colour. Carrying colour would change the exporter, the glTF import, the mesh format, the packed vertex and every shader that reads it, so weights come from height and distance from the trunk axis instead.
+   - **Placed and detail foliage** need nothing of their own: `foliage_cull` writes the material handle into each expanded `GpuInstanceData`, and its world matrix's translation is the plant's base. Ray-tracing BLAS stay at rest.
+   - **Automation.** `set_wind` changes the wind in memory and can hold the wind clock at a time, so two captures compare known poses.
+   - **Validation.** Bistro, which has no wind materials, renders within the run-to-run noise of the engine before the change, with wind on and off. In ForestDemoDetail, with leaf, cross, bark and trunk materials on `Tree` and grass, fern and plant materials on `Grass`, captures with the clock held 1.5 s apart differ across leaves, trunks, grass and the leaf shadows on the bridge, and the motion vector view shows motion on foliage only, and none with wind off.
+   - **Measured** with `profile_gpu_frames`: Bistro's G-buffer and shadow passes cost 0.02 to 0.05 ms more than before, from the vertex-stage material read. On ForestDemoDetail, wind on against off adds under 0.01 ms.
+   - **Not built:** authored per-vertex weights (vertex colour), bending normals and tangents, widening cull bounds by the wind's reach (a crown moves about a metre at strength 1), wind in the editor selection outline, and a wind clock tied to the game's pause.
 4. **Editor tools.** Placed paint and erase brushes, the detail override brush, the biome editor, and undo.
 5. **Ray-tracing levels and collision.** Levels by distance band for foliage in the TLAS, and Jolt static bodies for placed instances near physics observers.
 6. **Unity conversion,** with terrain import.

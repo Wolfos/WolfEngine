@@ -7,6 +7,7 @@ import "../Ddgi/ddgi_sample.slang";
 import "../Common/volumetric_fog.slang";
 import "../Atmosphere/atmosphere_common.slang";
 import "../Common/cloud_sampling.slang";
+import "../Common/foliage_shading.slang";
 
 cbuffer BindlessHandles : register(b0)
 {
@@ -185,7 +186,10 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     SamplerState linearSampler = GetSampler(samplerHandle);
 
     float3 albedo = gbufferAlbedo.SampleLevel(linearSampler, uv, 0.0f).rgb;
-    float3 normal = DecodeNormal(gbufferNormal.SampleLevel(linearSampler, uv, 0.0f).xyz);
+    float4 normalSample = gbufferNormal.SampleLevel(linearSampler, uv, 0.0f);
+    float3 normal = DecodeNormal(normalSample.xyz);
+    float foliageTranslucency;
+    bool isFoliage = DecodeGBufferFoliage(normalSample.w, foliageTranslucency);
     float4 material = gbufferMaterial.SampleLevel(linearSampler, uv, 0.0f);
     float3 emissive = gbufferEmissive.SampleLevel(linearSampler, uv, 0.0f).rgb;
 
@@ -285,6 +289,31 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
         shadowMaxDistance);
+    if (isFoliage)
+    {
+        color += EvaluateDirectionalTransmission(
+            surface,
+            viewDir,
+            foliageTranslucency,
+            directionalLightCount,
+            shadedDirectionalLights,
+            shadowViewProjection0,
+            shadowViewProjection1,
+            shadowViewProjection2,
+            shadowMapHandle0,
+            shadowMapHandle1,
+            shadowMapHandle2,
+            shadowSamplerHandle,
+            shadowSplitsBlend.xyz,
+            shadowSplitsBlend.w,
+            shadowLightIndex,
+            shadowTexelSizeBiasStrength.xy,
+            shadowDepthBiases.xyz,
+            shadowNormalOffsets.xyz,
+            shadowTexelSizeBiasStrength.w,
+            shadowsEnabled,
+            shadowMaxDistance);
+    }
 
     uint clusterIndex = ComputeClusterIndex(dispatchThreadId.xy, uint2(framebufferSizeX, framebufferSizeY), max(viewPos.z, nearPlane), nearPlane, farPlane);
     ClusterHeader header = g_ClusterHeaders[clusterIndex];
