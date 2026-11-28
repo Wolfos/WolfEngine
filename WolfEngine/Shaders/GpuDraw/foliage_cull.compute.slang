@@ -97,7 +97,8 @@ StructuredBuffer<GpuFoliageRenderer> g_FoliageRenderers : register(t9);
 struct FoliageInstance
 {
     float4x4 localToWorld;
-    float scale;
+    // The largest of the width and height scales, which the type's bounds grow by.
+    float maxScale;
     uint typeIndex;
 };
 
@@ -140,7 +141,10 @@ FoliageInstance DecodeFoliageInstance(uint4 packed, GpuFoliageChunk chunk)
         float(packed.x >> 16),
         float(packed.y & 0xFFFFu)) / 65535.0f;
     float3 position = lerp(chunk.quantizationMin.xyz, chunk.quantizationMax.xyz, normalizedPosition);
-    float scale = f16tof32(packed.y >> 16);
+    float heightScale = f16tof32(packed.y >> 16);
+    // Zero width bits mean the instance is scaled uniformly.
+    uint widthBits = packed.w >> 16;
+    float widthScale = widthBits == 0u ? heightScale : f16tof32(widthBits);
     float4 q = UnpackFoliageQuaternion(packed.z);
 
     float xx = q.x * q.x;
@@ -160,11 +164,11 @@ FoliageInstance DecodeFoliageInstance(uint4 packed, GpuFoliageChunk chunk)
 
     FoliageInstance instance;
     instance.localToWorld = float4x4(
-        float4(row0 * scale, 0.0f),
-        float4(row1 * scale, 0.0f),
-        float4(row2 * scale, 0.0f),
+        float4(row0 * widthScale, 0.0f),
+        float4(row1 * heightScale, 0.0f),
+        float4(row2 * widthScale, 0.0f),
         float4(position, 1.0f));
-    instance.scale = scale;
+    instance.maxScale = max(abs(widthScale), abs(heightScale));
     instance.typeIndex = packed.w & 0xFFFFu;
     return instance;
 }
@@ -247,7 +251,7 @@ void CSCullFoliage(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThr
 
         float4x4 instanceToWorld = mul(instance.localToWorld, localToWorld);
         float3 center = mul(float4(type.boundsCenterRadius.xyz, 1.0f), instanceToWorld).xyz;
-        float radius = type.boundsCenterRadius.w * abs(instance.scale) * setScale;
+        float radius = type.boundsCenterRadius.w * instance.maxScale * setScale;
         float3 relativeCenter = center - cameraPosition.xyz;
         float maxDistance = isShadowView ? type.distances.y : type.distances.x;
         if (length(relativeCenter) - radius > maxDistance)

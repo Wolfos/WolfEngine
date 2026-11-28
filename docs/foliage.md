@@ -76,8 +76,9 @@ A placed instance is 16 bytes:
 | --- | --- |
 | Position | Three 16-bit unorm values across the cell's bounds, about 1 mm over 64 m |
 | Rotation | A 32-bit packed quaternion (smallest three) |
-| Scale | A 16-bit float, uniform |
+| Height scale | A 16-bit float, along the type's Y axis |
 | Type | A 16-bit index into the asset's type list |
+| Width scale | A 16-bit float, along the type's X and Z axes; zero means the same as the height scale |
 
 100,000 trees are 1.6 MB. Foliage does not move, so there is no previous transform; motion vectors come from the camera, plus wind.
 
@@ -200,7 +201,7 @@ Detail is regenerated every frame, so palette changes, brush strokes and layer r
 Unity terrain data stores trees and detail separately, which maps onto the two tiers:
 
 - Tree prototypes become `FoliageType`s pointing at the converted prefabs, such as the beech prefab with its LOD group.
-- `TreeInstances`, with normalised position, width and height scale, and rotation, become placed instances. Unity scales trees non-uniformly by width and height; placed instances scale uniformly, so height is used and the difference is reported.
+- `TreeInstances`, with normalised position, width and height scale, and rotation, become placed instances. Unity scales trees by width and height separately, which map onto the instance's width and height scales. In the Forest demo the width-to-height ratio runs from 0.43 to 2.4, too wide to approximate with one uniform scale.
 - Detail prototypes become detail `FoliageType`s, and the per-type detail maps become override paint (add). The converted terrain starts with empty biomes and fully painted detail, and can move to biomes gradually.
 
 The pack's demo terrain data (`Terrain Forest Demo Standard Source.asset`) is in Unity's binary serialisation, so conversion needs a reader for it. That reader belongs with terrain import, which this phase is built together with.

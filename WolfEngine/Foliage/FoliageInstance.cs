@@ -6,9 +6,28 @@ namespace WolfEngine;
 /// <summary>One placed foliage instance, in the space of the terrain that owns it. See docs/foliage.md.</summary>
 /// <param name="Position">Position in the terrain entity's local space.</param>
 /// <param name="Rotation">Rotation in the terrain entity's local space.</param>
-/// <param name="Scale">Uniform scale.</param>
+/// <param name="HeightScale">Scale along the type's up axis, Y.</param>
 /// <param name="TypeIndex">Index into <see cref="TerrainFoliage.Types"/>.</param>
-public readonly record struct FoliageInstance(Vector3 Position, Quaternion Rotation, float Scale, int TypeIndex);
+/// <param name="WidthScale">Scale along the type's X and Z axes, so a tree can be wider or narrower than it is tall.</param>
+public readonly record struct FoliageInstance(
+	Vector3 Position,
+	Quaternion Rotation,
+	float HeightScale,
+	int TypeIndex,
+	float WidthScale)
+{
+	/// <summary>An instance scaled the same on every axis.</summary>
+	public FoliageInstance(Vector3 position, Quaternion rotation, float scale, int typeIndex)
+		: this(position, rotation, scale, typeIndex, scale)
+	{
+	}
+
+	/// <summary>The scale on each of the type's axes.</summary>
+	public Vector3 Scale => new(WidthScale, HeightScale, WidthScale);
+
+	/// <summary>The largest scale on any axis, which bounds measured on the type grow by.</summary>
+	public float MaxScale => MathF.Max(MathF.Abs(WidthScale), MathF.Abs(HeightScale));
+}
 
 /// <summary>
 /// The 16-byte form placed instances are stored and uploaded in. Mirrored by <c>DecodeFoliageInstance</c> in
@@ -18,12 +37,16 @@ public readonly record struct FoliageInstance(Vector3 Position, Quaternion Rotat
 /// Four little-endian words:
 /// <list type="number">
 /// <item>Position X and Y, each a 16-bit unorm across the cell's bounds.</item>
-/// <item>Position Z, the same way, and the scale as a 16-bit float.</item>
+/// <item>Position Z, the same way, and the height scale as a 16-bit float.</item>
 /// <item>
 /// The rotation, packed as its three smallest components (10 bits each, in 1022 steps so zero is exact) and the index
 /// of the largest (2 bits).
 /// </item>
-/// <item>The type index in the low 16 bits. The high 16 bits are reserved and zero.</item>
+/// <item>
+/// The type index in the low 16 bits, and the width scale as a 16-bit float in the high 16 bits. Zero there means the
+/// width scale equals the height scale, which is how uniform instances are written and how data written before the
+/// width scale existed reads.
+/// </item>
 /// </list>
 /// Positions resolve to about 1 mm across a 64 m cell, and rotations to about 0.1 degrees.
 /// </remarks>
@@ -55,12 +78,17 @@ public static class FoliageInstancePacking
 		var x = QuantizeUnorm16(instance.Position.X, boundsMin.X, boundsMax.X);
 		var y = QuantizeUnorm16(instance.Position.Y, boundsMin.Y, boundsMax.Y);
 		var z = QuantizeUnorm16(instance.Position.Z, boundsMin.Z, boundsMax.Z);
-		var scale = BitConverter.HalfToUInt16Bits((Half)instance.Scale);
+		var heightScale = BitConverter.HalfToUInt16Bits((Half)instance.HeightScale);
+		var widthScale = BitConverter.HalfToUInt16Bits((Half)instance.WidthScale);
+		if (widthScale == heightScale)
+		{
+			widthScale = 0;
+		}
 
 		BinaryPrimitives.WriteUInt32LittleEndian(destination, x | (y << 16));
-		BinaryPrimitives.WriteUInt32LittleEndian(destination[4..], z | ((uint)scale << 16));
+		BinaryPrimitives.WriteUInt32LittleEndian(destination[4..], z | ((uint)heightScale << 16));
 		BinaryPrimitives.WriteUInt32LittleEndian(destination[8..], PackQuaternion(instance.Rotation));
-		BinaryPrimitives.WriteUInt32LittleEndian(destination[12..], (uint)instance.TypeIndex);
+		BinaryPrimitives.WriteUInt32LittleEndian(destination[12..], (uint)instance.TypeIndex | ((uint)widthScale << 16));
 	}
 
 	public static FoliageInstance Unpack(ReadOnlySpan<byte> source, Vector3 boundsMin, Vector3 boundsMax)
@@ -79,9 +107,11 @@ public static class FoliageInstancePacking
 			DequantizeUnorm16(word0 & 0xFFFF, boundsMin.X, boundsMax.X),
 			DequantizeUnorm16(word0 >> 16, boundsMin.Y, boundsMax.Y),
 			DequantizeUnorm16(word1 & 0xFFFF, boundsMin.Z, boundsMax.Z));
-		var scale = (float)BitConverter.UInt16BitsToHalf((ushort)(word1 >> 16));
+		var heightScale = (float)BitConverter.UInt16BitsToHalf((ushort)(word1 >> 16));
+		var widthBits = (ushort)(word3 >> 16);
+		var widthScale = widthBits == 0 ? heightScale : (float)BitConverter.UInt16BitsToHalf(widthBits);
 
-		return new FoliageInstance(position, UnpackQuaternion(word2), scale, (int)(word3 & 0xFFFF));
+		return new FoliageInstance(position, UnpackQuaternion(word2), heightScale, (int)(word3 & 0xFFFF), widthScale);
 	}
 
 	public static uint PackQuaternion(Quaternion rotation)

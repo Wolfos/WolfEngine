@@ -41,7 +41,8 @@ public sealed class FoliageAuthoringServiceTests
 			Assert.That(Vector2.Distance(point, center), Is.LessThanOrEqualTo(settings.RadiusMeters + 0.001f));
 			Assert.That(surface.TrySampleSurface(Matrix4x4.Identity, instance.Position, out var surfacePoint, out _), Is.True);
 			Assert.That(instance.Position.Y, Is.EqualTo(surfacePoint.Y).Within(0.001f));
-			Assert.That(instance.Scale, Is.EqualTo(1.5f));
+			Assert.That(instance.HeightScale, Is.EqualTo(1.5f));
+			Assert.That(instance.WidthScale, Is.EqualTo(1.5f));
 			Assert.That(instance.Rotation, Is.EqualTo(Quaternion.Identity));
 		}
 	}

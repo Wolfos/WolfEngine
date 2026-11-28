@@ -25,9 +25,38 @@ public sealed class FoliageTests
 		Assert.Multiple(() =>
 		{
 			Assert.That(Vector3.Distance(unpacked.Position, instance.Position), Is.LessThan(0.001f), "1 mm across a 64 m cell");
-			Assert.That(unpacked.Scale, Is.EqualTo(instance.Scale).Within(0.001f));
+			Assert.That(unpacked.HeightScale, Is.EqualTo(instance.HeightScale).Within(0.001f));
+			Assert.That(unpacked.WidthScale, Is.EqualTo(instance.HeightScale).Within(0.001f));
 			Assert.That(angle, Is.LessThan(0.2f * MathF.PI / 180.0f));
 			Assert.That(unpacked.TypeIndex, Is.EqualTo(7));
+		});
+	}
+
+	[Test]
+	public void Packing_RoundTripsAWidthScaleAndWritesNoneForUniformInstances()
+	{
+		var wide = new FoliageInstance(new Vector3(20.0f, 1.0f, 70.0f), Quaternion.Identity, 1.5f, 3, 0.75f);
+		var uniform = new FoliageInstance(new Vector3(20.0f, 1.0f, 70.0f), Quaternion.Identity, 1.5f, 3);
+		var packedWide = new byte[FoliageInstancePacking.SizeInBytes];
+		var packedUniform = new byte[FoliageInstancePacking.SizeInBytes];
+
+		FoliageInstancePacking.Pack(wide, BoundsMin, BoundsMax, packedWide);
+		FoliageInstancePacking.Pack(uniform, BoundsMin, BoundsMax, packedUniform);
+		var unpacked = FoliageInstancePacking.Unpack(packedWide, BoundsMin, BoundsMax);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(unpacked.HeightScale, Is.EqualTo(1.5f));
+			Assert.That(unpacked.WidthScale, Is.EqualTo(0.75f));
+			Assert.That(unpacked.TypeIndex, Is.EqualTo(3));
+			Assert.That(unpacked.Scale, Is.EqualTo(new Vector3(0.75f, 1.5f, 0.75f)));
+			Assert.That(unpacked.MaxScale, Is.EqualTo(1.5f));
+
+			// Uniform instances leave the width bits zero, which is also how data from before the width scale reads.
+			Assert.That(BitConverter.ToUInt16(packedUniform, 14), Is.Zero);
+			var unpackedUniform = FoliageInstancePacking.Unpack(packedUniform, BoundsMin, BoundsMax);
+			Assert.That(unpackedUniform.HeightScale, Is.EqualTo(1.5f));
+			Assert.That(unpackedUniform.WidthScale, Is.EqualTo(1.5f));
 		});
 	}
 

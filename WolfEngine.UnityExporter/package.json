@@ -1,0 +1,7 @@
+{
+  "name": "com.wolfengine.unity-exporter",
+  "displayName": "WolfEngine Exporter",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "Exports a Unity scene's terrain, trees and prefab placements to a folder that the WolfEngine editor imports."
+}

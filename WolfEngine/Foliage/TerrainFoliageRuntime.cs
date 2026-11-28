@@ -240,7 +240,7 @@ internal sealed class TerrainFoliageRuntime
 	{
 		var center = instance.Position + Vector3.Transform(type.Bounds.Center * instance.Scale, instance.Rotation);
 
-		return new BoundingSphere(center, type.Bounds.Radius * MathF.Abs(instance.Scale));
+		return new BoundingSphere(center, type.Bounds.Radius * instance.MaxScale);
 	}
 }
 
