@@ -721,6 +721,18 @@ public sealed class EditorCommandServiceTests
 		fixture.SceneWorkspace.DidNotReceive().SaveCurrentScene();
 	}
 
+	private static SceneAuthoringService CreateSceneAuthoring(
+		IEditorInteractionState interactionState,
+		IEditorUndoRedoService undoRedoService)
+	{
+		return new SceneAuthoringService(
+			Substitute.For<IEditorSceneSnapshotService>(),
+			undoRedoService,
+			interactionState,
+			Substitute.For<IEditorProjectService>(),
+			Substitute.For<IProjectAssetPipelineService>());
+	}
+
 	[Test]
 	public void EntitiesWindow_DeleteSelectedEntity_RemovesEntityAndMarksSceneDirty()
 	{
@@ -728,8 +740,7 @@ public sealed class EditorCommandServiceTests
 			var window = new EntitiesWindow(
 				Substitute.For<IIconManager>(),
 				interactionState,
-				Substitute.For<IEditorSceneSnapshotService>(),
-				Substitute.For<IEditorUndoRedoService>(),
+				CreateSceneAuthoring(interactionState, Substitute.For<IEditorUndoRedoService>()),
 				Substitute.For<IPrefabAssetCreator>(),
 				Substitute.For<IAssetSelectionService>(),
 				Substitute.For<IEditorNotificationService>());
@@ -753,8 +764,7 @@ public sealed class EditorCommandServiceTests
 		var window = new EntitiesWindow(
 			Substitute.For<IIconManager>(),
 			interactionState,
-			Substitute.For<IEditorSceneSnapshotService>(),
-			undoRedoService,
+			CreateSceneAuthoring(interactionState, undoRedoService),
 			Substitute.For<IPrefabAssetCreator>(),
 			Substitute.For<IAssetSelectionService>(),
 			Substitute.For<IEditorNotificationService>());
@@ -792,7 +802,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
 			Substitute.For<IEditorCommandService>(),
-			Substitute.For<IFileManagerService>());
+			Substitute.For<IFileManagerService>(),
+			Substitute.For<ISceneAuthoringService>());
 
 		var requested = window.RequestDeleteSelectedItem();
 
@@ -813,7 +824,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
 			Substitute.For<IEditorCommandService>(),
-			Substitute.For<IFileManagerService>());
+			Substitute.For<IFileManagerService>(),
+			Substitute.For<ISceneAuthoringService>());
 		window.SetSelectedFolderForTesting("Assets/Data");
 
 		var requested = window.RequestDeleteSelectedItem();
@@ -846,7 +858,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
 			Substitute.For<IEditorCommandService>(),
-			Substitute.For<IFileManagerService>());
+			Substitute.For<IFileManagerService>(),
+			Substitute.For<ISceneAuthoringService>());
 		window.SetSelectedFolderForTesting("Assets/Data");
 
 		var requested = window.RequestRenameSelectedItem();
@@ -868,7 +881,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
 			Substitute.For<IEditorCommandService>(),
-			Substitute.For<IFileManagerService>());
+			Substitute.For<IFileManagerService>(),
+			Substitute.For<ISceneAuthoringService>());
 		window.SetSelectedFolderForTesting("Assets/Data");
 
 		var requested = window.RequestRenameSelectedItem();

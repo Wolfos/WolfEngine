@@ -152,6 +152,7 @@ public static class Program
 		services.AddSingleton<TerrainToolSettingsOverlay>();
 		services.AddSingleton<TerrainBrushPreviewDecalController>();
 		services.AddSingleton<ITerrainBrushGpuExecutor, TerrainBrushGpuExecutor>();
+		services.AddSingleton<ISceneAuthoringService, SceneAuthoringService>();
 		services.AddSingleton<ITerrainAuthoringService, TerrainAuthoringService>();
 		services.AddSingleton<FoliageAuthoringService>();
 		services.AddSingleton<TerrainToolController>();

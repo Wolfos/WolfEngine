@@ -15,23 +15,17 @@ public sealed class TransformGizmoController
 {
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly EditorCameraContext _cameraContext;
-	private readonly IEditorInteractionState _interactionState;
-	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
-	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly ISceneAuthoringService _sceneAuthoring;
 	private readonly TransformGizmo _gizmo = new();
 
 	public TransformGizmoController(
 		EditorViewportStateBus viewportStateBus,
 		EditorCameraContext cameraContext,
-		IEditorInteractionState interactionState,
-		IEditorSceneSnapshotService sceneSnapshotService,
-		IEditorUndoRedoService undoRedoService)
+		ISceneAuthoringService sceneAuthoring)
 	{
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
-		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
-		_sceneSnapshotService = sceneSnapshotService ?? throw new ArgumentNullException(nameof(sceneSnapshotService));
-		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
+		_sceneAuthoring = sceneAuthoring ?? throw new ArgumentNullException(nameof(sceneAuthoring));
 	}
 
 	public void DrawAndHandle(
@@ -65,11 +59,8 @@ public sealed class TransformGizmoController
 			: GetAverageWorldPosition(world, transformEntities);
 		var target = new SceneEntityGizmoTarget(
 			scene,
-			world,
 			transformEntities,
-			_interactionState,
-			_sceneSnapshotService,
-			_undoRedoService);
+			_sceneAuthoring);
 		var view = new TransformGizmoView(
 			viewportState,
 			_viewportStateBus.GetRenderState(RenderViewId.Primary).ViewProjection);

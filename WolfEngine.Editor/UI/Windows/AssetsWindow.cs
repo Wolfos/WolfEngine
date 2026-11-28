@@ -24,6 +24,7 @@ public sealed partial class AssetsWindow : EditorWindow, IEditorAssetDeletionHan
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
 	private readonly IFileManagerService _fileManagerService;
+	private readonly ISceneAuthoringService _sceneAuthoring;
 	private readonly EditorCameraSystem? _editorCameraSystem;
 	private readonly AssetsWindowDragDropState _dragDrop = new(DragPreviewRounding);
 	private readonly AssetsWindowSelectionState _selection = new();
@@ -50,6 +51,7 @@ public sealed partial class AssetsWindow : EditorWindow, IEditorAssetDeletionHan
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
 		IFileManagerService fileManagerService,
+		ISceneAuthoringService sceneAuthoring,
 		EditorCameraSystem? editorCameraSystem = null)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
@@ -62,6 +64,7 @@ public sealed partial class AssetsWindow : EditorWindow, IEditorAssetDeletionHan
 		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
 		_commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
 		_fileManagerService = fileManagerService ?? throw new ArgumentNullException(nameof(fileManagerService));
+		_sceneAuthoring = sceneAuthoring ?? throw new ArgumentNullException(nameof(sceneAuthoring));
 		_editorCameraSystem = editorCameraSystem;
 	}
 
@@ -449,32 +452,11 @@ public sealed partial class AssetsWindow : EditorWindow, IEditorAssetDeletionHan
 		BrowserContextTarget contextTarget, string renameLabel, string deleteLabel)
 	{
 		var asset = ResolveTargetAsset(contextTarget);
-		if (asset is not null && asset.Type == AssetType.Model3D && ImGui.MenuItem("Add to Scene"))
+		if (asset is not null &&
+		    (asset.Type == AssetType.Model3D || asset.Type == AssetType.Prefab) &&
+		    ImGui.MenuItem("Add to Scene"))
 		{
-			try
-			{
-				_assetPipelineService.InstantiateImportedModel(
-					_projectService.CurrentAssetCatalog, asset.Id, scene.World, GetSceneSpawnPosition());
-				_interactionState.MarkSceneDirty(scene.World);
-			}
-			catch (Exception ex)
-			{
-				ShowError($"Failed to add model to scene: {ex.Message}");
-			}
-		}
-
-		if (asset is not null && asset.Type == AssetType.Prefab && ImGui.MenuItem("Add to Scene"))
-		{
-			try
-			{
-				_assetPipelineService.InstantiatePrefab(
-					_projectService.CurrentAssetCatalog, asset.Id, scene, GetSceneSpawnPosition());
-				_interactionState.MarkSceneDirty(scene.World);
-			}
-			catch (Exception ex)
-			{
-				ShowError($"Failed to add prefab to scene: {ex.Message}");
-			}
+			AddAssetToScene(scene, asset.Id);
 		}
 
 		if (sourceItem.SubAssets.Count > 0 && contextTarget.Kind == BrowserContextKind.Source)
@@ -506,6 +488,22 @@ public sealed partial class AssetsWindow : EditorWindow, IEditorAssetDeletionHan
 		if (ImGui.MenuItem($"Show in {_fileManagerService.FileManagerName}"))
 		{
 			RevealSourceInFileManager(contextTarget.AssetId!.Value, contextTarget.RelativeSourcePath!);
+		}
+	}
+
+	private void AddAssetToScene(EditorScene scene, Guid assetId)
+	{
+		try
+		{
+			var placed = _sceneAuthoring.Instantiate(scene, assetId, GetSceneSpawnPosition());
+			if (placed.Succeeded == false)
+			{
+				ShowError($"Failed to add to scene: {placed.RefusalReason}");
+			}
+		}
+		catch (Exception ex)
+		{
+			ShowError($"Failed to add to scene: {ex.Message}");
 		}
 	}
 

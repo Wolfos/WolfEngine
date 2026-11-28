@@ -34,6 +34,7 @@ public sealed partial class EditorRemoteAutomationController
 	private readonly IImGuiInputSink _imguiInput;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
+	private readonly ISceneAuthoringService _sceneAuthoring;
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
 	private readonly FoliageAuthoringService _foliageAuthoringService;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
@@ -72,6 +73,7 @@ public sealed partial class EditorRemoteAutomationController
 		IInputSystem inputSystem,
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
+		ISceneAuthoringService sceneAuthoring,
 		ITerrainAuthoringService terrainAuthoringService,
 		FoliageAuthoringService foliageAuthoringService,
 		IProjectAssetPipelineService assetPipelineService,
@@ -120,6 +122,7 @@ public sealed partial class EditorRemoteAutomationController
 		_imguiInput = imguiInput;
 		_interactionState = interactionState;
 		_commandService = commandService;
+		_sceneAuthoring = sceneAuthoring;
 		_terrainAuthoringService = terrainAuthoringService;
 		_foliageAuthoringService = foliageAuthoringService;
 		_assetPipelineService = assetPipelineService;
@@ -498,32 +501,41 @@ public sealed partial class EditorRemoteAutomationController
 			return $"Indirect light minimum: {minimum}. Changed in memory only.";
 		}, cancellationToken);
 
+	/// <summary>
+	/// Sets an entity's local rotation as one scene-authoring transform edit: undoable in the authoring
+	/// scene, unrecorded in the Play-mode runtime scene.
+	/// </summary>
 	public Task SetEntityRotationAsync(Guid entityId, Vector3 eulerDegrees, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
-			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
-			foreach (var pair in scene.EntityIds)
-			{
-				if (pair.Value != entityId) continue;
-				var radians = eulerDegrees * (MathF.PI / 180.0f);
-				scene.World.SetLocalRotation(pair.Key, Quaternion.CreateFromYawPitchRoll(radians.Y, radians.X, radians.Z));
-				return;
-			}
-			throw new InvalidOperationException($"Entity '{entityId:D}' was not found in the active scene.");
+			var scene = _playSession.ActiveScene;
+			var entity = GetActiveSceneEntity(scene, entityId);
+			var radians = eulerDegrees * (MathF.PI / 180.0f);
+			var edit = _sceneAuthoring.BeginTransformEdit(scene, [entity]);
+			edit.SetLocalRotation(entity, Quaternion.CreateFromYawPitchRoll(radians.Y, radians.X, radians.Z));
+			edit.Commit();
 		}, cancellationToken);
 
+	/// <inheritdoc cref="SetEntityRotationAsync"/>
 	public Task SetEntityScaleAsync(Guid entityId, Vector3 scale, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
-			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
-			foreach (var pair in scene.EntityIds)
-			{
-				if (pair.Value != entityId) continue;
-				scene.World.SetLocalScale(pair.Key, scale);
-				return;
-			}
-			throw new InvalidOperationException($"Entity '{entityId:D}' was not found in the active scene.");
+			var scene = _playSession.ActiveScene;
+			var entity = GetActiveSceneEntity(scene, entityId);
+			var edit = _sceneAuthoring.BeginTransformEdit(scene, [entity]);
+			edit.SetLocalScale(entity, scale);
+			edit.Commit();
 		}, cancellationToken);
+
+	private static Entity GetActiveSceneEntity(EditorScene scene, Guid entityId)
+	{
+		if (scene.TryGetEntity(entityId, out var entity) == false)
+		{
+			throw new InvalidOperationException($"Entity '{entityId:D}' was not found in the active scene.");
+		}
+
+		return entity;
+	}
 
 	public Task Ready => _ready.Task;
 	public Task Stopped => _stopped.Task;
@@ -559,21 +571,32 @@ public sealed partial class EditorRemoteAutomationController
 		if (ShutdownRequested) _renderer.RequestShutdown();
 	}
 
+	/// <summary>
+	/// Creates an empty entity through scene authoring, the way the hierarchy's Create menu does: undoable
+	/// in the authoring scene, unrecorded in the Play-mode runtime scene.
+	/// </summary>
 	public Task<(Guid EntityId, string Name)> CreateEntityAsync(string? name, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
-			var resolvedName = string.IsNullOrWhiteSpace(name) ? "Entity" : name.Trim();
-			var scene = _sceneWorkspace.CurrentScene;
-			var entity = scene.World.CreateEntity(resolvedName, Matrix4x4.Identity);
-			var entityId = _sceneSnapshotService.EnsurePersistentEntityId(scene, entity);
-			scene.EntityCellKeys[entity] = SceneCellKey.Global;
-			_interactionState.MarkSceneDirty();
-			return (entityId, resolvedName);
+			var scene = _playSession.ActiveScene;
+			var created = _sceneAuthoring.CreateEntity(scene, EntityCreationPreset.Empty, Vector3.Zero, name);
+			ThrowIfRefused(created.RefusalReason);
+
+			var entity = created.Value;
+			return (scene.EntityIds[entity], scene.World.GetComponent<NameComponent>(entity).Name);
 		}, cancellationToken);
 
+	private static void ThrowIfRefused(string? refusalReason)
+	{
+		if (refusalReason is not null)
+		{
+			throw new InvalidOperationException(refusalReason);
+		}
+	}
+
 	/// <summary>
-	/// Instantiates an imported 3D model into the authoring scene by asset name, through the same
-	/// path the Assets window uses for a drag and drop.
+	/// Places an imported 3D model, found by name in the project's asset catalog (mounted engine assets
+	/// included), through scene authoring, the way the Assets window's Add to Scene does.
 	/// </summary>
 	public Task<InstantiatedModelResult> InstantiateModelAsync(
 		string assetName,
@@ -587,43 +610,36 @@ public sealed partial class EditorRemoteAutomationController
 				throw new InvalidOperationException("asset_name is required.");
 			}
 
-			var projectRoot = Path.GetFullPath(_projectPath);
-			var database = _assetPipelineService.LoadDatabase(projectRoot);
-			var model = database.Assets.FirstOrDefault(asset =>
-				asset.Type == AssetType.Model3D &&
-				asset.Name.Contains(assetName, StringComparison.OrdinalIgnoreCase));
+			var models = _projectService.CurrentAssetCatalog.Assets
+				.Where(mountedAsset => mountedAsset.Asset.Type == AssetType.Model3D)
+				.Select(mountedAsset => mountedAsset.Asset)
+				.ToList();
+			var model = models.FirstOrDefault(asset => asset.Name.Contains(assetName, StringComparison.OrdinalIgnoreCase));
 			if (model is null)
 			{
-				var available = string.Join(", ", database.Assets
-					.Where(asset => asset.Type == AssetType.Model3D)
-					.Select(asset => asset.Name));
+				var available = string.Join(", ", models.Select(asset => asset.Name));
 				throw new InvalidOperationException(
 					$"No 3D model asset matching '{assetName}'. Available models: {available}");
 			}
 
-			var scene = _sceneWorkspace.CurrentScene;
+			var scene = _playSession.ActiveScene;
+			var placed = _sceneAuthoring.Instantiate(scene, model.Id, spawnPosition);
+			ThrowIfRefused(placed.RefusalReason);
+
 			var world = scene.World;
-			var existingEntities = new HashSet<Entity>(EnumerateEntities(world));
+			var rootEntity = placed.Value.Root;
+			if (Math.Abs(uniformScale - 1.0f) > float.Epsilon)
+			{
+				var edit = _sceneAuthoring.BeginTransformEdit(scene, [rootEntity]);
+				edit.SetLocalScale(rootEntity, new Vector3(uniformScale, uniformScale, uniformScale));
+				edit.Commit();
+			}
 
-			_assetPipelineService.InstantiateImportedModel(projectRoot, model.Id, world, spawnPosition);
-
-			var rootEntity = default(Entity);
 			var skinnedMeshRendererCount = 0;
 			var animatorCount = 0;
 			var meshLodLevelCounts = new List<int>();
-			foreach (var entity in EnumerateEntities(world))
+			foreach (var entity in placed.Value.Entities)
 			{
-				if (existingEntities.Contains(entity))
-				{
-					continue;
-				}
-
-				scene.EntityCellKeys[entity] = SceneCellKey.Global;
-				if (world.HasComponent<Parent>(entity) == false && rootEntity.IsValid == false)
-				{
-					rootEntity = entity;
-				}
-
 				if (world.HasComponent<SkinnedMeshRenderer>(entity))
 				{
 					skinnedMeshRendererCount++;
@@ -642,20 +658,10 @@ public sealed partial class EditorRemoteAutomationController
 				}
 			}
 
-			if (rootEntity.IsValid && Math.Abs(uniformScale - 1.0f) > float.Epsilon)
-			{
-				world.SetLocalScale(rootEntity, new Vector3(uniformScale, uniformScale, uniformScale));
-			}
-
-			var rootEntityId = rootEntity.IsValid
-				? _sceneSnapshotService.EnsurePersistentEntityId(scene, rootEntity)
-				: Guid.Empty;
-			_interactionState.MarkSceneDirty();
-
 			return new InstantiatedModelResult(
 				model.Name,
 				model.Id,
-				rootEntityId,
+				scene.EntityIds[rootEntity],
 				skinnedMeshRendererCount,
 				animatorCount,
 				_editorFrameCoordinator.CompletedSequence,
@@ -753,26 +759,18 @@ public sealed partial class EditorRemoteAutomationController
 		}, cancellationToken);
 
 	/// <summary>
-	/// Snapshots the transform-bearing entities. Materialised into a list rather than returned lazily
-	/// because the ECS view enumerator is a ref struct and cannot survive an iterator.
+	/// Deletes an entity and its children through scene authoring, the way the hierarchy's Delete does:
+	/// undoable in the authoring scene, and refused inside a prefab instance.
 	/// </summary>
-	private static List<Entity> EnumerateEntities(World world)
-	{
-		var entities = new List<Entity>();
-		foreach (var entry in world.View<LocalTransform>())
-		{
-			entities.Add(entry.Entity);
-		}
-
-		return entities;
-	}
-
 	public Task DeleteEntityAsync(Guid entityId, CancellationToken cancellationToken) => Enqueue(() =>
 	{
-		var scene = _sceneWorkspace.CurrentScene;
-		if (scene.EntityIds.Values.Contains(entityId) == false) throw new InvalidOperationException($"Entity '{entityId:D}' was not found.");
-		_sceneSnapshotService.DeleteEntitiesByPersistentIds(scene, [entityId]);
-		_interactionState.MarkSceneDirty();
+		var scene = _playSession.ActiveScene;
+		if (scene.TryGetEntity(entityId, out var entity) == false)
+		{
+			throw new InvalidOperationException($"Entity '{entityId:D}' was not found.");
+		}
+
+		ThrowIfRefused(_sceneAuthoring.DeleteEntities(scene, [entity]).RefusalReason);
 	}, cancellationToken);
 
 	/// <summary>
@@ -786,17 +784,7 @@ public sealed partial class EditorRemoteAutomationController
 		Enqueue(() =>
 		{
 			var scene = _sceneWorkspace.CurrentScene;
-			var entity = default(Entity);
-			foreach (var entry in scene.EntityIds)
-			{
-				if (entry.Value == entityId)
-				{
-					entity = entry.Key;
-					break;
-				}
-			}
-
-			if (entity.IsValid == false)
+			if (scene.TryGetEntity(entityId, out var entity) == false)
 			{
 				throw new InvalidOperationException($"Entity '{entityId:D}' was not found.");
 			}
@@ -834,16 +822,10 @@ public sealed partial class EditorRemoteAutomationController
 			return 0;
 		}
 
-		var entitiesById = new Dictionary<Guid, Entity>(scene.EntityIds.Count);
-		foreach (var entry in scene.EntityIds)
-		{
-			entitiesById[entry.Value] = entry.Key;
-		}
-
 		var selected = 0;
 		foreach (var entityId in entityIds)
 		{
-			if (entitiesById.TryGetValue(entityId, out var entity) == false)
+			if (scene.TryGetEntity(entityId, out var entity) == false)
 			{
 				throw new InvalidOperationException($"Entity '{entityId:D}' was not found.");
 			}
@@ -1705,22 +1687,17 @@ public sealed partial class EditorRemoteAutomationController
 				throw new InvalidOperationException("terrain_entity_id must be a GUID.");
 			}
 
-			foreach (var entry in scene.EntityIds)
+			if (scene.TryGetEntity(requestedId, out var requestedEntity) == false)
 			{
-				if (entry.Value != requestedId)
-				{
-					continue;
-				}
-
-				if (scene.World.IsAlive(entry.Key) == false || scene.World.HasComponent<TerrainComponent>(entry.Key) == false)
-				{
-					throw new InvalidOperationException($"Entity '{requestedId:D}' is not a terrain entity.");
-				}
-
-				return (entry.Key, requestedId);
+				throw new InvalidOperationException($"Terrain entity '{requestedId:D}' was not found in the authoring scene.");
 			}
 
-			throw new InvalidOperationException($"Terrain entity '{requestedId:D}' was not found in the authoring scene.");
+			if (scene.World.HasComponent<TerrainComponent>(requestedEntity) == false)
+			{
+				throw new InvalidOperationException($"Entity '{requestedId:D}' is not a terrain entity.");
+			}
+
+			return (requestedEntity, requestedId);
 		}
 
 		(Entity Entity, Guid PersistentId)? match = null;
@@ -1874,8 +1851,7 @@ public sealed partial class EditorRemoteAutomationController
     {
         if (entityId is null) return AnimationEditor.PreviewInstance ?? throw new InvalidOperationException("No animation preview is open.");
         var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
-        var entity = scene.EntityIds.FirstOrDefault(pair => pair.Value == entityId.Value).Key;
-        if (!entity.IsValid || !scene.World.HasComponent<Animator>(entity)) throw new InvalidOperationException("Animator entity was not found.");
+        if (scene.TryGetEntity(entityId.Value, out var entity) == false || scene.World.HasComponent<Animator>(entity) == false) throw new InvalidOperationException("Animator entity was not found.");
         ref var animator = ref scene.World.GetComponent<Animator>(entity);
         return animator.Instance ?? throw new InvalidOperationException(animator.Diagnostic ?? "Animator is unavailable.");
     }

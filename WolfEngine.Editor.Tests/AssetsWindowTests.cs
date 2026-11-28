@@ -815,7 +815,8 @@ public sealed class AssetsWindowTests
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
 			Substitute.For<IEditorCommandService>(),
-			Substitute.For<IFileManagerService>());
+			Substitute.For<IFileManagerService>(),
+			Substitute.For<ISceneAuthoringService>());
 
 		var movedSourcePath = window.MoveDragTargetForTesting("Source", "Assets/Models/Car.glb", "Assets/Vehicles");
 		var movedFolderPath = window.MoveDragTargetForTesting("Folder", "Assets/Models", "Assets/Vehicles");
@@ -859,7 +860,8 @@ public sealed class AssetsWindowTests
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
 			Substitute.For<IEditorCommandService>(),
-			Substitute.For<IFileManagerService>());
+			Substitute.For<IFileManagerService>(),
+			Substitute.For<ISceneAuthoringService>());
 		window.SetSelectedFolderForTesting("Assets/Models");
 		selection.Select(carId, requestFocus: false);
 
@@ -892,7 +894,8 @@ public sealed class AssetsWindowTests
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
 			Substitute.For<IEditorCommandService>(),
-			fileManagerService);
+			fileManagerService,
+			Substitute.For<ISceneAuthoringService>());
 
 		window.OpenFolderInFileManagerForTesting("Assets/Models");
 		window.RevealSourceInFileManagerForTesting("Assets/Models/Car.glb");
@@ -927,7 +930,8 @@ public sealed class AssetsWindowTests
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
 			Substitute.For<IEditorCommandService>(),
-			Substitute.For<IFileManagerService>());
+			Substitute.For<IFileManagerService>(),
+			Substitute.For<ISceneAuthoringService>());
 
 		window.HandleCreationResultForTesting(EditorAssetCreationResult.Succeeded(assetId));
 

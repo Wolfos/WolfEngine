@@ -17,4 +17,23 @@ public class EditorScene
 	public Dictionary<Entity, SceneCellKey> EntityCellKeys { get; set; } = new();
 	public Dictionary<Entity, Guid> EntityIds { get; set; } = new();
 	public Dictionary<Entity, List<SavedPrefabLink>> EntityPrefabSourcePaths { get; set; } = new();
+
+	/// <summary>Finds the live entity with this persistent ID.</summary>
+	public bool TryGetEntity(Guid entityId, out Entity entity)
+	{
+		if (entityId != Guid.Empty)
+		{
+			foreach (var entry in EntityIds)
+			{
+				if (entry.Value == entityId && World.IsAlive(entry.Key))
+				{
+					entity = entry.Key;
+					return true;
+				}
+			}
+		}
+
+		entity = default;
+		return false;
+	}
 }

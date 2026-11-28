@@ -23,3 +23,21 @@ _Avoid_: graphics pipeline (when meaning the shader rather than one state of it)
 **Shader reload**:
 Replacing engine shaders while the editor runs, taking effect from the next applied shader revision.
 _Avoid_: hot reload (that is gameplay code), shader invalidation
+
+## Editor scenes
+
+**Authoring scene**:
+The scene the editor edits and saves. Only edits to it are undoable and make it dirty.
+_Avoid_: editor scene (when meaning which scene), edit scene
+
+**Runtime scene**:
+The isolated copy of the authoring scene that Play mode runs. It is discarded when Play stops, and nothing done to it reaches the authoring scene.
+_Avoid_: play scene, PIE scene
+
+**Scene authoring**:
+Changing a scene's entities as a user would: creating, duplicating, deleting, instantiating models and prefabs, reparenting, moving, enabling and disabling them, changing their icons, and adding, editing and removing their components. On the authoring scene each operation is one undo step, whoever asks for it; on the runtime scene it is never recorded.
+_Avoid_: entity operations, scene editing (when meaning only these structural changes)
+
+**Component edit**:
+One continuous change to one component on a set of entities, such as a gizmo drag or dragging an inspector field, that becomes a single undo step when it is committed. A transform edit is a component edit of the transform.
+_Avoid_: component capture, gizmo edit, field edit (when meaning the whole interaction)

@@ -33,8 +33,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private readonly IProjectTypeCatalog _projectTypeCatalog;
     private readonly RenderGraph _renderGraph;
     private readonly IEditorInteractionState _interactionState;
-    private readonly IEditorSceneSnapshotService _sceneSnapshotService;
-    private readonly IEditorUndoRedoService _undoRedoService;
+    private readonly ISceneAuthoringService _sceneAuthoring;
     private readonly IEditorAssetRefreshService _assetRefreshService;
     private readonly List<ProjectTypeDescriptor> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
@@ -43,6 +42,8 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private readonly Dictionary<TerrainEditKey, TerrainComponent> _pendingTerrainEdits = new();
     private readonly List<Entity> _componentTargets = new();
     private Type? _pendingRemovedComponentType;
+    private ISceneComponentEdit? _activeEdit;
+    private EditorScene? _activeEditScene;
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
 
@@ -54,8 +55,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         IProjectTypeCatalog projectTypeCatalog,
         RenderGraph renderGraph,
         IEditorInteractionState interactionState,
-        IEditorSceneSnapshotService sceneSnapshotService,
-        IEditorUndoRedoService undoRedoService,
+        ISceneAuthoringService sceneAuthoring,
         IEditorAssetRefreshService assetRefreshService)
     {
         _icons = icons;
@@ -65,8 +65,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         _projectTypeCatalog = projectTypeCatalog;
         _renderGraph = renderGraph;
         _interactionState = interactionState;
-        _sceneSnapshotService = sceneSnapshotService;
-        _undoRedoService = undoRedoService;
+        _sceneAuthoring = sceneAuthoring ?? throw new ArgumentNullException(nameof(sceneAuthoring));
         _assetRefreshService = assetRefreshService ?? throw new ArgumentNullException(nameof(assetRefreshService));
     }
 
@@ -135,6 +134,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
         ImGui.End();
         ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
+
+        // A drag, a typed value or a picker session stays one undo step: the edit stays open while any
+        // widget is active and is committed on the first frame nothing is.
+        if (_activeEdit is not null && ImGui.IsAnyItemActive() == false)
+        {
+            CommitActiveEdit();
+        }
     }
 
 	public void DrawEntityControls(EditorScene scene, Entity entity)
@@ -159,8 +165,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 		var isEnabled = scene.World.IsEnabled(entity);
 		if (EditorUIUtility.Checkbox("##EntityEnabled", ref isEnabled))
 		{
-			scene.World.SetEnabled(entity, isEnabled);
-			_interactionState.MarkSceneDirty(scene.World);
+			_sceneAuthoring.SetEnabled(scene, entity, isEnabled);
 		}
 
 		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
@@ -265,16 +270,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                         continue;
                     }
                     
-                    var defaultIconAttribute = descriptor.Type.GetCustomAttribute<DefaultIconAttribute>();
-                    var icon = defaultIconAttribute?.iconName;
-                    if (icon != null)
-                    {
-                        scene.EntityIcons.TryAdd(entity, icon);
-                    }
-
-                    RuntimeComponentAccessor.AddDefault(scene.World, entity, descriptor.Type);
+                    CommitActiveEdit();
+                    _sceneAuthoring.AddComponent(scene, entity, descriptor.Type);
                     EditorGui.SelectEntity(entity, scene.World);
-                    _interactionState.MarkSceneDirty(scene.World);
                     ImGui.CloseCurrentPopup();
                     break;
                 }
@@ -328,7 +326,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 ImGui.OpenPopup(iconPickerPopupId);
             }
 
-            DrawIconPickerModal(scene, entity, iconPickerPopupId, icons, interactionState);
+            DrawIconPickerModal(scene, entity, iconPickerPopupId, icons, _sceneAuthoring);
             ImGui.SameLine();
 			ImGui.SetNextItemWidth(MathF.Max(1.0f, ImGui.GetContentRegionAvail().X - toggleWidth - ImGui.GetStyle().ItemSpacing.X));
             var hasMixedName = IsMixed(scene, typeof(NameComponent), [nameof(NameComponent.Name)]);
@@ -637,10 +635,10 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         if (ImGui.Button("Apply Terrain Settings"))
         {
-            var before = CaptureSingleComponentSnapshot(scene, entity, componentType);
-            RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, stagedComponent);
-            PushComponentEdit("Edit TerrainComponent", before, CaptureSingleComponentSnapshot(scene, entity, componentType));
-            interactionState.MarkSceneDirty(world);
+            CommitActiveEdit();
+            var edit = _sceneAuthoring.BeginComponentEdit(scene, [entity], componentType, "Edit TerrainComponent");
+            edit.Apply(target => RuntimeComponentAccessor.WriteBoxed(world, target, componentType, stagedComponent));
+            edit.Commit();
             _pendingTerrainEdits.Remove(key);
         }
 
@@ -667,11 +665,6 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         }
 
         ImGui.PopID();
-    }
-
-    private SceneComponentSnapshot CaptureSingleComponentSnapshot(EditorScene scene, Entity entity, Type componentType)
-    {
-        return _sceneSnapshotService.CaptureComponent(scene, entity, componentType);
     }
 
     private bool TryGetComponentTargets(World world, Type componentType, out Entity sourceEntity)
@@ -712,17 +705,15 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
-        var before = CaptureComponentSnapshots(scene, componentType);
-        for (var i = 0; i < _componentTargets.Count; i++)
+        var edit = GetActiveEdit(scene, componentType, description);
+        edit.Apply(target =>
         {
-            apply(_componentTargets[i]);
-			if (componentType == typeof(MeshRenderer))
-			{
-				scene.World.MarkWorldTransformChanged(_componentTargets[i]);
-			}
-        }
-
-        PushComponentEdit(scene.World, description, before, CaptureComponentSnapshots(scene, componentType));
+            apply(target);
+            if (componentType == typeof(MeshRenderer))
+            {
+                scene.World.MarkWorldTransformChanged(target);
+            }
+        });
     }
 
     private void ApplyGenericComponentEdits(EditorScene scene, Type componentType, IReadOnlyList<RuntimeComponentFieldEditor.FieldEdit> edits)
@@ -732,21 +723,20 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
-        var before = CaptureComponentSnapshots(scene, componentType);
-        for (var i = 0; i < _componentTargets.Count; i++)
+        var edit = GetActiveEdit(scene, componentType, $"Edit {componentType.Name}");
+        edit.Apply(target =>
         {
-            var target = _componentTargets[i];
             var targetValue = RuntimeComponentAccessor.ReadBoxed(scene.World, target, componentType);
             var changed = false;
             for (var editIndex = 0; editIndex < edits.Count; editIndex++)
             {
-                var edit = edits[editIndex];
-                if (Equals(GetFieldValue(targetValue, edit.Path), edit.Value))
+                var fieldEdit = edits[editIndex];
+                if (Equals(GetFieldValue(targetValue, fieldEdit.Path), fieldEdit.Value))
                 {
                     continue;
                 }
 
-                RuntimeComponentFieldEditor.ApplyFieldEdit(targetValue, edit);
+                RuntimeComponentFieldEditor.ApplyFieldEdit(targetValue, fieldEdit);
                 changed = true;
             }
 
@@ -754,20 +744,36 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             {
                 RuntimeComponentAccessor.WriteBoxed(scene.World, target, componentType, targetValue);
             }
-        }
-
-        PushComponentEdit(scene.World, $"Edit {componentType.Name}", before, CaptureComponentSnapshots(scene, componentType));
+        });
     }
 
-    private List<SceneComponentSnapshot> CaptureComponentSnapshots(EditorScene scene, Type componentType)
+    /// <summary>
+    /// Returns the open component edit for this component on the current targets, beginning a new one,
+    /// and committing any other, when the scene, component or targets changed.
+    /// </summary>
+    private ISceneComponentEdit GetActiveEdit(EditorScene scene, Type componentType, string description)
     {
-        var snapshots = new List<SceneComponentSnapshot>(_componentTargets.Count);
-        for (var i = 0; i < _componentTargets.Count; i++)
+        if (_activeEdit is not null &&
+            ReferenceEquals(_activeEditScene, scene) &&
+            _activeEdit.ComponentType == componentType &&
+            _activeEdit.Entities.SequenceEqual(_componentTargets))
         {
-            snapshots.Add(CaptureSingleComponentSnapshot(scene, _componentTargets[i], componentType));
+            return _activeEdit;
         }
 
-        return snapshots;
+        CommitActiveEdit();
+        _activeEdit = _sceneAuthoring.BeginComponentEdit(scene, _componentTargets.ToArray(), componentType, description);
+        _activeEditScene = scene;
+
+        return _activeEdit;
+    }
+
+    private void CommitActiveEdit()
+    {
+        var edit = _activeEdit;
+        _activeEdit = null;
+        _activeEditScene = null;
+        edit?.Commit();
     }
 
     private bool IsMixed(EditorScene scene, Type componentType, IReadOnlyList<string> fieldNames)
@@ -842,55 +848,6 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 		return draw();
     }
 
-    private void PushComponentEdit(string description, SceneComponentSnapshot before, SceneComponentSnapshot after)
-    {
-        if (SnapshotsEqual(before, after))
-        {
-            return;
-        }
-
-        _undoRedoService.BeginCapture(description);
-        _undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry(description, [before], [after]));
-    }
-
-    private void PushComponentEdit(World world, string description, IReadOnlyList<SceneComponentSnapshot> before, IReadOnlyList<SceneComponentSnapshot> after)
-    {
-        var changedBefore = new List<SceneComponentSnapshot>();
-        var changedAfter = new List<SceneComponentSnapshot>();
-        var count = Math.Min(before.Count, after.Count);
-        for (var i = 0; i < count; i++)
-        {
-            if (SnapshotsEqual(before[i], after[i]))
-            {
-                continue;
-            }
-
-            changedBefore.Add(before[i]);
-            changedAfter.Add(after[i]);
-        }
-
-        if (changedBefore.Count == 0)
-        {
-            return;
-        }
-
-        _undoRedoService.BeginCapture(description);
-        _undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry(description, changedBefore, changedAfter));
-        _interactionState.MarkSceneDirty(world);
-    }
-
-    private static bool SnapshotsEqual(SceneComponentSnapshot left, SceneComponentSnapshot right)
-    {
-        return left.EntityId == right.EntityId &&
-               string.Equals(left.ComponentTypeId, right.ComponentTypeId, StringComparison.Ordinal) &&
-               string.Equals(NormalizeSnapshotJson(left.Data), NormalizeSnapshotJson(right.Data), StringComparison.Ordinal);
-    }
-
-    private static string NormalizeSnapshotJson(JsonElement data)
-    {
-        return JsonSerializer.Serialize(data, AssetJson.SerializerOptions);
-    }
-
 	private bool BeginComponentSection(string label, out bool removeRequested)
 	{
 		_icons.TryGet("delete", out var deleteIcon);
@@ -900,17 +857,14 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
     private void RemoveComponent(EditorScene scene, Entity entity, Type componentType)
     {
-        var snapshot = CaptureSingleComponentSnapshot(scene, entity, componentType);
-        RuntimeComponentAccessor.Remove(scene.World, entity, componentType);
+        CommitActiveEdit();
+        _sceneAuthoring.RemoveComponent(scene, entity, componentType);
         if (componentType == typeof(TerrainComponent))
         {
             ClearPendingTerrainEdit(scene.World, entity);
         }
 
         EditorGui.RefreshSelectedEntity(scene.World, requestFocus: false);
-        _undoRedoService.BeginCapture($"Remove {componentType.Name}");
-        _undoRedoService.CommitCapture(new SceneComponentRemovalUndoRedoEntry($"Remove {componentType.Name}", [snapshot]));
-        _interactionState.MarkSceneDirty(scene.World);
     }
 
     private void ClearPendingTerrainEdit(World world, Entity entity)
@@ -946,7 +900,12 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         return 0;
     }
 
-    private static void DrawIconPickerModal(EditorScene scene, Entity entity, string popupId, IIconManager icons, IEditorInteractionState interactionState)
+    private static void DrawIconPickerModal(
+        EditorScene scene,
+        Entity entity,
+        string popupId,
+        IIconManager icons,
+        ISceneAuthoringService sceneAuthoring)
     {
         var isOpen = true;
         ImGui.SetNextWindowSize(new Vector2(360.0f, 260.0f), ImGuiCond.Appearing);
@@ -973,8 +932,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                     ImGui.PushID(name);
                     if (ImGui.ImageButton("##icon", textureId, PickerIconSize))
                     {
-                        scene.EntityIcons[entity] = name;
-                        interactionState.MarkSceneDirty(scene.World);
+                        sceneAuthoring.SetIcon(scene, entity, name);
                         ImGui.CloseCurrentPopup();
                     }
 

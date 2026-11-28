@@ -107,6 +107,127 @@ public sealed class SceneComponentRemovalUndoRedoEntry : IEditorUndoRedoEntry
 	}
 }
 
+/// <summary>Records adding components: undo removes them again, redo puts them back with the values they were added with.</summary>
+public sealed class SceneComponentAdditionUndoRedoEntry : IEditorUndoRedoEntry
+{
+	private readonly IReadOnlyList<SceneComponentSnapshot> _addedSnapshots;
+
+	public SceneComponentAdditionUndoRedoEntry(string description, IReadOnlyList<SceneComponentSnapshot> addedSnapshots)
+	{
+		Description = string.IsNullOrWhiteSpace(description) ? "Add Component" : description;
+		_addedSnapshots = addedSnapshots ?? throw new ArgumentNullException(nameof(addedSnapshots));
+	}
+
+	public string Description { get; }
+
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.AuthoringScene;
+
+	public void Undo(EditorUndoRedoContext context)
+	{
+		context.SceneSnapshotService.RemoveComponents(context.SceneWorkspace.CurrentScene, _addedSnapshots);
+		EditorGui.RefreshSelectedEntity(context.SceneWorkspace.CurrentScene.World, requestFocus: false);
+		context.InteractionState.MarkSceneDirty();
+	}
+
+	public void Redo(EditorUndoRedoContext context)
+	{
+		context.SceneSnapshotService.ApplyComponentSnapshots(context.SceneWorkspace.CurrentScene, _addedSnapshots);
+		EditorGui.RefreshSelectedEntity(context.SceneWorkspace.CurrentScene.World, requestFocus: false);
+		context.InteractionState.MarkSceneDirty();
+	}
+}
+
+public sealed class EntityEnabledUndoRedoEntry : IEditorUndoRedoEntry
+{
+	private readonly Guid _entityId;
+	private readonly bool _before;
+	private readonly bool _after;
+
+	public EntityEnabledUndoRedoEntry(string description, Guid entityId, bool before, bool after)
+	{
+		Description = string.IsNullOrWhiteSpace(description) ? "Enable Entity" : description;
+		_entityId = entityId;
+		_before = before;
+		_after = after;
+	}
+
+	public string Description { get; }
+
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.AuthoringScene;
+
+	public void Undo(EditorUndoRedoContext context)
+	{
+		Apply(context, _before);
+	}
+
+	public void Redo(EditorUndoRedoContext context)
+	{
+		Apply(context, _after);
+	}
+
+	private void Apply(EditorUndoRedoContext context, bool enabled)
+	{
+		var scene = context.SceneWorkspace.CurrentScene;
+		if (scene.TryGetEntity(_entityId, out var entity) == false)
+		{
+			return;
+		}
+
+		scene.World.SetEnabled(entity, enabled);
+		context.InteractionState.MarkSceneDirty();
+	}
+}
+
+/// <summary>Records an entity's hierarchy icon. A null icon means the entity had none and uses the default.</summary>
+public sealed class EntityIconUndoRedoEntry : IEditorUndoRedoEntry
+{
+	private readonly Guid _entityId;
+	private readonly string? _before;
+	private readonly string? _after;
+
+	public EntityIconUndoRedoEntry(string description, Guid entityId, string? before, string? after)
+	{
+		Description = string.IsNullOrWhiteSpace(description) ? "Change Icon" : description;
+		_entityId = entityId;
+		_before = before;
+		_after = after;
+	}
+
+	public string Description { get; }
+
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.AuthoringScene;
+
+	public void Undo(EditorUndoRedoContext context)
+	{
+		Apply(context, _before);
+	}
+
+	public void Redo(EditorUndoRedoContext context)
+	{
+		Apply(context, _after);
+	}
+
+	private void Apply(EditorUndoRedoContext context, string? icon)
+	{
+		var scene = context.SceneWorkspace.CurrentScene;
+		if (scene.TryGetEntity(_entityId, out var entity) == false)
+		{
+			return;
+		}
+
+		if (icon is null)
+		{
+			scene.EntityIcons.Remove(entity);
+		}
+		else
+		{
+			scene.EntityIcons[entity] = icon;
+		}
+
+		context.InteractionState.MarkSceneDirty();
+	}
+}
+
 public sealed class EntityDeletionUndoRedoEntry : IEditorUndoRedoEntry
 {
 	private readonly IReadOnlyList<DeletedEntitySnapshot> _deletedEntities;
@@ -216,7 +337,7 @@ public sealed class EntityHierarchyUndoRedoEntry : IEditorUndoRedoEntry
 	{
 		for (var i = 0; i < snapshots.Count; i++)
 		{
-			EntityHierarchyEditorOperations.ApplySnapshot(context.SceneWorkspace.CurrentScene, snapshots[i]);
+			SceneAuthoringService.ApplyHierarchySnapshot(context.SceneWorkspace.CurrentScene, snapshots[i]);
 		}
 
 		context.InteractionState.MarkSceneDirty();

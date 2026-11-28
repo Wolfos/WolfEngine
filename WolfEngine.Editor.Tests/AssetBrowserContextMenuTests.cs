@@ -81,7 +81,8 @@ public sealed class AssetBrowserContextMenuTests
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
 			Substitute.For<IEditorCommandService>(),
-			files);
+			files,
+			Substitute.For<ISceneAuthoringService>());
 		_window.SetSelectedFolderForTesting("Assets/Rig_Large");
 		DrawFrame();
 		DrawFrame();

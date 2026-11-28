@@ -53,8 +53,7 @@ public sealed partial class EditorRemoteAutomationController
 					throw new InvalidOperationException("attach_to_entity_id must be a GUID.");
 				}
 
-				var entity = scene.EntityIds.FirstOrDefault(entry => entry.Value == persistentId).Key;
-				if (entity.IsValid == false || scene.World.IsAlive(entity) == false)
+				if (scene.TryGetEntity(persistentId, out var entity) == false)
 				{
 					throw new InvalidOperationException($"Entity '{persistentId:D}' is not in the Play-mode scene.");
 				}

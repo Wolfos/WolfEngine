@@ -14,7 +14,6 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	private static readonly List<Entity> RootEntities = new();
 	private static readonly List<Entity> VisibleEntities = new();
 	private static readonly List<EntitiesWindowRowState> DrawnRows = new();
-	private static readonly List<Entity> PendingDeleteEntities = new();
 	private static readonly List<Entity> DraggedEntities = new();
 	private static readonly HashSet<Entity> RevealAncestors = new();
 	private static readonly HashSet<Entity> SearchMatches = new();
@@ -25,8 +24,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 	private readonly IIconManager _iconManager;
 	private readonly IEditorInteractionState _interactionState;
-	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
-	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly ISceneAuthoringService _sceneAuthoring;
 	private readonly IPrefabAssetCreator _prefabAssetCreator;
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorNotificationService _notificationService;
@@ -44,8 +42,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	public EntitiesWindow(
 		IIconManager iconManager,
 		IEditorInteractionState interactionState,
-		IEditorSceneSnapshotService sceneSnapshotService,
-		IEditorUndoRedoService undoRedoService,
+		ISceneAuthoringService sceneAuthoring,
 		IPrefabAssetCreator prefabAssetCreator,
 		IAssetSelectionService assetSelectionService,
 		IEditorNotificationService notificationService,
@@ -53,8 +50,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	{
 		_iconManager = iconManager;
 		_interactionState = interactionState;
-		_sceneSnapshotService = sceneSnapshotService;
-		_undoRedoService = undoRedoService;
+		_sceneAuthoring = sceneAuthoring;
 		_prefabAssetCreator = prefabAssetCreator;
 		_assetSelectionService = assetSelectionService;
 		_notificationService = notificationService;
@@ -516,13 +512,12 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		if (ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows))
 		{
 			CollectDraggedEntities(draggedEntity);
-			EntityHierarchyEditorOperations.TryReparentEntities(
-				scene,
-				DraggedEntities,
-				_hoveredEntity,
-				_sceneSnapshotService,
-				_undoRedoService,
-				_interactionState);
+			var reparented = _sceneAuthoring.ReparentEntities(scene, DraggedEntities, _hoveredEntity);
+			if (reparented.Succeeded)
+			{
+				SelectEntities(reparented.Value, scene.World);
+			}
+
 			DraggedEntities.Clear();
 		}
 
@@ -673,18 +668,16 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 	private void DrawCreateMenuItem(EditorScene scene, EntityCreationPreset preset)
 	{
-		if (ImGui.MenuItem(EntityCreationOperations.GetDisplayName(preset)) == false)
+		if (ImGui.MenuItem(EntityCreationPresets.GetDisplayName(preset)) == false)
 		{
 			return;
 		}
 
-		EntityCreationOperations.CreateEntity(
-			scene,
-			preset,
-			GetNewEntityPosition(),
-			_sceneSnapshotService,
-			_undoRedoService,
-			_interactionState);
+		var created = _sceneAuthoring.CreateEntity(scene, preset, GetNewEntityPosition());
+		if (created.Succeeded)
+		{
+			EditorGui.SelectEntity(created.Value, scene.World);
+		}
 	}
 
 	private Vector3 GetNewEntityPosition()
@@ -705,114 +698,45 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			return;
 		}
 
-		if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
+		var duplicated = _sceneAuthoring.DuplicateEntity(scene, entity);
+		if (duplicated.Succeeded)
 		{
-			_notificationService.ReportError(
-				"Cannot duplicate entities inside prefab instances. Duplicate the prefab root instance instead.");
+			EditorGui.SelectEntity(duplicated.Value, scene.World, requestFocus: false);
 			return;
 		}
 
-		EntityHierarchyEditorOperations.DuplicateEntity(
-			scene,
-			entity,
-			_sceneSnapshotService,
-			_undoRedoService,
-			_interactionState);
+		_notificationService.ReportError(duplicated.RefusalReason!);
 	}
 
 	private void DeleteEntity(Entity entity, EditorScene scene)
 	{
-		if (scene.World.IsAlive(entity) == false)
-		{
-			return;
-		}
-
-		if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
-		{
-			_notificationService.ReportError(
-				"Cannot delete entities inside prefab instances. Delete the prefab root instance instead.");
-			return;
-		}
-
-		PendingDeleteEntities.Clear();
-		CollectEntitySubtree(entity, scene.World, PendingDeleteEntities);
-		var deletedEntities = _sceneSnapshotService.CaptureDeletedEntities(scene, PendingDeleteEntities);
-		scene.World.DestroyEntity(entity);
-
-		for (var i = 0; i < PendingDeleteEntities.Count; i++)
-		{
-			var deletedEntity = PendingDeleteEntities[i];
-			scene.EntityIcons.Remove(deletedEntity);
-			scene.EntityCellKeys.Remove(deletedEntity);
-			scene.EntityIds.Remove(deletedEntity);
-			scene.EntityPrefabSourcePaths.Remove(deletedEntity);
-		}
-
-		if (EditorGui.HasSelectedEntity && PendingDeleteEntities.Contains(EditorGui.SelectedEntity))
-		{
-			EditorGui.ClearEntitySelection();
-		}
-
-		if (deletedEntities.Count > 0)
-		{
-			_undoRedoService.BeginCapture("Delete Entity");
-			_undoRedoService.CommitCapture(new EntityDeletionUndoRedoEntry("Delete Entity", deletedEntities));
-		}
-
-		_interactionState.MarkSceneDirty(scene.World);
-		PendingDeleteEntities.Clear();
+		DeleteEntities(scene, [entity]);
 	}
 
-	private void DeleteSelectedEntities(EditorScene scene)
+	private bool DeleteEntities(EditorScene scene, IReadOnlyList<Entity> entities)
 	{
-		PendingDeleteEntities.Clear();
-		var roots = new List<Entity>();
-		foreach (var entity in EditorGui.SelectedEntities)
+		var deleted = _sceneAuthoring.DeleteEntities(scene, entities);
+		if (deleted.Succeeded)
 		{
-			if (scene.World.IsAlive(entity) == false || IsDescendantOfSelectedEntity(entity, scene.World))
-			{
-				continue;
-			}
-
-			if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
-			{
-				_notificationService.ReportError(
-					"Cannot delete entities inside prefab instances. Delete the prefab root instance instead.");
-				return;
-			}
-
-			roots.Add(entity);
-			CollectEntitySubtree(entity, scene.World, PendingDeleteEntities);
+			return true;
 		}
 
-		if (roots.Count == 0)
+		_notificationService.ReportError(deleted.RefusalReason!);
+		return false;
+	}
+
+	private static void SelectEntities(IReadOnlyList<Entity> entities, World world)
+	{
+		if (entities.Count == 0)
 		{
 			return;
 		}
 
-		var deletedEntities = _sceneSnapshotService.CaptureDeletedEntities(scene, PendingDeleteEntities);
-		foreach (var root in roots)
+		EditorGui.ReplaceEntitySelection(entities[0], world, requestFocus: false);
+		for (var i = 1; i < entities.Count; i++)
 		{
-			scene.World.DestroyEntity(root);
+			EditorGui.AddEntitySelection(entities[i], world, requestFocus: false);
 		}
-
-		foreach (var entity in PendingDeleteEntities)
-		{
-			scene.EntityIcons.Remove(entity);
-			scene.EntityCellKeys.Remove(entity);
-			scene.EntityIds.Remove(entity);
-			scene.EntityPrefabSourcePaths.Remove(entity);
-		}
-
-		EditorGui.ClearEntitySelection();
-		if (deletedEntities.Count > 0)
-		{
-			_undoRedoService.BeginCapture("Delete Entity");
-			_undoRedoService.CommitCapture(new EntityDeletionUndoRedoEntry("Delete Entity", deletedEntities));
-		}
-
-		_interactionState.MarkSceneDirty(scene.World);
-		PendingDeleteEntities.Clear();
 	}
 
 	public bool DeleteSelectedEntity(EditorScene scene)
@@ -822,8 +746,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			return false;
 		}
 
-		DeleteSelectedEntities(scene);
-		return true;
+		return DeleteEntities(scene, EditorGui.SelectedEntities.ToArray());
 	}
 
 	public bool DuplicateSelectedEntity(EditorScene scene)
@@ -835,47 +758,6 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 		DuplicateEntity(EditorGui.SelectedEntity, scene);
 		return true;
-	}
-
-	private static void CollectEntitySubtree(Entity entity, World world, List<Entity> entities)
-	{
-		entities.Add(entity);
-		if (world.HasComponent<Children>(entity) == false)
-		{
-			return;
-		}
-
-		var child = world.GetComponent<Children>(entity).First;
-		while (child.IsValid)
-		{
-			var next = world.HasComponent<Sibling>(child)
-				? world.GetComponent<Sibling>(child).Next
-				: default;
-			CollectEntitySubtree(child, world, entities);
-			child = next;
-		}
-	}
-
-	private static bool IsDescendantOfSelectedEntity(Entity entity, World world)
-	{
-		var current = entity;
-		while (world.HasComponent<Parent>(current))
-		{
-			var parent = world.GetComponent<Parent>(current).Value;
-			if (parent.IsValid == false)
-			{
-				return false;
-			}
-
-			if (EditorGui.SelectedEntities.Contains(parent))
-			{
-				return true;
-			}
-
-			current = parent;
-		}
-
-		return false;
 	}
 
 	private readonly record struct EntitySelectionClick(Entity Entity, bool Shift, bool Additive);

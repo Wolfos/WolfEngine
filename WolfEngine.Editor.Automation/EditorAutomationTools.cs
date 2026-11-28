@@ -28,7 +28,7 @@ public sealed class EditorAutomationTools
 		return "Editor camera updated in memory.";
 	}
 
-	[McpServerTool(Name = "create_entity"), Description("Create an entity in the running editor's authoring scene without saving the scene.")]
+	[McpServerTool(Name = "create_entity"), Description("Create an empty entity through scene authoring, the way the hierarchy's Create menu does, without saving the scene. In the authoring scene it is one undo step; during Play mode it is created in the runtime scene and not recorded.")]
 	public async Task<string> CreateEntity(
 		[Description("Optional entity name.")] string? name = null,
 		CancellationToken cancellationToken = default)
@@ -37,7 +37,7 @@ public sealed class EditorAutomationTools
 		return $"Created entity '{result.Name}' with id {result.EntityId:D}.";
 	}
 
-	[McpServerTool(Name = "delete_entity"), Description("Delete an entity by the persistent GUID returned by create_entity.")]
+	[McpServerTool(Name = "delete_entity"), Description("Delete an entity and its children by persistent GUID through scene authoring, the way the hierarchy's Delete does. In the authoring scene it is one undo step; during Play mode it acts on the runtime scene and is not recorded. Refused for entities inside a prefab instance: delete the prefab root instead.")]
 	public async Task<string> DeleteEntity(
 		[Description("Persistent entity GUID.")] string entityId,
 		CancellationToken cancellationToken)
@@ -46,7 +46,7 @@ public sealed class EditorAutomationTools
 		return $"Deleted entity {entityId}.";
 	}
 
-	[McpServerTool(Name = "instantiate_model"), Description("Instantiate an imported 3D model into the authoring scene by asset name, through the same path the Assets window uses. Reports how many mesh renderers, skinned mesh renderers and animators the model brought with it, and each mesh renderer's level of detail count.")]
+	[McpServerTool(Name = "instantiate_model"), Description("Instantiate an imported 3D model by asset name, searching the project's asset catalog including mounted engine assets, through scene authoring the way the Assets window's Add to Scene does. In the authoring scene it is one undo step, plus one more when a uniform scale is applied; during Play mode it goes into the runtime scene unrecorded. Reports how many mesh renderers, skinned mesh renderers and animators the model brought with it, and each mesh renderer's level of detail count.")]
 	public Task<InstantiatedModelResult> InstantiateModel(
 		[Description("Substring of the 3D model asset name, such as 'Macarena'.")] string assetName,
 		[Description("Optional spawn X in world units.")] float? x = null,
@@ -401,7 +401,7 @@ public sealed class EditorAutomationTools
 	public Task<EngineShaderReloadResult> ReloadEngineShaders(CancellationToken cancellationToken) =>
 		_controller.ReloadEngineShadersAsync(cancellationToken);
 
-	[McpServerTool(Name = "undo"), Description("Undo the most recent editor authoring action, including a terrain stroke.")]
+	[McpServerTool(Name = "undo"), Description("Undo the most recent editor authoring action, including entity create, delete, instantiate and transform edits and terrain strokes.")]
 	public Task<EditorUndoResult> Undo(CancellationToken cancellationToken) =>
 		_controller.UndoAsync(cancellationToken);
 
@@ -587,14 +587,14 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.SetIndirectLightMinimumAsync(minimum, cancellationToken);
 
-	[McpServerTool(Name = "set_entity_scale"), Description("Set an entity's local scale in the active authoring or Play-mode scene without saving. Supports per-axis negative scales for mirrored-geometry validation.")]
+	[McpServerTool(Name = "set_entity_scale"), Description("Set an entity's local scale in the active authoring or Play-mode scene without saving, as one scene-authoring transform edit: undoable in the authoring scene, unrecorded in Play mode. Supports per-axis negative scales for mirrored-geometry validation.")]
 	public async Task<string> SetEntityScale(string entityId, float x, float y, float z, CancellationToken cancellationToken)
 	{
 		await _controller.SetEntityScaleAsync(Guid.Parse(entityId), new System.Numerics.Vector3(x, y, z), cancellationToken);
 		return $"Entity {entityId}: scale ({x}, {y}, {z}). Changed in memory only.";
 	}
 
-	[McpServerTool(Name = "set_entity_rotation"), Description("Set an entity's local Euler rotation in degrees in the active authoring or Play-mode scene, without saving. Uses the same transform setter as the inspector.")]
+	[McpServerTool(Name = "set_entity_rotation"), Description("Set an entity's local Euler rotation in degrees in the active authoring or Play-mode scene, without saving, as one scene-authoring transform edit: undoable in the authoring scene, unrecorded in Play mode.")]
 	public async Task<string> SetEntityRotation(string entityId, float pitch, float yaw, float roll, CancellationToken cancellationToken)
 	{
 		await _controller.SetEntityRotationAsync(Guid.Parse(entityId), new System.Numerics.Vector3(pitch, yaw, roll), cancellationToken);
