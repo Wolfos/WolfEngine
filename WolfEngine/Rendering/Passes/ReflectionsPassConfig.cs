@@ -44,4 +44,8 @@ public readonly struct ReflectionsPassConfig
 	public IGfxBuffer? MeshBuffer { get; init; }
 	public IGfxBuffer? PackedMeshVertexBuffer { get; init; }
 	public IGfxBuffer? PackedMeshIndexBuffer { get; init; }
+	public IGfxBuffer? TerrainMaterialBuffer { get; init; }
+	public IGfxBuffer? TerrainLayerBuffer { get; init; }
+	public IGfxBuffer? InstanceIndexToTerrainRayTracingResolutionBuffer { get; init; }
+	public DescriptorHandle ErrorTexture { get; init; }
 }

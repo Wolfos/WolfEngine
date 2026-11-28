@@ -7,6 +7,7 @@ import "../Common/normal_decode.slang";
 import "../Common/packed_vertex.slang";
 import "../Common/raytracing_common.slang";
 import "../Common/rt_alpha_test.slang";
+import "../Common/rt_hit_surface.slang";
 import "reflections_common.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 1048576
@@ -22,6 +23,7 @@ cbuffer BindlessHandles : register(b0)
     uint brdfLutHandle;
     uint outputHandle;
     uint samplerHandle;
+    uint errorTextureHandle;
 };
 
 cbuffer CameraParams : register(b1)
@@ -62,6 +64,26 @@ StructuredBuffer<GpuMeshData> g_MeshTable : register(t7);
 StructuredBuffer<uint> g_PackedIndices : register(t9);
 
 StructuredBuffer<PackedMeshVertex> g_PackedVertices : register(t8);
+// Terrain hits are shaded from the terrain's own material and layer maps, as the diffuse ray passes shade them.
+StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t10);
+StructuredBuffer<GpuTerrainLayerData> g_TerrainLayerTable : register(t11);
+StructuredBuffer<uint> g_InstanceIndexToTerrainRtResolution : register(t12);
+
+RtSceneTables ReflectionSceneTables()
+{
+    RtSceneTables tables;
+    tables.instances = g_InstanceTable;
+    tables.materials = g_MaterialTable;
+    tables.instanceIndexToInstanceHandle = g_InstanceIndexToInstanceHandle;
+    tables.meshes = g_MeshTable;
+    tables.packedVertices = g_PackedVertices;
+    tables.packedIndices = g_PackedIndices;
+    tables.terrainMaterials = g_TerrainMaterialTable;
+    tables.terrainLayers = g_TerrainLayerTable;
+    tables.instanceIndexToTerrainRtResolution = g_InstanceIndexToTerrainRtResolution;
+    tables.errorTextureHandle = errorTextureHandle;
+    return tables;
+}
 
 RtAlphaTest ReflectionAlphaTest()
 {
@@ -231,12 +253,98 @@ float TraceDirectionalVisibility(float3 worldPosition, float3 worldNormal, float
     return WolfTraceAnyAlphaTested(sceneTlas, shadowRay, 0xFF, ReflectionAlphaTest()).hit ? 0.0f : 1.0f;
 }
 
+/// Lights a reflected hit: image-based lighting plus each directional light with a traced shadow, plus emission.
+float3 ShadeHitSurface(
+    SurfaceLightingInput surface,
+    float3 hitPosition,
+    float3 worldGeometricNormal,
+    float3 incomingRayDirection)
+{
+    float3 worldNormal = surface.normal;
+    float3 hitViewDirection = normalize(-incomingRayDirection);
+    float3 radiance = EvaluateImageBasedLighting(
+        surface,
+        hitViewDirection,
+        irradianceHandle,
+        prefilteredHandle,
+        brdfLutHandle,
+        samplerHandle,
+        IBL_EXPOSURE);
+
+    [unroll]
+    for (uint lightIndex = 0u;
+         lightIndex < directionalLightCount && lightIndex < MAX_DIRECTIONAL_LIGHTS;
+         lightIndex++)
+    {
+        DirectionalLightData light = directionalLights[lightIndex];
+        float3 lightDirection = -normalize(light.directionAndType.xyz);
+        float nDotL = dot(worldNormal, lightDirection);
+        if (nDotL <= 0.0f)
+        {
+            continue;
+        }
+        float visibility =
+            TraceDirectionalVisibility(hitPosition, worldGeometricNormal, lightDirection);
+        float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a;
+        radiance += AccumulateLight(
+            surface,
+            hitViewDirection,
+            lightColor,
+            lightDirection,
+            1.0f,
+            visibility);
+    }
+
+    return max(radiance + surface.emissive, 0.0f.xxx);
+}
+
+/// Terrain has no mesh material: its surface comes from its layer maps. Terrain reflections are rough, so it is lit
+/// as a fully rough dielectric rather than resolving its ORM layers.
+bool TryShadeTerrainHit(
+    uint instanceIndex,
+    uint primitiveIndex,
+    float2 barycentrics,
+    float3 rayOrigin,
+    float3 rayDirection,
+    float hitDistance,
+    out float3 radiance)
+{
+    radiance = 0.0f.xxx;
+    RtHitSurface hit;
+    if (!RtTryResolveHitSurface(
+            ReflectionSceneTables(),
+            instanceIndex,
+            primitiveIndex,
+            barycentrics,
+            hitDistance,
+            rayOrigin,
+            rayDirection,
+            0.0f,
+            hit) ||
+        !hit.valid)
+    {
+        return false;
+    }
+
+    SurfaceLightingInput surface = (SurfaceLightingInput)0;
+    surface.worldPos = hit.worldPosition;
+    surface.normal = hit.worldNormal;
+    surface.albedo = hit.albedo;
+    surface.metallic = 0.0f;
+    surface.roughness = 1.0f;
+    surface.occlusion = 1.0f;
+    surface.emissive = hit.emissive;
+    radiance = ShadeHitSurface(surface, hit.worldPosition, hit.worldGeometricNormal, rayDirection);
+    return true;
+}
+
 bool TryShadeHitMaterial(
     uint instanceIndex,
     uint primitiveIndex,
     float2 barycentrics,
     float3 hitPosition,
     float3 incomingRayDirection,
+    float hitDistance,
     out float3 radiance)
 {
     radiance = 0.0f.xxx;
@@ -251,6 +359,18 @@ bool TryShadeHitMaterial(
         return false;
     }
     GpuInstanceData instanceData = g_InstanceTable[GetHandleIndex(instanceHandle)];
+    if (instanceData.drawKind == RT_DRAW_KIND_TERRAIN)
+    {
+        return TryShadeTerrainHit(
+            instanceIndex,
+            primitiveIndex,
+            barycentrics,
+            hitPosition - incomingRayDirection * hitDistance,
+            incomingRayDirection,
+            hitDistance,
+            radiance);
+    }
+
     if (!IsPackedHandleValid(instanceData.meshHandle) || !IsPackedHandleValid(instanceData.materialHandle))
     {
         return false;
@@ -340,41 +460,7 @@ bool TryShadeHitMaterial(
     surface.roughness = saturate(ormSample.g * material.metallicRoughness.y);
     surface.occlusion = saturate(ormSample.r);
     surface.emissive = emissive;
-    float3 hitViewDirection = normalize(-incomingRayDirection);
-    radiance = EvaluateImageBasedLighting(
-        surface,
-        hitViewDirection,
-        irradianceHandle,
-        prefilteredHandle,
-        brdfLutHandle,
-        samplerHandle,
-        IBL_EXPOSURE);
-
-    [unroll]
-    for (uint lightIndex = 0u;
-         lightIndex < directionalLightCount && lightIndex < MAX_DIRECTIONAL_LIGHTS;
-         lightIndex++)
-    {
-        DirectionalLightData light = directionalLights[lightIndex];
-        float3 lightDirection = -normalize(light.directionAndType.xyz);
-        float nDotL = dot(worldNormal, lightDirection);
-        if (nDotL <= 0.0f)
-        {
-            continue;
-        }
-        float visibility =
-            TraceDirectionalVisibility(hitPosition, worldGeometricNormal, lightDirection);
-        float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a;
-        radiance += AccumulateLight(
-            surface,
-            hitViewDirection,
-            lightColor,
-            lightDirection,
-            1.0f,
-            visibility);
-    }
-
-    radiance = max(radiance + emissive, 0.0f.xxx);
+    radiance = ShadeHitSurface(surface, hitPosition, worldGeometricNormal, incomingRayDirection);
     return true;
 }
 
@@ -454,6 +540,7 @@ void ReflectionsRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             hit.barycentrics,
             hitPosition,
             reflectionDirection,
+            hitDistance,
             materialRadiance))
         {
             // Geometry without a resolvable material still occludes the sky.

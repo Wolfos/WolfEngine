@@ -185,7 +185,12 @@ public sealed class ReflectionsPass
 				isRayTraced ? rayTracingSceneResources?.InstanceIndexToInstanceHandleBuffer : null,
 			MeshBuffer = isRayTraced ? gpuDrawResources.MeshBuffer : null,
 			PackedMeshVertexBuffer = isRayTraced ? renderer.GetPackedMeshVertexBuffer() : null,
-			PackedMeshIndexBuffer = isRayTraced ? renderer.GetPackedMeshIndexBuffer() : null
+			PackedMeshIndexBuffer = isRayTraced ? renderer.GetPackedMeshIndexBuffer() : null,
+			TerrainMaterialBuffer = isRayTraced ? gpuDrawResources.TerrainMaterialBuffer : null,
+			TerrainLayerBuffer = isRayTraced ? gpuDrawResources.TerrainLayerBuffer : null,
+			InstanceIndexToTerrainRayTracingResolutionBuffer =
+				isRayTraced ? rayTracingSceneResources?.InstanceIndexToTerrainRayTracingResolutionBuffer : null,
+			ErrorTexture = _bindlessRegistry.ErrorTextureHandle
 		};
 	}
 
@@ -211,6 +216,7 @@ public sealed class ReflectionsPass
 			bindlessWriter.SetUInt("irradianceHandle", config.Irradiance.Value);
 			bindlessWriter.SetUInt("prefilteredHandle", config.PrefilteredEnvironment.Value);
 			bindlessWriter.SetUInt("brdfLutHandle", config.BrdfLut.Value);
+			bindlessWriter.SetUInt("errorTextureHandle", config.ErrorTexture.Value);
 		}
 		bindlessWriter.SetUInt("outputHandle", config.Output.Value);
 		bindlessWriter.SetUInt("samplerHandle", config.LinearSampler.Value);
@@ -308,6 +314,12 @@ public sealed class ReflectionsPass
 				?? throw new InvalidOperationException("Ray traced reflections packed vertex buffer missing."));
 			commandList.SetComputeReadOnlyBuffer(9, config.PackedMeshIndexBuffer
 				?? throw new InvalidOperationException("Ray traced reflections packed index buffer missing."));
+			commandList.SetComputeReadOnlyBuffer(10, config.TerrainMaterialBuffer
+				?? throw new InvalidOperationException("Ray traced reflections terrain material buffer missing."));
+			commandList.SetComputeReadOnlyBuffer(11, config.TerrainLayerBuffer
+				?? throw new InvalidOperationException("Ray traced reflections terrain layer buffer missing."));
+			commandList.SetComputeReadOnlyBuffer(12, config.InstanceIndexToTerrainRayTracingResolutionBuffer
+				?? throw new InvalidOperationException("Ray traced reflections terrain resolution sidecar missing."));
 		}
 
 		var size = kernel.ThreadGroupSize;
