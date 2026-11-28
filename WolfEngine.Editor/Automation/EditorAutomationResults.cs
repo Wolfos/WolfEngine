@@ -1,3 +1,4 @@
+using WolfEngine.Editor.UnityImport;
 namespace WolfEngine.Editor.Automation;
 
 public sealed record EditorWorkspaceSummaryResult(
@@ -39,6 +40,11 @@ public sealed record EditorUiStateResult(
 	string? FocusedWindowId,
 	IReadOnlyList<EditorUiWindowResult> Windows,
 	IReadOnlyList<EditorUiDockNodeResult> DockNodes,
+	long EditorFrameSequence,
+	long RenderFrameSequence);
+
+public sealed record UnitySceneImportResult(
+	UnitySceneImportReport Report,
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 

@@ -1,3 +1,4 @@
+using WolfEngine.Editor.UnityImport;
 using System.Collections.Concurrent;
 using System.Numerics;
 using WolfEngine.Editor.Tooling.Imaging;
@@ -37,6 +38,7 @@ public sealed partial class EditorRemoteAutomationController
 	private readonly ISceneAuthoringService _sceneAuthoring;
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
 	private readonly FoliageAuthoringService _foliageAuthoringService;
+	private readonly UnitySceneImporter _unitySceneImporter;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
 	private readonly IPrefabAssetCreator _prefabAssetCreator;
 	private readonly IRenderer _renderer;
@@ -76,6 +78,7 @@ public sealed partial class EditorRemoteAutomationController
 		ISceneAuthoringService sceneAuthoring,
 		ITerrainAuthoringService terrainAuthoringService,
 		FoliageAuthoringService foliageAuthoringService,
+		UnitySceneImporter unitySceneImporter,
 		IProjectAssetPipelineService assetPipelineService,
 		IPrefabAssetCreator prefabAssetCreator,
 		IRenderer renderer,
@@ -125,6 +128,7 @@ public sealed partial class EditorRemoteAutomationController
 		_sceneAuthoring = sceneAuthoring;
 		_terrainAuthoringService = terrainAuthoringService;
 		_foliageAuthoringService = foliageAuthoringService;
+		_unitySceneImporter = unitySceneImporter ?? throw new ArgumentNullException(nameof(unitySceneImporter));
 		_assetPipelineService = assetPipelineService;
 		_prefabAssetCreator = prefabAssetCreator;
 		_renderer = renderer;
@@ -836,6 +840,35 @@ public sealed partial class EditorRemoteAutomationController
 
 		return selected;
 	}, cancellationToken);
+
+	/// <summary>Imports a Unity export as a new scene through <see cref="UnitySceneImporter"/>, then opens that scene.</summary>
+	public Task<UnitySceneImportResult> ImportUnitySceneAsync(
+		string exportFolder,
+		string unityProjectPath,
+		string targetFolder,
+		string sceneName,
+		string? renderConfigPath,
+		CancellationToken cancellationToken) =>
+		EnqueueAsync(async () =>
+		{
+			if (_playSession.State != EditorPlayState.Edit)
+			{
+				throw new InvalidOperationException("Stop Play mode before importing a scene.");
+			}
+
+			var report = _unitySceneImporter.Import(new UnitySceneImportRequest(
+				exportFolder,
+				targetFolder,
+				sceneName,
+				unityProjectPath,
+				renderConfigPath));
+			await _commandService.LoadSceneForAutomationAsync(report.SceneId, cancellationToken).ConfigureAwait(false);
+
+			return new UnitySceneImportResult(
+				report,
+				_editorFrameCoordinator.CompletedSequence,
+				_renderFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
 
 	public Task<SceneLoadResult> LoadSceneAsync(string scenePath, CancellationToken cancellationToken) =>
 		EnqueueAsync(async () =>

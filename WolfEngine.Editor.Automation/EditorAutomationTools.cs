@@ -375,6 +375,22 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken = default) =>
 		_controller.SnapFoliageToTerrainAsync(terrainEntityId, cancellationToken);
 
+	[McpServerTool(Name = "import_unity_scene"), Description("Import a scene exported from Unity with WolfEngine.UnityExporter as a new scene in the open project, then open it. Creates the terrain, its layer set and textures, its trees as placed foliage (using project prefabs matched by name), the directional lights and the main camera. Returns what was imported, skipped and guessed.")]
+	public Task<UnitySceneImportResult> ImportUnityScene(
+		[Description("Folder the Unity exporter wrote, holding scene.json.")] string exportFolder,
+		[Description("The Unity project the export came from; its textures are read from there.")] string unityProjectPath,
+		[Description("Project folder under Assets for the imported assets, for example Assets/Imported/ForestDemo.")] string targetFolder,
+		[Description("Name of the new scene, saved as Assets/Scenes/Name/Name.scene.json. Must not exist yet.")] string sceneName,
+		[Description("Optional project path of a RenderConfig for the scene's world settings.")] string? renderConfigPath = null,
+		CancellationToken cancellationToken = default) =>
+		_controller.ImportUnitySceneAsync(
+			exportFolder,
+			unityProjectPath,
+			targetFolder,
+			sceneName,
+			renderConfigPath,
+			cancellationToken);
+
 	[McpServerTool(Name = "paint_foliage"), Description("Apply one undoable placed-foliage stamp. Returns added, removed and total instances, plus the foliage asset GUID when assigned.")]
 	public Task<FoliagePaintResult> PaintFoliage(
 		[Description("Persistent terrain entity GUID. Omit when the scene contains exactly one terrain.")] string? terrainEntityId = null,

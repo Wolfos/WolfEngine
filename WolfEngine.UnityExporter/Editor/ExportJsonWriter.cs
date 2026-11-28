@@ -105,6 +105,23 @@ namespace WolfEngine.UnityExporter
 			WriteFloats(value.r, value.g, value.b, value.a);
 		}
 
+		public void WriteInts(string name, IReadOnlyList<int> values)
+		{
+			WriteName(name);
+			_builder.Append('[');
+			for (var i = 0; i < values.Count; i++)
+			{
+				if (i > 0)
+				{
+					_builder.Append(", ");
+				}
+
+				_builder.Append(values[i].ToString(CultureInfo.InvariantCulture));
+			}
+
+			_builder.Append(']');
+		}
+
 		public void WriteStrings(string name, IReadOnlyList<string> values)
 		{
 			WriteName(name);

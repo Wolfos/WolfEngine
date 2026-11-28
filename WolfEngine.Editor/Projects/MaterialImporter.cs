@@ -268,26 +268,7 @@ public sealed class MaterialImporter : IMaterialImporter
 
 	private Guid WriteTextureAsset(RgbaImage image, string relativeFolderPath, string fileName, TextureSemantic semantic)
 	{
-		var relativeTexturePath = $"{relativeFolderPath}/{fileName}";
-		var absoluteTexturePath = _projectService.GetAbsolutePath(relativeTexturePath);
-		var textureName = Path.GetFileNameWithoutExtension(fileName);
-		var nodeId = Guid.NewGuid();
-
-		image.SavePng(absoluteTexturePath);
-		_metadataStore.Save(
-			AssetFileExtensions.GetMetaPath(absoluteTexturePath),
-			CreateTextureMetadata(textureName, nodeId, semantic));
-		return nodeId;
-	}
-
-	private static AssetSourceMetaFile CreateTextureMetadata(string name, Guid nodeId, TextureSemantic semantic)
-	{
-		var metadata = CreateMetadata(AssetImporterIds.Texture, AssetType.Texture2D, name, nodeId);
-		metadata.SetImportSettings(new TextureImportSettings
-		{
-			TextureSemantic = semantic
-		});
-		return metadata;
+		return GeneratedTextureWriter.Write(_projectService, _metadataStore, image, $"{relativeFolderPath}/{fileName}", semantic);
 	}
 
 	private static TextureSemantic GetAlbedoSemantic(MaterialAssetType materialType)

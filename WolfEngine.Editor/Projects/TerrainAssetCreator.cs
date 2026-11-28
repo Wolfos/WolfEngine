@@ -5,6 +5,9 @@ namespace WolfEngine.Editor.Projects;
 public interface ITerrainAssetCreator
 {
 	EditorAssetCreationResult CreateTerrainAsset(string targetRelativeFolderPath);
+
+	/// <summary>Writes <paramref name="content"/> as a new terrain asset under the next free name based on its own.</summary>
+	EditorAssetCreationResult CreateTerrainAsset(string targetRelativeFolderPath, TerrainAsset content);
 }
 
 public sealed class TerrainAssetCreator : ITerrainAssetCreator
@@ -25,6 +28,11 @@ public sealed class TerrainAssetCreator : ITerrainAssetCreator
 
 	public EditorAssetCreationResult CreateTerrainAsset(string targetRelativeFolderPath)
 	{
+		return CreateTerrainAsset(targetRelativeFolderPath, content: null);
+	}
+
+	public EditorAssetCreationResult CreateTerrainAsset(string targetRelativeFolderPath, TerrainAsset? content)
+	{
 		if (_projectService.HasOpenProject == false)
 		{
 			return EditorAssetCreationResult.Failed("Open or create a project before creating terrain assets.");
@@ -33,13 +41,13 @@ public sealed class TerrainAssetCreator : ITerrainAssetCreator
 		var targetFolder = ProjectPathUtility.NormalizeAssetsFolderPath(targetRelativeFolderPath);
 		var absoluteFolder = _projectService.GetAbsolutePath(targetFolder);
 		Directory.CreateDirectory(absoluteFolder);
-		var assetName = GetNextAssetName(absoluteFolder);
+		var assetName = GetNextAssetName(absoluteFolder, content?.Name ?? "New Terrain");
 		var relativeAssetPath = $"{targetFolder}/{assetName}{TerrainAsset.FileExtension}";
 		var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
 
 		try
 		{
-			TerrainAssetSerializer.Write(absoluteAssetPath, TerrainAsset.CreateDefault(assetName));
+			TerrainAssetSerializer.Write(absoluteAssetPath, content ?? TerrainAsset.CreateDefault(assetName));
 			var metadata = new AssetSourceMetaFile
 			{
 				SourceId = Guid.NewGuid(),
@@ -69,9 +77,8 @@ public sealed class TerrainAssetCreator : ITerrainAssetCreator
 		}
 	}
 
-	private static string GetNextAssetName(string absoluteFolder)
+	private static string GetNextAssetName(string absoluteFolder, string baseName)
 	{
-		const string baseName = "New Terrain";
 		var candidate = baseName;
 		var index = 1;
 		while (File.Exists(Path.Combine(absoluteFolder, candidate + TerrainAsset.FileExtension)))

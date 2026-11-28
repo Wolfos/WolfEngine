@@ -356,6 +356,21 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<FoliageSnapResult> SnapFoliageToTerrainAsync(string? terrainEntityId, CancellationToken cancellationToken) =>
 		GetRunningEditor().SnapFoliageToTerrainAsync(terrainEntityId, cancellationToken);
 
+	public Task<UnitySceneImportResult> ImportUnitySceneAsync(
+		string exportFolder,
+		string unityProjectPath,
+		string targetFolder,
+		string sceneName,
+		string? renderConfigPath,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().ImportUnitySceneAsync(
+			exportFolder,
+			unityProjectPath,
+			targetFolder,
+			sceneName,
+			renderConfigPath,
+			cancellationToken);
+
 	public Task<FoliagePaintResult> PaintFoliageAsync(
 		string? terrainEntityId,
 		float localX,

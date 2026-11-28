@@ -204,7 +204,7 @@ Unity terrain data stores trees and detail separately, which maps onto the two t
 - `TreeInstances`, with normalised position, width and height scale, and rotation, become placed instances. Unity scales trees by width and height separately, which map onto the instance's width and height scales. In the Forest demo the width-to-height ratio runs from 0.43 to 2.4, too wide to approximate with one uniform scale.
 - Detail prototypes become detail `FoliageType`s, and the per-type detail maps become override paint (add). The converted terrain starts with empty biomes and fully painted detail, and can move to biomes gradually.
 
-The pack's demo terrain data (`Terrain Forest Demo Standard Source.asset`) is in Unity's binary serialisation, so conversion needs a reader for it. That reader belongs with terrain import, which this phase is built together with.
+Terrain trees are imported by the Unity scene import; see `unity-import.md`. It uses an exporter that runs inside Unity instead of reading Unity's binary terrain format. Detail prototypes and detail maps are not imported.
 
 ## Validation
 

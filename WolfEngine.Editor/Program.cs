@@ -1,3 +1,4 @@
+using WolfEngine.Editor.UnityImport;
 using WolfEngine.Rendering;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
@@ -84,6 +85,8 @@ public static class Program
 		services.AddSingleton<IMaterialExtractionService, MaterialExtractionService>();
 		services.AddSingleton<IDataAssetCreator, DataAssetCreator>();
 		services.AddSingleton<ITerrainAssetCreator, TerrainAssetCreator>();
+		services.AddSingleton<UnityPrefabImporter>();
+		services.AddSingleton<UnitySceneImporter>();
 		services.AddSingleton<IPrefabAssetCreator, PrefabAssetCreator>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
 		services.AddSingleton<IAudioAssetImporter, AudioAssetImporter>();

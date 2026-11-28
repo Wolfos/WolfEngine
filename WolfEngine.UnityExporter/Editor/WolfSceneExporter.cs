@@ -121,6 +121,19 @@ namespace WolfEngine.UnityExporter
 
 			json.EndArray();
 
+			// The prefabs the scene places, as terrain trees or as instances, with their materials and meshes.
+			var prefabs = new PrefabAssetExporter();
+			var prefabPaths = collector.Terrains
+				.SelectMany(terrain => terrain.terrainData.treePrototypes)
+				.Where(prototype => prototype.prefab != null)
+				.Select(prototype => AssetDatabase.GetAssetPath(prototype.prefab))
+				.Concat(collector.PrefabInstances.Select(instance => instance.PrefabPath))
+				.Where(path => string.IsNullOrEmpty(path) == false);
+			prefabs.WritePrefabs(json, prefabPaths);
+			prefabs.WriteMaterials(json);
+			prefabs.WriteMeshes(json, outputFolder);
+			json.WriteStrings("warnings", prefabs.Warnings);
+
 			json.BeginObject("skipped");
 			json.Write("inactiveObjects", collector.InactiveObjectCount);
 			json.Write("prefabInstancesWithOverrides", collector.PrefabInstances.Count(instance => instance.OverrideCount > 0));
@@ -131,6 +144,7 @@ namespace WolfEngine.UnityExporter
 			var treeCount = collector.Terrains.Sum(terrain => terrain.terrainData.treeInstanceCount);
 
 			return $"{collector.Terrains.Count} terrains, {treeCount} trees, {collector.PrefabInstances.Count} prefab instances, " +
+			       $"{prefabs.MeshCount} meshes, {prefabs.MaterialCount} materials, {prefabs.Warnings.Count} warnings, " +
 			       $"{collector.MeshObjects.Count} mesh objects, {collector.Lights.Count} lights, {collector.Cameras.Count} cameras, " +
 			       $"{collector.InactiveObjectCount} inactive objects skipped, written to {outputFolder}";
 		}

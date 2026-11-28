@@ -6,6 +6,9 @@ public interface IDataAssetCreator
 {
 	EditorAssetCreationResult CreateDataAsset(Type dataAssetType, string targetRelativeFolderPath);
 	EditorAssetCreationResult CreateDataAsset(Type dataAssetType, string targetRelativeFolderPath, string baseName);
+
+	/// <summary>Creates a data asset with the given content instead of the type's defaults, under the next free name.</summary>
+	EditorAssetCreationResult CreateDataAsset(Type dataAssetType, string targetRelativeFolderPath, string baseName, IDataAsset content);
 	EditorAssetCreationResult RestoreDataAsset(Type dataAssetType, string relativeAssetPath, AssetSourceMetaFile metadata);
 }
 
@@ -36,6 +39,15 @@ public sealed class DataAssetCreator : IDataAssetCreator
 
 	public EditorAssetCreationResult CreateDataAsset(Type dataAssetType, string targetRelativeFolderPath, string baseName)
 	{
+		return CreateDataAsset(dataAssetType, targetRelativeFolderPath, baseName, content: null);
+	}
+
+	public EditorAssetCreationResult CreateDataAsset(
+		Type dataAssetType,
+		string targetRelativeFolderPath,
+		string baseName,
+		IDataAsset? content)
+	{
 		if (_projectService.HasOpenProject == false)
 		{
 			return EditorAssetCreationResult.Failed("Open or create a project before creating data assets.");
@@ -62,11 +74,25 @@ public sealed class DataAssetCreator : IDataAssetCreator
 			]
 		};
 
-		return RestoreDataAsset(dataAssetType, relativeAssetPath, metadata);
+		return WriteDataAsset(dataAssetType, relativeAssetPath, metadata, content);
 	}
 
 	public EditorAssetCreationResult RestoreDataAsset(Type dataAssetType, string relativeAssetPath, AssetSourceMetaFile metadata)
 	{
+		return WriteDataAsset(dataAssetType, relativeAssetPath, metadata, content: null);
+	}
+
+	private EditorAssetCreationResult WriteDataAsset(
+		Type dataAssetType,
+		string relativeAssetPath,
+		AssetSourceMetaFile metadata,
+		IDataAsset? content)
+	{
+		if (content is not null && dataAssetType.IsInstanceOfType(content) == false)
+		{
+			throw new ArgumentException($"The content is not a {dataAssetType.Name}.", nameof(content));
+		}
+
 		var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
 		var absoluteMetaPath = AssetFileExtensions.GetMetaPath(absoluteAssetPath);
 		if (File.Exists(absoluteAssetPath) || File.Exists(absoluteMetaPath))
@@ -76,7 +102,7 @@ public sealed class DataAssetCreator : IDataAssetCreator
 
 		try
 		{
-			var asset = _dataAssetStore.CreateDefault(dataAssetType);
+			var asset = content ?? _dataAssetStore.CreateDefault(dataAssetType);
 			_dataAssetStore.SaveAsset(absoluteAssetPath, dataAssetType, asset);
 			_metadataStore.Save(absoluteMetaPath, metadata);
 			_projectService.RefreshAssetSource(relativeAssetPath);
