@@ -35,6 +35,10 @@ public sealed record UnitySceneImportRequest(
 /// their transform, so these are what the import leaves out.
 /// </param>
 /// <param name="DiscardedLayerWeight">Mean layer weight per texel beyond the four layers a texel holds, from 0 to 1.</param>
+/// <param name="DetailFits">
+/// Per Unity detail prototype converted to detail foliage, how its painted density was fitted to the layers.
+/// </param>
+/// <param name="SkippedDetailPrototypes">Detail prototypes not converted, with why.</param>
 public sealed record UnitySceneImportReport(
 	Guid SceneId,
 	string ScenePath,
@@ -49,7 +53,21 @@ public sealed record UnitySceneImportReport(
 	IReadOnlyDictionary<string, int> SkippedPrefabInstances,
 	IReadOnlyDictionary<string, int> InstanceOverrides,
 	float DiscardedLayerWeight,
+	IReadOnlyList<UnityDetailPrototypeReport> DetailFits,
+	IReadOnlyList<string> SkippedDetailPrototypes,
 	IReadOnlyList<string> Warnings);
+
+/// <summary>How a Unity detail prototype became detail foliage.</summary>
+/// <param name="Densities">Plants per square metre on each layer, by layer name, for the layers that grow it.</param>
+/// <param name="PaintedPlants">Plants Unity placed across the terrain.</param>
+/// <param name="FittedPlants">Plants the layer densities grow across the terrain, before distance and clumping.</param>
+/// <param name="RelativeError">See <see cref="UnityDetailFit.RelativeError"/>.</param>
+public sealed record UnityDetailPrototypeReport(
+	string Prefab,
+	IReadOnlyDictionary<string, float> Densities,
+	double PaintedPlants,
+	double FittedPlants,
+	float RelativeError);
 
 /// <summary>
 /// Imports a scene exported from Unity with WolfEngine.UnityExporter into the open project: each terrain with its
@@ -112,6 +130,10 @@ public sealed class UnitySceneImporter
 		var prefabPaths = export.Terrains
 			.SelectMany(terrain => terrain.TreePrototypes)
 			.Select(prototype => prototype.Prefab)
+			.Concat(export.Terrains
+				.SelectMany(terrain => terrain.DetailPrototypes)
+				.Where(prototype => prototype.UsePrototypeMesh)
+				.Select(prototype => prototype.Prefab))
 			.OfType<string>();
 		if (request.PlacePrefabInstances)
 		{
@@ -150,6 +172,8 @@ public sealed class UnitySceneImporter
 			context.SkippedPrefabInstances,
 			context.InstanceOverrides,
 			context.DiscardedLayerWeight,
+			context.DetailFits,
+			context.SkippedDetailPrototypes,
 			context.Warnings);
 	}
 
@@ -249,6 +273,12 @@ public sealed class UnitySceneImporter
 		foreach (var layer in terrain.Layers)
 		{
 			layerSet.Layers.Add(ImportLayer(context, layer, $"{terrainFolder}/Textures"));
+		}
+
+		var biomes = ImportDetailBiomes(context, terrain, terrainName, terrainFolder);
+		for (var i = 0; i < biomes.Length; i++)
+		{
+			layerSet.Layers[i].Biome = biomes[i];
 		}
 
 		context.LayerCount += terrain.Layers.Count;
@@ -426,6 +456,191 @@ public sealed class UnitySceneImporter
 			$"the foliage of '{terrainName}'");
 	}
 
+	/// <summary>
+	/// Converts the terrain's mesh detail prototypes into detail foliage types, fits each one's painted density to the
+	/// layers, and writes a biome per layer that grows anything. Unity's detail maps themselves are not kept.
+	/// </summary>
+	/// <returns>Per layer, its biome, or an empty reference for a layer that grows no detail.</returns>
+	private AssetRef<FoliageBiome>[] ImportDetailBiomes(
+		ImportContext context,
+		UnityTerrainExport terrain,
+		string terrainName,
+		string terrainFolder)
+	{
+		var biomes = new AssetRef<FoliageBiome>[terrain.Layers.Count];
+		var details = context.Export.ReadDetails(terrain);
+		if (details.Length == 0 || terrain.Layers.Count == 0)
+		{
+			return biomes;
+		}
+
+		var alphamaps = context.Export.ReadAlphamaps(terrain);
+		var size = terrain.GetSize();
+		var terrainArea = size.X * size.Z;
+		var cellArea = terrainArea / ((float)terrain.DetailResolution * terrain.DetailResolution);
+		var coverage = string.Equals(terrain.DetailScatterMode, "CoverageMode", StringComparison.Ordinal);
+		var planeSize = terrain.DetailResolution * terrain.DetailResolution;
+		var entries = new List<FoliageBiomeEntry>[terrain.Layers.Count];
+		for (var i = 0; i < entries.Length; i++)
+		{
+			entries[i] = [];
+		}
+
+		for (var prototypeIndex = 0; prototypeIndex < terrain.DetailPrototypes.Count; prototypeIndex++)
+		{
+			var prototype = terrain.DetailPrototypes[prototypeIndex];
+			var label = prototype.Prefab ?? prototype.Texture ?? $"(prototype {prototypeIndex})";
+			if (prototype.UsePrototypeMesh == false || string.IsNullOrWhiteSpace(prototype.Prefab))
+			{
+				context.SkippedDetailPrototypes.Add($"{label}: grass billboards are not supported; only mesh detail converts");
+				continue;
+			}
+
+			if (context.ConvertedPrefabs.TryGetValue(prototype.Prefab, out var converted) == false ||
+			    _projectService.TryGetAsset(converted.PrefabId, out var prefab) == false)
+			{
+				context.SkippedDetailPrototypes.Add($"{label}: the prefab did not convert");
+				continue;
+			}
+
+			var densityPerValue = GetDetailDensityPerValue(terrain, prototype, cellArea, coverage);
+			var fit = UnityDetailConversion.Fit(
+				alphamaps,
+				terrain.AlphamapResolution,
+				terrain.Layers.Count,
+				details.AsSpan(prototypeIndex * planeSize, planeSize),
+				terrain.DetailResolution,
+				densityPerValue,
+				terrainArea);
+			if (fit.PaintedPlants <= 0.0)
+			{
+				context.SkippedDetailPrototypes.Add($"{label}: not painted anywhere");
+				continue;
+			}
+
+			var type = GetOrCreateDetailFoliageType(context, prefab, terrain.DetailObjectDistance);
+			var densities = new Dictionary<string, float>(StringComparer.Ordinal);
+			for (var layer = 0; layer < terrain.Layers.Count; layer++)
+			{
+				var density = fit.Densities[layer];
+				if (density < MinimumDetailDensity)
+				{
+					continue;
+				}
+
+				densities[terrain.Layers[layer].Name] = density;
+				entries[layer].Add(CreateBiomeEntry(prototype, type, density));
+			}
+
+			context.DetailFits.Add(new UnityDetailPrototypeReport(
+				label,
+				densities,
+				fit.PaintedPlants,
+				fit.FittedPlants,
+				fit.RelativeError));
+		}
+
+		for (var layer = 0; layer < terrain.Layers.Count; layer++)
+		{
+			if (entries[layer].Count == 0)
+			{
+				continue;
+			}
+
+			var layerName = SanitizeFileName(string.IsNullOrWhiteSpace(terrain.Layers[layer].Name) ? $"Layer {layer}" : terrain.Layers[layer].Name);
+			var biome = new FoliageBiome
+			{
+				Entries = entries[layer]
+			};
+			var biomeId = RequireCreated(
+				_dataAssetCreator.CreateDataAsset(typeof(FoliageBiome), $"{terrainFolder}/Biomes", $"{terrainName} {layerName}", biome),
+				$"the biome of layer '{layerName}'");
+			biomes[layer] = new AssetRef<FoliageBiome> { NodeId = biomeId };
+		}
+
+		return biomes;
+	}
+
+	/// <summary>Below this many plants per square metre a fitted layer density is noise from the fit, and dropped.</summary>
+	private const float MinimumDetailDensity = 0.01f;
+
+	/// <summary>
+	/// Plants per square metre one unit of a detail map value stands for. In instance count mode a value is a plant count
+	/// per cell. In coverage mode it is coverage out of 255, which Unity turns into plants by the prototype's density
+	/// relative to its size; that is approximated as density plants per square metre at full coverage.
+	/// </summary>
+	private static float GetDetailDensityPerValue(
+		UnityTerrainExport terrain,
+		UnityDetailPrototypeExport prototype,
+		float cellArea,
+		bool coverage)
+	{
+		var scale = prototype.UseDensityScaling ? Math.Clamp(terrain.DetailObjectDensity, 0.0f, 1.0f) : 1.0f;
+		if (coverage)
+		{
+			return prototype.Density * scale / 255.0f;
+		}
+
+		return cellArea > 0.0f ? scale / cellArea : 0.0f;
+	}
+
+	/// <summary>
+	/// Unity scales detail by a width and a height picked from their ranges with the same noise, so wide plants are also
+	/// tall ones. The entry keeps the height range and the width as a ratio of it.
+	/// </summary>
+	private static FoliageBiomeEntry CreateBiomeEntry(UnityDetailPrototypeExport prototype, AssetRef<FoliageType> type, float density)
+	{
+		var minHeight = MathF.Max(prototype.MinHeight, 0.01f);
+		var maxHeight = MathF.Max(prototype.MaxHeight, minHeight);
+		var minRatio = prototype.MinWidth / minHeight;
+		var maxRatio = prototype.MaxWidth / maxHeight;
+
+		return new FoliageBiomeEntry
+		{
+			Type = type,
+			Density = density,
+			MinHeightScale = minHeight,
+			MaxHeightScale = maxHeight,
+			MinWidthRatio = MathF.Max(0.01f, MathF.Min(minRatio, maxRatio)),
+			MaxWidthRatio = MathF.Max(0.01f, MathF.Max(minRatio, maxRatio)),
+			AlignToNormal = Math.Clamp(prototype.AlignToGround, 0.0f, 1.0f)
+		};
+	}
+
+	/// <summary>
+	/// Creates a foliage type for drawing a prefab as detail: out to Unity's detail distance, shadowed near the camera
+	/// only, and never ray traced. Kept apart from a tree type for the same prefab, whose distances differ.
+	/// </summary>
+	private AssetRef<FoliageType> GetOrCreateDetailFoliageType(ImportContext context, AssetDatabaseEntry prefab, float distance)
+	{
+		if (context.DetailTypesByPrefab.TryGetValue(prefab.Id, out var known))
+		{
+			return known;
+		}
+
+		var cullDistance = MathF.Max(distance, 1.0f);
+		var name = $"{GetPrefabFileName(prefab)} Detail";
+		var type = new FoliageType
+		{
+			Prefab = new AssetRef<Prefab> { NodeId = prefab.Id },
+			CullDistance = cullDistance,
+			ShadowDistance = MathF.Min(DetailShadowDistance, cullDistance),
+			RayTracingDistance = 0.0f,
+			DetailFadeDistance = cullDistance * 0.25f
+		};
+		var typeId = RequireCreated(
+			_dataAssetCreator.CreateDataAsset(typeof(FoliageType), $"{context.TargetFolder}/Foliage Types", name, type),
+			$"the detail foliage type for '{name}'");
+		var created = new AssetRef<FoliageType> { NodeId = typeId };
+		context.DetailTypesByPrefab.Add(prefab.Id, created);
+		context.CreatedFoliageTypes.Add(name);
+
+		return created;
+	}
+
+	/// <summary>How far imported detail casts shadows, in metres: the nearest cascade or two.</summary>
+	private const float DetailShadowDistance = 25.0f;
+
 	private static string GetPrefabFileName(AssetDatabaseEntry entry)
 	{
 		var fileName = Path.GetFileName(entry.RelativeSourcePath);
@@ -588,6 +803,9 @@ public sealed class UnitySceneImporter
 		public UnitySceneExport Export { get; } = export;
 		public string TargetFolder { get; } = targetFolder;
 		public Dictionary<Guid, AssetRef<FoliageType>> FoliageTypesByPrefab { get; } = new();
+		public Dictionary<Guid, AssetRef<FoliageType>> DetailTypesByPrefab { get; } = new();
+		public List<UnityDetailPrototypeReport> DetailFits { get; } = [];
+		public List<string> SkippedDetailPrototypes { get; } = [];
 		public Dictionary<string, int> UnresolvedTreePrefabs { get; } = new(StringComparer.Ordinal);
 		public List<string> CreatedFoliageTypes { get; } = [];
 		public IReadOnlyDictionary<string, UnityConvertedPrefab> ConvertedPrefabs { get; set; } = new Dictionary<string, UnityConvertedPrefab>();

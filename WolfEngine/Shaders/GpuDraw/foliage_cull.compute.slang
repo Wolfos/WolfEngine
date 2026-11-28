@@ -1,7 +1,8 @@
 import "../Common/draw_data.slang";
+import "foliage_common.slang";
 
-// Culls one terrain's placed foliage for up to three views, and expands every visible instance into the instance table's
-// foliage region so the geometry shaders draw it like any other instance. See docs/foliage.md.
+// Culls one terrain's placed or detail foliage for up to three views, and expands every visible instance into the
+// instance table's foliage region so the geometry shaders draw it like any other instance. See docs/foliage.md.
 
 #define WOLF_MAX_CULL_VIEW_COUNT 3
 // Mirrors FrustumCulling.MaxPlaneCount.
@@ -41,20 +42,8 @@ cbuffer FoliageCullParams : register(b12)
     uint expansionBase;
     uint expansionCapacity;
     uint ownerDrawFlags;
-};
-
-// Mirrors GpuFoliageChunk in TerrainFoliageRuntime.cs: up to 64 instances of one cell, quantised across the cell's
-// bounds. cullMin.w is the longest cull distance in the chunk, cullMax.w the longest shadow distance.
-struct GpuFoliageChunk
-{
-    float4 quantizationMin;
-    float4 quantizationMax;
-    float4 cullMin;
-    float4 cullMax;
-    uint instanceStart;
-    uint instanceCount;
-    uint pad0;
-    uint pad1;
+    // Entries in g_FoliageTypes. Instances naming a type past it are empty detail slots, or unresolved types.
+    uint typeCount;
 };
 
 // Mirrors GpuFoliageType in GpuFoliageDraws.cs. lod.levelBatches is unused; levels map to batches per renderer.
@@ -101,36 +90,6 @@ struct FoliageInstance
     float maxScale;
     uint typeIndex;
 };
-
-float4 UnpackFoliageQuaternion(uint packed)
-{
-    // Mirrors FoliageInstancePacking.UnpackQuaternion: three 10-bit components in [-1/sqrt(2), 1/sqrt(2)] in 1022 steps,
-    // so zero is exact, most significant first, and the index of the left-out largest in the top two bits.
-    const float limit = 0.70710678f;
-    uint largest = packed >> 30;
-    float smallest[3];
-    smallest[0] = ((float((packed >> 20) & 0x3FFu) / 1022.0f) * 2.0f - 1.0f) * limit;
-    smallest[1] = ((float((packed >> 10) & 0x3FFu) / 1022.0f) * 2.0f - 1.0f) * limit;
-    smallest[2] = ((float(packed & 0x3FFu) / 1022.0f) * 2.0f - 1.0f) * limit;
-    float largestValue = sqrt(max(0.0f, 1.0f - dot(float3(smallest[0], smallest[1], smallest[2]),
-                                                   float3(smallest[0], smallest[1], smallest[2]))));
-
-    float4 q;
-    uint next = 0;
-    for (uint i = 0; i < 4; i++)
-    {
-        float value = largestValue;
-        if (i != largest)
-        {
-            value = smallest[next];
-            next++;
-        }
-
-        q[i] = value;
-    }
-
-    return normalize(q);
-}
 
 // Mirrors FoliageInstancePacking and TerrainFoliageRuntime.GetInstanceTransform: scale, then rotation, then position,
 // in the terrain's local space, for row vectors.
@@ -243,6 +202,11 @@ void CSCullFoliage(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThr
     {
         uint instanceIndex = chunk.instanceStart + local;
         FoliageInstance instance = DecodeFoliageInstance(g_FoliageInstances[instanceIndex], chunk);
+        if (instance.typeIndex >= typeCount)
+        {
+            continue;
+        }
+
         GpuFoliageType type = g_FoliageTypes[instance.typeIndex];
         if (type.rendererCount == 0u)
         {

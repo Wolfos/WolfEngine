@@ -27,4 +27,10 @@ public sealed class FoliageType : IDataAsset
 	/// the type out of it.
 	/// </summary>
 	public float RayTracingDistance { get; set; } = 100.0f;
+
+	/// <summary>
+	/// Grown as detail foliage, the distance in metres before <see cref="CullDistance"/> over which plants thin out and
+	/// shrink away, so the edge of the generated area does not show. Detail is never ray traced.
+	/// </summary>
+	public float DetailFadeDistance { get; set; } = 15.0f;
 }

@@ -404,6 +404,7 @@ public sealed class DataAssetEditor
 					changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Normal));
 					changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Orm));
 					changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Height));
+					changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Biome));
 				}
 				finally
 				{
@@ -479,6 +480,11 @@ public sealed class DataAssetEditor
 		if (valueType.IsArray)
 		{
 			return DrawArray(label, valueType, value as Array);
+		}
+
+		if (valueType.IsGenericType && valueType.GetGenericTypeDefinition() == typeof(List<>))
+		{
+			return DrawList(label, valueType, value as System.Collections.IList);
 		}
 
 		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, valueType, value, member));
@@ -581,6 +587,82 @@ public sealed class DataAssetEditor
 				if (ImGui.Button("Add element"))
 				{
 					next = DataAssetArrayEditing.AddElement(next, elementType);
+					elementsChanged = true;
+				}
+			}
+			finally
+			{
+				ImGui.EndDisabled();
+			}
+
+			if (canAdd == false)
+			{
+				ImGui.TextDisabled($"{elementType.Name} needs a public parameterless constructor to add elements.");
+			}
+
+			return elementsChanged;
+		});
+
+		return new PropertyDrawerResult(true, changed, next);
+	}
+
+	/// <summary>
+	/// Draws a <see cref="List{T}"/> like an array, editing the list in place. A null list is replaced by a new one when
+	/// an element is added.
+	/// </summary>
+	private PropertyDrawerResult DrawList(string label, Type listType, System.Collections.IList? value)
+	{
+		var elementType = listType.GetGenericArguments()[0];
+		var next = value;
+		// Keep the ImGui ID stable when the element count changes.
+		var changed = DrawCollapsibleGroup($"{label} ({value?.Count ?? 0})###List", () =>
+		{
+			var removeIndex = -1;
+			var elementsChanged = false;
+			if (next is null || next.Count == 0)
+			{
+				ImGui.TextDisabled("Empty list");
+			}
+
+			for (var index = 0; index < (next?.Count ?? 0); index++)
+			{
+				ImGui.PushID(index);
+				try
+				{
+					var elementResult = DrawValue($"[{index}]", elementType, next![index]);
+					if (elementResult.Changed)
+					{
+						next[index] = elementResult.Value;
+						elementsChanged = true;
+					}
+
+					if (ImGui.Button("Remove element"))
+					{
+						removeIndex = index;
+					}
+				}
+				finally
+				{
+					ImGui.PopID();
+				}
+
+				ImGui.Separator();
+			}
+
+			if (removeIndex >= 0)
+			{
+				next!.RemoveAt(removeIndex);
+				elementsChanged = true;
+			}
+
+			var canAdd = DataAssetArrayEditing.CanCreateElement(elementType);
+			ImGui.BeginDisabled(canAdd == false);
+			try
+			{
+				if (ImGui.Button("Add element"))
+				{
+					next ??= (System.Collections.IList)Activator.CreateInstance(listType)!;
+					next.Add(DataAssetArrayEditing.CreateElement(elementType));
 					elementsChanged = true;
 				}
 			}

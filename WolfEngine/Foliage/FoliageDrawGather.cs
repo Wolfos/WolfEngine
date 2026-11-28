@@ -113,6 +113,42 @@ internal sealed class FoliageDrawGather
 		return int.MinValue + (typeIndex * FoliageTypeRuntime.MaxRendererCount) + rendererIndex;
 	}
 
+	/// <summary>
+	/// Sub-draw id of the record that keeps a detail type's renderer resident. Counts up from
+	/// <see cref="DetailAnchorSubdrawIdBase"/>, past every placed anchor id and short of every ray-tracing instance id.
+	/// </summary>
+	internal static int GetDetailAnchorSubdrawId(int typeIndex, int rendererIndex)
+	{
+		return DetailAnchorSubdrawIdBase + (typeIndex * FoliageTypeRuntime.MaxRendererCount) + rendererIndex;
+	}
+
+	/// <summary>Placed anchors take at most (65,536 types × 8 renderers) ids above <see cref="int.MinValue"/>.</summary>
+	private const int DetailAnchorSubdrawIdBase = int.MinValue + (1 << 24);
+
+	/// <summary>
+	/// Keeps every renderer of a terrain's detail types in the draw tables, since the GPU generates their instances and
+	/// nothing else references their meshes and materials.
+	/// </summary>
+	public static void TouchDetailResourceAnchors(GpuDrawDatabase database, Entity entity, TerrainDetailRuntime detail)
+	{
+		ArgumentNullException.ThrowIfNull(database);
+		ArgumentNullException.ThrowIfNull(detail);
+
+		foreach (var detailType in detail.DetailTypes)
+		{
+			var type = detailType.Type;
+			for (var rendererIndex = 0; rendererIndex < type.Renderers.Count; rendererIndex++)
+			{
+				var renderer = type.Renderers[rendererIndex];
+				database.TouchResourceAnchor(
+					entity,
+					GetDetailAnchorSubdrawId(detailType.TypeIndex, rendererIndex),
+					renderer.Mesh,
+					renderer.Material);
+			}
+		}
+	}
+
 	/// <summary>Sub-draw id of a renderer of an instance in the ray-tracing scene.</summary>
 	internal static int GetRayTracingSubdrawId(int instanceIndex, int rendererIndex)
 	{

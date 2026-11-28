@@ -1472,6 +1472,10 @@ public sealed partial class EditorRemoteAutomationController
 				stats.ReservationCount,
 				stats.ReservedBatchSlots,
 				stats.ExpansionCapacity,
+				stats.DetailSetCount,
+				stats.DetailTypeCount,
+				stats.DetailCandidateCount,
+				stats.DetailDistanceScale,
 				_renderGraph.GetRayTracingSceneState().TopLevelInstanceCount,
 				_renderFrameCoordinator.CompletedSequence);
 		}, cancellationToken);

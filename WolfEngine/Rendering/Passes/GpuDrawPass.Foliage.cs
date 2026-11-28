@@ -48,9 +48,9 @@ internal struct GpuFoliageRenderer
 }
 
 /// <summary>
-/// Placed foliage: the GPU copies of each terrain's instances, the per-frame type and renderer tables, the batch slots
-/// reserved for them, and the cull that expands visible instances into the instance table's foliage region. See
-/// docs/foliage.md.
+/// Foliage: the GPU copies of each terrain's placed instances, the buffers detail foliage is generated into each frame,
+/// the per-frame type and renderer tables, the batch slots reserved for them, and the cull that expands visible
+/// instances into the instance table's foliage region. See docs/foliage.md.
 /// </summary>
 public sealed partial class GpuDrawPass
 {
@@ -58,13 +58,14 @@ public sealed partial class GpuDrawPass
 	/// Most instance slots the foliage region is grown to. Visible foliage past it is dropped and counted in the foliage
 	/// counters.
 	/// </summary>
-	private const int MaxFoliageExpansionSlots = 262144;
+	private const int MaxFoliageExpansionSlots = 524288;
 
 	/// <summary>Views a frame culls foliage for: the camera, and the shadow cascades.</summary>
 	private const int FoliageExpansionViewGroups = 2;
 
 	private readonly Dictionary<TerrainFoliageRuntime, FoliageRuntimeGpuState> _foliageRuntimeStates = new();
 	private readonly Dictionary<FoliageSetKey, FoliageSetGpuState> _foliageSetStates = new();
+	private readonly Dictionary<FoliageSetKey, DetailFoliageGpuState> _detailFoliageStates = new();
 	private readonly Dictionary<FoliageReservationKey, FoliageReservation> _foliageReservations = new();
 	private readonly HashSet<FoliageReservationKey> _desiredFoliageReservations = new();
 	private readonly List<FoliageReservationKey> _foliageReservationScratch = new();
@@ -75,11 +76,12 @@ public sealed partial class GpuDrawPass
 	private int _foliageReservationClearGeneration = -1;
 	private int _foliageFrame;
 
-	private readonly record struct FoliageSetKey(int OwnerViewIndex, int WorldId, Entity Entity);
+	/// <param name="Detail">True for a terrain's detail foliage, false for its placed foliage.</param>
+	private readonly record struct FoliageSetKey(int OwnerViewIndex, int WorldId, Entity Entity, bool Detail);
 
 	private readonly record struct FoliageReservationKey(
 		FoliageSetKey Set,
-		TerrainFoliageRuntime Runtime,
+		IFoliageCullSource Runtime,
 		int TypeIndex,
 		int RendererIndex,
 		int MeshLevel,
@@ -120,6 +122,13 @@ public sealed partial class GpuDrawPass
 		uint Types,
 		uint Renderers);
 
+	private sealed record DetailGenerateBindings(
+		uint Instances,
+		uint Chunks,
+		uint TerrainMaterials,
+		uint TerrainLayers,
+		uint Entries);
+
 	/// <summary>A terrain's instances and chunks on the GPU, shared by every view that draws it.</summary>
 	private sealed class FoliageRuntimeGpuState
 	{
@@ -140,15 +149,40 @@ public sealed partial class GpuDrawPass
 		public int LastUsedFrame;
 	}
 
-	private readonly record struct PreparedFoliageSet(
+	/// <summary>
+	/// A terrain's detail foliage on the GPU for one view: the instances and chunks it is generated into, sized for its
+	/// runtime's candidates, and the entry table generation reads.
+	/// </summary>
+	private sealed class DetailFoliageGpuState
+	{
+		public required TerrainDetailRuntime Runtime;
+		public required IGfxBuffer Instances;
+		public required IGfxBuffer Chunks;
+		public required IGfxBuffer Entries;
+		public int LastUsedFrame;
+	}
+
+	/// <summary>What detail generation needs this frame, besides the buffers it writes.</summary>
+	/// <param name="TerrainMaterialHandle">Zero while the terrain's material is not in the draw tables yet.</param>
+	private sealed record PreparedDetailGeneration(
+		GpuDetailFoliageSet Set,
+		DetailFoliageGpuState Gpu,
+		uint TerrainMaterialHandle);
+
+	/// <param name="Instances">Packed instances the cull reads, four words each.</param>
+	/// <param name="Detail">How to generate the instances first; null for placed foliage.</param>
+	private sealed record PreparedFoliageSet(
 		int OwnerViewIndex,
-		GpuFoliageSet Set,
-		FoliageRuntimeGpuState Runtime,
-		FoliageSetGpuState State);
+		IFoliageCullSource Source,
+		Matrix4x4 LocalToWorld,
+		IGfxBuffer Instances,
+		IGfxBuffer Chunks,
+		FoliageSetGpuState State,
+		PreparedDetailGeneration? Detail);
 
 	/// <summary>
-	/// Instance slots the foliage cull could expand into this frame if every placed instance were visible to both the
-	/// camera and the shadow cascades, capped at <see cref="MaxFoliageExpansionSlots"/>.
+	/// Instance slots the foliage cull could expand into this frame if every placed instance and detail candidate were
+	/// visible to both the camera and the shadow cascades, capped at <see cref="MaxFoliageExpansionSlots"/>.
 	/// </summary>
 	private static int GetFoliageExpansionSlots(ReadOnlySpan<GpuDrawSource> sources)
 	{
@@ -156,6 +190,11 @@ public sealed partial class GpuDrawPass
 		for (var i = 0; i < sources.Length; i++)
 		{
 			foreach (var set in sources[i].Database.FoliageSets)
+			{
+				slots += (long)set.Runtime.RendererInstanceCount * FoliageExpansionViewGroups;
+			}
+
+			foreach (var set in sources[i].Database.DetailFoliageSets)
 			{
 				slots += (long)set.Runtime.RendererInstanceCount * FoliageExpansionViewGroups;
 			}
@@ -193,12 +232,39 @@ public sealed partial class GpuDrawPass
 					continue;
 				}
 
-				var setKey = new FoliageSetKey(source.Owner.Index, set.WorldId, set.Entity);
+				var setKey = new FoliageSetKey(source.Owner.Index, set.WorldId, set.Entity, Detail: false);
 				var runtimeState = EnsureFoliageRuntimeState(set.Runtime, device);
-				var setState = EnsureFoliageSetState(setKey, set.Runtime, device);
-				BuildFoliageTables(setKey, set, source.Database);
+				var setState = EnsureFoliageSetState(setKey, set.Runtime.InstanceCount, device);
+				BuildFoliageTables(setKey, set.Runtime, set.LocalToWorld, source.Database);
 				UploadFoliageTables(setState, device, frameSlot);
-				_preparedFoliageSets.Add(new PreparedFoliageSet(source.Owner.Index, set, runtimeState, setState));
+				_preparedFoliageSets.Add(new PreparedFoliageSet(
+					source.Owner.Index,
+					set.Runtime,
+					set.LocalToWorld,
+					runtimeState.Instances,
+					runtimeState.Chunks,
+					setState,
+					null));
+			}
+
+			foreach (var set in source.Database.DetailFoliageSets)
+			{
+				var setKey = new FoliageSetKey(source.Owner.Index, set.WorldId, set.Entity, Detail: true);
+				var detailState = EnsureDetailFoliageState(setKey, set.Runtime, device);
+				var setState = EnsureFoliageSetState(setKey, set.Runtime.CandidateCount, device);
+				BuildFoliageTables(setKey, set.Runtime, set.LocalToWorld, source.Database);
+				UploadFoliageTables(setState, device, frameSlot);
+				var terrainMaterialHandle = source.Database.TryGetMaterialHandle(set.TerrainMaterial, out var handle)
+					? handle.Value
+					: 0u;
+				_preparedFoliageSets.Add(new PreparedFoliageSet(
+					source.Owner.Index,
+					set.Runtime,
+					set.LocalToWorld,
+					detailState.Instances,
+					detailState.Chunks,
+					setState,
+					new PreparedDetailGeneration(set, detailState, terrainMaterialHandle)));
 			}
 		}
 
@@ -206,27 +272,31 @@ public sealed partial class GpuDrawPass
 		RetireUnusedFoliageStates(device);
 	}
 
-	private void BuildFoliageTables(FoliageSetKey setKey, in GpuFoliageSet set, GpuDrawDatabase database)
+	private void BuildFoliageTables(
+		FoliageSetKey setKey,
+		IFoliageCullSource source,
+		in Matrix4x4 localToWorld,
+		GpuDrawDatabase database)
 	{
 		_foliageTypeScratch.Clear();
 		_foliageRendererScratch.Clear();
 
-		var runtime = set.Runtime;
-		for (var typeIndex = 0; typeIndex < runtime.Types.Length; typeIndex++)
+		for (var typeIndex = 0; typeIndex < source.Types.Count; typeIndex++)
 		{
 			var gpuType = new GpuFoliageType
 			{
 				RendererStart = (uint)_foliageRendererScratch.Count
 			};
 
-			var instanceCount = (uint)runtime.TypeInstanceCounts[typeIndex];
-			if (runtime.Types[typeIndex] is { } type && instanceCount > 0)
+			var instanceCount = (uint)source.GetTypeSlotCount(typeIndex);
+			if (source.Types[typeIndex] is { } type && instanceCount > 0)
 			{
 				for (var rendererIndex = 0; rendererIndex < type.Renderers.Count; rendererIndex++)
 				{
 					if (TryBuildFoliageRenderer(
 						    setKey,
-						    set,
+						    source,
+						    localToWorld,
 						    database,
 						    typeIndex,
 						    rendererIndex,
@@ -258,7 +328,8 @@ public sealed partial class GpuDrawPass
 	/// <returns>False while its mesh or material is not in the draw tables yet, or no lane draws its material.</returns>
 	private bool TryBuildFoliageRenderer(
 		FoliageSetKey setKey,
-		in GpuFoliageSet set,
+		IFoliageCullSource source,
+		in Matrix4x4 localToWorld,
 		GpuDrawDatabase database,
 		int typeIndex,
 		int rendererIndex,
@@ -286,7 +357,7 @@ public sealed partial class GpuDrawPass
 			drawState.ExecutionKey.BucketId,
 			drawState.ExecutionKey.Sidedness,
 			renderer.Mesh,
-			renderer.LocalTransform * set.LocalToWorld);
+			renderer.LocalTransform * localToWorld);
 		if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var lane) == false)
 		{
 			return false;
@@ -302,7 +373,7 @@ public sealed partial class GpuDrawPass
 			_batches.EnsureResident(levelMesh);
 			var key = new FoliageReservationKey(
 				setKey,
-				set.Runtime,
+				source,
 				typeIndex,
 				rendererIndex,
 				meshLevel,
@@ -384,9 +455,9 @@ public sealed partial class GpuDrawPass
 		return state;
 	}
 
-	private FoliageSetGpuState EnsureFoliageSetState(FoliageSetKey key, TerrainFoliageRuntime runtime, IGfxDevice device)
+	private FoliageSetGpuState EnsureFoliageSetState(FoliageSetKey key, int slotCount, IGfxDevice device)
 	{
-		if (_foliageSetStates.TryGetValue(key, out var state) && state.LevelCapacity >= runtime.InstanceCount)
+		if (_foliageSetStates.TryGetValue(key, out var state) && state.LevelCapacity >= slotCount)
 		{
 			state.LastUsedFrame = _foliageFrame;
 			return state;
@@ -397,7 +468,7 @@ public sealed partial class GpuDrawPass
 			RetireFoliageSetState(state, device);
 		}
 
-		var levelCapacity = Math.Max(runtime.InstanceCount, 1);
+		var levelCapacity = Math.Max(slotCount, 1);
 		var levels = device.CreateBuffer(new BufferDescriptor(
 			(ulong)levelCapacity * sizeof(uint),
 			BufferUsage.Structured,
@@ -414,6 +485,64 @@ public sealed partial class GpuDrawPass
 		_foliageSetStates[key] = state;
 
 		return state;
+	}
+
+	/// <summary>
+	/// The buffers a terrain's detail foliage is generated into for one view, created again when its runtime changes.
+	/// Chunks start empty, so a set the cull reads before its first generation draws nothing.
+	/// </summary>
+	private DetailFoliageGpuState EnsureDetailFoliageState(FoliageSetKey key, TerrainDetailRuntime runtime, IGfxDevice device)
+	{
+		if (_detailFoliageStates.TryGetValue(key, out var state))
+		{
+			if (ReferenceEquals(state.Runtime, runtime))
+			{
+				state.LastUsedFrame = _foliageFrame;
+				return state;
+			}
+
+			RetireDetailFoliageState(state, device);
+		}
+
+		var instances = device.CreateBuffer(new BufferDescriptor(
+			(ulong)Math.Max(runtime.CandidateCount, 1) * FoliageInstancePacking.SizeInBytes,
+			BufferUsage.Structured,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "DetailFoliageInstances"));
+
+		var chunkCount = Math.Max(runtime.ChunkCount, 1);
+		var chunks = device.CreateBuffer(new BufferDescriptor(
+			(ulong)(chunkCount * Unsafe.SizeOf<GpuFoliageChunk>()),
+			BufferUsage.Structured,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "DetailFoliageChunks"));
+		WriteBuffer<GpuFoliageChunk>(chunks, new GpuFoliageChunk[chunkCount], "DetailFoliageChunks");
+
+		var entries = device.CreateBuffer(new BufferDescriptor(
+			(ulong)(Math.Max(runtime.Entries.Length, 1) * Unsafe.SizeOf<GpuDetailEntry>()),
+			BufferUsage.Structured,
+			BufferFlags.AllowShaderResource,
+			name: "DetailFoliageEntries"));
+		WriteBuffer<GpuDetailEntry>(entries, runtime.Entries, "DetailFoliageEntries");
+
+		state = new DetailFoliageGpuState
+		{
+			Runtime = runtime,
+			Instances = instances,
+			Chunks = chunks,
+			Entries = entries,
+			LastUsedFrame = _foliageFrame
+		};
+		_detailFoliageStates[key] = state;
+
+		return state;
+	}
+
+	private static void RetireDetailFoliageState(DetailFoliageGpuState state, IGfxDevice device)
+	{
+		RetireBuffer(device, state.Instances, "DetailFoliageInstances");
+		RetireBuffer(device, state.Chunks, "DetailFoliageChunks");
+		RetireBuffer(device, state.Entries, "DetailFoliageEntries");
 	}
 
 	/// <summary>
@@ -509,6 +638,17 @@ public sealed partial class GpuDrawPass
 			RetireFoliageSetState(state, device);
 			_foliageSetStates.Remove(key);
 		}
+
+		foreach (var (key, state) in _detailFoliageStates.ToArray())
+		{
+			if (state.LastUsedFrame == _foliageFrame)
+			{
+				continue;
+			}
+
+			RetireDetailFoliageState(state, device);
+			_detailFoliageStates.Remove(key);
+		}
 	}
 
 	private static void RetireFoliageSetState(FoliageSetGpuState state, IGfxDevice device)
@@ -573,8 +713,7 @@ public sealed partial class GpuDrawPass
 					continue;
 				}
 
-				var set = prepared.Set;
-				var chunkCount = set.Runtime.Chunks.Length;
+				var chunkCount = prepared.Source.ChunkCount;
 				if (chunkCount == 0)
 				{
 					continue;
@@ -582,10 +721,10 @@ public sealed partial class GpuDrawPass
 
 				writer.Clear();
 				WriteCullPlanes(writer, viewProjections, cullingPlanes, cullingPlaneCounts);
-				writer.SetMatrix4x4("localToWorld", set.LocalToWorld);
+				writer.SetMatrix4x4("localToWorld", prepared.LocalToWorld);
 				writer.SetVector4(
 					"setParams",
-					new Vector4(FoliageTypeRuntime.GetMaxScale(set.LocalToWorld), useShadowBuffers ? 1.0f : 0.0f, 0.0f, 0.0f));
+					new Vector4(FoliageTypeRuntime.GetMaxScale(prepared.LocalToWorld), useShadowBuffers ? 1.0f : 0.0f, 0.0f, 0.0f));
 				writer.SetVector4("cameraPosition", new Vector4(cameraOrigin, 0.0f));
 				writer.SetVector4(
 					"lodProjection",
@@ -602,6 +741,7 @@ public sealed partial class GpuDrawPass
 				writer.SetUInt("expansionBase", (uint)_gpuDrawResources.FoliageExpansionBase);
 				writer.SetUInt("expansionCapacity", (uint)_gpuDrawResources.FoliageExpansionCapacity);
 				writer.SetUInt("ownerDrawFlags", (uint)viewIndex << GpuDrawFlags.OwnerViewShift);
+				writer.SetUInt("typeCount", (uint)prepared.Source.Types.Count);
 
 				commandList.BindPipeline(pipeline);
 				commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
@@ -611,8 +751,8 @@ public sealed partial class GpuDrawPass
 				commandList.SetComputeBuffer(bindings.Levels, prepared.State.Levels);
 				commandList.SetComputeBuffer(bindings.Counters, counterBuffer);
 				commandList.SetComputeReadOnlyBuffer(bindings.Batches, batchBuffer);
-				commandList.SetComputeReadOnlyBuffer(bindings.Instances, prepared.Runtime.Instances);
-				commandList.SetComputeReadOnlyBuffer(bindings.Chunks, prepared.Runtime.Chunks);
+				commandList.SetComputeReadOnlyBuffer(bindings.Instances, prepared.Instances);
+				commandList.SetComputeReadOnlyBuffer(bindings.Chunks, prepared.Chunks);
 				commandList.SetComputeReadOnlyBuffer(bindings.Types, typeBuffer);
 				commandList.SetComputeReadOnlyBuffer(bindings.Renderers, rendererBuffer);
 
@@ -622,6 +762,89 @@ public sealed partial class GpuDrawPass
 				commandList.Dispatch(groupCountX, groupCountY, 1);
 			}
 		}
+	}
+
+	/// <summary>
+	/// Generates every prepared set's detail foliage around its view's camera, one dispatch per detail type. Runs once a
+	/// frame after the table updates, because it reads the terrain tables, and before any view culls, because every
+	/// view's cull reads what it writes.
+	/// </summary>
+	private void RecordDetailGeneration(RenderGraphContext context, IGfxDevice device)
+	{
+		if (_gpuDrawResources.TerrainMaterialBuffer is not { } terrainMaterials ||
+		    _gpuDrawResources.TerrainLayerBuffer is not { } terrainLayers)
+		{
+			return;
+		}
+
+		var commandList = context.CommandList;
+		using (Profiling.FrameProfiler.Instance.Measure("GpuDraw.GenerateDetailFoliage"))
+		{
+			foreach (var prepared in _preparedFoliageSets)
+			{
+				if (prepared.Detail is not { TerrainMaterialHandle: not 0u } detail)
+				{
+					continue;
+				}
+
+				var pipeline = _detailGenerate.GetPipeline(device);
+				var writer = _detailGenerate.Writer("DetailGenerateParams");
+				var bindings = GetDetailGenerateBindings(_detailGenerate.ReflectionLayout);
+				var set = detail.Set;
+				var runtime = set.Runtime;
+				var setScale = FoliageTypeRuntime.GetMaxScale(set.LocalToWorld);
+				commandList.BindPipeline(pipeline);
+				commandList.SetComputeBuffer(bindings.Instances, detail.Gpu.Instances);
+				commandList.SetComputeBuffer(bindings.Chunks, detail.Gpu.Chunks);
+				commandList.SetComputeReadOnlyBuffer(bindings.TerrainMaterials, terrainMaterials);
+				commandList.SetComputeReadOnlyBuffer(bindings.TerrainLayers, terrainLayers);
+				commandList.SetComputeReadOnlyBuffer(bindings.Entries, detail.Gpu.Entries);
+				foreach (var detailType in runtime.DetailTypes)
+				{
+					var (originX, originZ) = TerrainDetailRuntime.GetWindowOrigin(detailType, set.LocalCamera);
+					var bounds = detailType.Type.Bounds;
+					writer.Clear();
+					writer.SetVector4("localCamera", new Vector4(set.LocalCamera, 0.0f));
+					writer.SetVector4("terrainSize", new Vector4(set.TerrainSize, set.HeightScale, setScale));
+					writer.SetVector4("typeBounds", new Vector4(bounds.Center, bounds.Radius));
+					writer.SetVector4(
+						"grid",
+						new Vector4(detailType.Spacing, detailType.TileSize, detailType.Distance, detailType.FadeDistance));
+					writer.SetInt("windowOriginX", originX);
+					writer.SetInt("windowOriginZ", originZ);
+					writer.SetUInt("gridDimension", (uint)detailType.GridDimension);
+					writer.SetUInt("chunkStart", (uint)detailType.ChunkStart);
+					writer.SetFloat("maxDensity", detailType.MaxDensity);
+					writer.SetFloat("densityScale", 1.0f);
+					writer.SetFloat("shadowDistance", detailType.Type.ShadowDistance);
+					writer.SetUInt("typeIndex", (uint)detailType.TypeIndex);
+					writer.SetUInt("typeCount", (uint)runtime.Types.Length);
+					writer.SetUInt("layerCount", (uint)runtime.LayerCount);
+					writer.SetUInt("seed", detailType.Seed);
+					writer.SetUInt("terrainMaterialHandle", detail.TerrainMaterialHandle);
+					commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
+
+					const int groupsPerRow = 65535;
+					var tileCount = detailType.ChunkCount;
+					var groupCountX = (uint)Math.Min(tileCount, groupsPerRow);
+					var groupCountY = (uint)((tileCount + groupsPerRow - 1) / groupsPerRow);
+					commandList.Dispatch(groupCountX, groupCountY, 1);
+				}
+
+				commandList.SynchronizeUnorderedAccess(detail.Gpu.Instances);
+				commandList.SynchronizeUnorderedAccess(detail.Gpu.Chunks);
+			}
+		}
+	}
+
+	private static DetailGenerateBindings GetDetailGenerateBindings(ShaderReflectionLayout layout)
+	{
+		return new DetailGenerateBindings(
+			layout.GetResource("g_DetailInstances").RegisterIndex,
+			layout.GetResource("g_DetailChunks").RegisterIndex,
+			layout.GetResource("g_TerrainMaterialTable").RegisterIndex,
+			layout.GetResource("g_TerrainLayerTable").RegisterIndex,
+			layout.GetResource("g_DetailEntries").RegisterIndex);
 	}
 
 	/// <summary>Writes each view's culling planes the way both cull shaders lay them out.</summary>
@@ -675,11 +898,24 @@ public sealed partial class GpuDrawPass
 		var sets = 0;
 		var instances = 0;
 		var renderers = 0;
+		var detailSets = 0;
+		var detailTypes = 0;
+		var detailCandidates = 0;
+		var detailDistanceScale = 1.0f;
 		foreach (var prepared in _preparedFoliageSets)
 		{
+			if (prepared.Detail is { } detail)
+			{
+				detailSets++;
+				detailTypes += detail.Set.Runtime.DetailTypes.Length;
+				detailCandidates += detail.Set.Runtime.CandidateCount;
+				detailDistanceScale = MathF.Min(detailDistanceScale, detail.Set.Runtime.DistanceScale);
+				continue;
+			}
+
 			sets++;
-			instances += prepared.Set.Runtime.InstanceCount;
-			renderers += prepared.Set.Runtime.RendererInstanceCount;
+			instances += prepared.Source.SlotCount;
+			renderers += prepared.Source.RendererInstanceCount;
 		}
 
 		var reservedSlots = 0L;
@@ -694,17 +930,32 @@ public sealed partial class GpuDrawPass
 			renderers,
 			_foliageReservations.Count,
 			reservedSlots,
-			_gpuDrawResources.FoliageExpansionCapacity);
+			_gpuDrawResources.FoliageExpansionCapacity,
+			detailSets,
+			detailTypes,
+			detailCandidates,
+			detailDistanceScale);
 	}
 }
 
-/// <summary>Placed foliage in the last frame's draw tables. See docs/foliage.md.</summary>
+/// <summary>Foliage in the last frame's draw tables. See docs/foliage.md.</summary>
+/// <param name="SetCount">Terrains with placed foliage, per view that draws them.</param>
 /// <param name="ReservedBatchSlots">Visible list slots reserved across every foliage batch, per view.</param>
 /// <param name="ExpansionCapacity">Instance slots the cull can expand visible foliage into per frame.</param>
+/// <param name="DetailSetCount">Terrains growing detail foliage, per view that draws them.</param>
+/// <param name="DetailTypeCount">Detail types generated, across those sets.</param>
+/// <param name="DetailCandidateCount">Candidate plants generated per frame, kept or not.</param>
+/// <param name="DetailDistanceScale">
+/// The smallest factor a set's detail distances were shrunk by to stay within its candidate limit; 1 when none was.
+/// </param>
 public readonly record struct FoliageDrawStats(
 	int SetCount,
 	int InstanceCount,
 	int RendererInstanceCount,
 	int ReservationCount,
 	long ReservedBatchSlots,
-	int ExpansionCapacity);
+	int ExpansionCapacity,
+	int DetailSetCount,
+	int DetailTypeCount,
+	int DetailCandidateCount,
+	float DetailDistanceScale);

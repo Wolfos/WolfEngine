@@ -1,6 +1,6 @@
 # Foliage
 
-Status: phase 1 (placed foliage) built; phases 2 to 6 are proposals.
+Status: phase 1 (placed foliage) and most of phase 2 (detail foliage) built; phases 3 to 6 are proposals.
 
 WolfEngine draws foliage as ordinary entities with mesh renderers. This document proposes a foliage system for open worlds: how foliage is stored without entities, how it reaches the GPU-driven draws, shadows and the ray-tracing scene, how it is authored, and the order to build it in. It builds on mesh LOD (see `mesh-lod.md`), which was designed with this system in mind.
 
@@ -202,9 +202,9 @@ Unity terrain data stores trees and detail separately, which maps onto the two t
 
 - Tree prototypes become `FoliageType`s pointing at the converted prefabs, such as the beech prefab with its LOD group.
 - `TreeInstances`, with normalised position, width and height scale, and rotation, become placed instances. Unity scales trees by width and height separately, which map onto the instance's width and height scales. In the Forest demo the width-to-height ratio runs from 0.43 to 2.4, too wide to approximate with one uniform scale.
-- Detail prototypes become detail `FoliageType`s, and the per-type detail maps become override paint (add). The converted terrain starts with empty biomes and fully painted detail, and can move to biomes gradually.
+- Detail prototypes become detail `FoliageType`s. As built, their detail maps are fitted to the layers as biomes rather than kept as override paint; see phase 2.
 
-Terrain trees are imported by the Unity scene import; see `unity-import.md`. It uses an exporter that runs inside Unity instead of reading Unity's binary terrain format. Detail prototypes and detail maps are not imported.
+Terrain trees and detail are imported by the Unity scene import; see `unity-import.md`. It uses an exporter that runs inside Unity instead of reading Unity's binary terrain format.
 
 ## Validation
 
@@ -232,6 +232,18 @@ Terrain trees are imported by the Unity scene import; see `unity-import.md`. It 
    - **Not built or not checked:** reading back the dropped-instance counter; the D3D12 backend and cooked builds; foliage on a moving or scaled terrain beyond the uniform scale the cull assumes.
    - **Found, not fixed:** the entity path puts every renderer of a LOD group in the TLAS, including the billboard that only draws at level 3. Placed foliage leaves it out.
 2. **Detail foliage.** `FoliageBiome`, the layer's `Biome` field, the shared automatic layer selection, GPU generation with clumping, limits, thinning and the budget, placed foliage exclusion, and override paint data (no brush yet).
+
+   As built:
+   - **Assets.** `FoliageBiome` holds entries with a type, density, height scale range, width as a ratio of height, clumping size and strength, steepest slope, height limits and normal alignment. Tint ranges wait for a grass material. `TerrainLayerDefinition.Biome` assigns one per layer. `FoliageType.DetailFadeDistance` is how far before its cull distance a detail type thins out.
+   - **Runtime.** `TerrainDetailRuntime` flattens a layer set's biomes into the types they grow and an entry table indexed by layer and type, and is rebuilt when a layer's biome, an entry or a type changes. Each type gets a candidate grid at the spacing of its densest entry, in tiles of 8 by 8 candidates, and a square window of tiles around the camera that reaches its cull distance. Past a million candidates per terrain, every type's distance shrinks by one factor, reported by `get_foliage_state`.
+   - **Generation.** `foliage_detail_generate.compute.slang` runs once per frame after the table updates, one dispatch per type and one thread group per tile. Candidates are jittered in their grid cell and take their random values from the cell, so density changes add or remove plants without moving any. Density blends by the layer weights from `SampleTerrainLayerBlend`, the terrain shader's own resolution of automatic layers. The rest of the entry comes from the strongest contributing layer. Heights use the terrain's bicubic sampling, so plants sit on the rendered surface.
+   - **Generated chunks are culled like placed ones.** Generation writes the same 16-byte instances and chunk records placed foliage uploads, so the foliage cull, LOD selection, batch reservations and expansion run unchanged over both, through `IFoliageCullSource`. Tiles map to chunks modulo the window, so a tile keeps its chunk, and its plants their level state, while it stays in the window. Empty slots name type `0xFFFF`, which the cull skips. Each type reserves batch slots for all of its candidates.
+   - **Distance.** Over the fade distance, the cutoff falls to zero, and a plant shrinks to nothing as the cutoff reaches its random value, so the edge fades instead of popping.
+   - **Resources.** Detail types' renderers are kept in the draw tables by resource anchors, like placed types', with their own range of sub-draw ids.
+   - **Expansion region.** Its cap rose from 262,144 to 524,288 slots, about 117 MB at most, sized from placed and detail foliage together.
+   - **Unity import.** Detail maps are fitted to the layers rather than imported as override paint; see `unity-import.md`. On the Forest demo, 15 prototypes and 65,000 painted plants become eight biomes, and 43,000 candidates are generated per frame.
+   - **Measured** on the Forest demo from the gameplay camera: the draw update, which now includes 15 generation dispatches, takes 0.33 ms of GPU time; the foliage cull is 0.09 ms for the camera and 0.22 ms for the shadow cascades.
+   - **Not built:** placed foliage exclusion, override paint, the quality settings' density scale (generation takes a scale, always 1), reading back the dropped-instance counter, terrains with a non-uniform or non-unit scale (the window is sized in local metres), and the D3D12 backend, which compiles but was not run.
 3. **Wind.** Wind state, the vertex function, material wind modes, and previous-frame wind for motion vectors.
 4. **Editor tools.** Placed paint and erase brushes, the detail override brush, the biome editor, and undo.
 5. **Ray-tracing levels and collision.** Levels by distance band for foliage in the TLAS, and Jolt static bodies for placed instances near physics observers.

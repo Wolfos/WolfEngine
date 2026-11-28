@@ -81,6 +81,34 @@ public sealed class UnitySceneExport
 
 		return bytes;
 	}
+
+	/// <summary>
+	/// Reads a terrain's detail maps: one plane per detail prototype of detail resolution squared 16-bit values, rows
+	/// along Z. Empty for an export written before detail was exported.
+	/// </summary>
+	public ushort[] ReadDetails(UnityTerrainExport terrain)
+	{
+		if (string.IsNullOrEmpty(terrain.DetailsFile) || terrain.DetailPrototypes.Count == 0)
+		{
+			return [];
+		}
+
+		var bytes = File.ReadAllBytes(Path.Combine(FolderPath, terrain.DetailsFile));
+		var expected = terrain.DetailResolution * terrain.DetailResolution * terrain.DetailPrototypes.Count * 2;
+		if (bytes.Length != expected)
+		{
+			throw new InvalidDataException(
+				$"'{terrain.DetailsFile}' holds {bytes.Length} bytes; {terrain.DetailPrototypes.Count} detail maps at {terrain.DetailResolution}² need {expected}.");
+		}
+
+		var values = new ushort[bytes.Length / 2];
+		for (var i = 0; i < values.Length; i++)
+		{
+			values[i] = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(i * 2, 2));
+		}
+
+		return values;
+	}
 }
 
 public sealed class UnityTerrainExport
@@ -98,6 +126,23 @@ public sealed class UnityTerrainExport
 	public List<UnityTerrainLayerExport> Layers { get; set; } = [];
 	public List<UnityTreePrototypeExport> TreePrototypes { get; set; } = [];
 	public List<UnityTreeExport> Trees { get; set; } = [];
+
+	/// <summary>Cells along each side of the detail maps.</summary>
+	public int DetailResolution { get; set; }
+
+	/// <summary>
+	/// <c>InstanceCountMode</c>, where a detail map value is a plant count per cell, or <c>CoverageMode</c>, where it is
+	/// coverage from 0 to 255 scaled by each prototype's density.
+	/// </summary>
+	public string? DetailScatterMode { get; set; }
+	public string? DetailsFile { get; set; }
+
+	/// <summary>How far from the camera Unity draws detail, in metres.</summary>
+	public float DetailObjectDistance { get; set; } = 80.0f;
+
+	/// <summary>The terrain's detail density setting, 0 to 1, for prototypes that use density scaling.</summary>
+	public float DetailObjectDensity { get; set; } = 1.0f;
+	public List<UnityDetailPrototypeExport> DetailPrototypes { get; set; } = [];
 
 	public Vector3 GetPosition() => UnitySpace.ToVector3(Position);
 
@@ -126,6 +171,26 @@ public sealed class UnityTerrainLayerExport
 public sealed class UnityTreePrototypeExport
 {
 	public string? Prefab { get; set; }
+}
+
+/// <summary>A Unity detail prototype: a mesh prefab, or a texture drawn as grass billboards.</summary>
+public sealed class UnityDetailPrototypeExport
+{
+	public bool UsePrototypeMesh { get; set; }
+	public string? Prefab { get; set; }
+	public string? Texture { get; set; }
+	public string? RenderMode { get; set; }
+	public float MinWidth { get; set; } = 1.0f;
+	public float MaxWidth { get; set; } = 1.0f;
+	public float MinHeight { get; set; } = 1.0f;
+	public float MaxHeight { get; set; } = 1.0f;
+	public float NoiseSpread { get; set; }
+
+	/// <summary>Density relative to the prototype's size, for coverage mode only.</summary>
+	public float Density { get; set; } = 1.0f;
+	public float AlignToGround { get; set; }
+	public float PositionJitter { get; set; } = 1.0f;
+	public bool UseDensityScaling { get; set; } = true;
 }
 
 public sealed class UnityTreeExport

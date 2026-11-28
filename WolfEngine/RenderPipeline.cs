@@ -108,6 +108,7 @@ public class RenderPipeline : IRenderPipeline
 	private readonly TerrainRuntimeCache _terrainRuntimeCache = new();
 	private readonly FoliageRuntimeCache _foliageRuntimeCache = new();
 	private readonly FoliageDrawGather _foliageDrawGather = new();
+	private readonly TerrainDetailRuntimeCache _terrainDetailRuntimeCache = new();
 	private readonly DebugPrimitiveMeshFactory _debugPrimitiveMeshFactory = new();
 	private readonly Dictionary<GpuDrawDatabase, List<World>> _renderWorldsByDatabase = new();
 	private readonly Dictionary<GpuDrawDatabase, int> _forcedReconcileSnapshotsByDatabase = new();
@@ -590,6 +591,8 @@ public class RenderPipeline : IRenderPipeline
 								entry.First.LocalToWorld,
 								cameraOrigin);
 						}
+
+						GatherDetailFoliage(gpuDrawDatabase, entry.Entity, ref entry.Second, entry.First.LocalToWorld, cameraOrigin);
 					}
 				}
 
@@ -648,6 +651,36 @@ public class RenderPipeline : IRenderPipeline
 
 			_foliageDrawGather.EndSync(gpuDrawDatabase);
 			gpuDrawDatabase.EndSync();
+	}
+
+	/// <summary>
+	/// Adds a terrain's detail foliage, grown from its layers' biomes, once the terrain has a material to draw with.
+	/// </summary>
+	private void GatherDetailFoliage(
+		GpuDrawDatabase gpuDrawDatabase,
+		Entity entity,
+		ref TerrainComponent terrain,
+		in Matrix4x4 localToWorld,
+		Vector3 cameraOrigin)
+	{
+		if (terrain.Material is not { } terrainMaterial ||
+		    terrain.LayerSetAsset.Asset is not { } layerSet ||
+		    _terrainDetailRuntimeCache.Resolve(layerSet, _renderGraph) is not { } detail ||
+		    detail.ChunkCount == 0 ||
+		    Matrix4x4.Invert(localToWorld, out var worldToLocal) == false)
+		{
+			return;
+		}
+
+		FoliageDrawGather.TouchDetailResourceAnchors(gpuDrawDatabase, entity, detail);
+		gpuDrawDatabase.TouchDetailFoliage(
+			entity,
+			detail,
+			localToWorld,
+			terrainMaterial,
+			terrain.GetResolvedWorldSize(),
+			terrain.GetResolvedHeightScale(),
+			Vector3.Transform(cameraOrigin, worldToLocal));
 	}
 
 	internal static void RemoveMeshesForWorldTransformRemovals(World world, GpuDrawDatabase gpuDrawDatabase)

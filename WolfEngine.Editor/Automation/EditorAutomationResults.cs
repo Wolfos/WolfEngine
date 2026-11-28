@@ -209,7 +209,10 @@ public sealed record RayTracingSceneStateResult(
 	ulong CompletedId,
 	long RenderFrameSequence);
 
-/// <summary>Placed foliage in the last frame's draw tables, and the ray-tracing instances it added.</summary>
+/// <summary>
+/// Foliage in the last frame's draw tables, and the ray-tracing instances placed foliage added. The detail fields count
+/// what is generated each frame, kept or not; see <see cref="WolfEngine.Rendering.Passes.FoliageDrawStats"/>.
+/// </summary>
 public sealed record FoliageStateResult(
 	int SetCount,
 	int InstanceCount,
@@ -217,6 +220,10 @@ public sealed record FoliageStateResult(
 	int ReservationCount,
 	long ReservedBatchSlots,
 	int ExpansionCapacity,
+	int DetailSetCount,
+	int DetailTypeCount,
+	int DetailCandidateCount,
+	float DetailDistanceScale,
 	int TlasInstanceCount,
 	long RenderFrameSequence);
 

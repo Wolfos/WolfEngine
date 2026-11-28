@@ -107,4 +107,7 @@ public sealed class TerrainLayerDefinition
 	public AssetRef<Texture> Normal { get; set; }
 	public AssetRef<Texture> Orm { get; set; }
 	public AssetRef<Texture> Height { get; set; }
+
+	/// <summary>The detail foliage that grows where this layer is painted. Without one, the layer grows none.</summary>
+	public AssetRef<FoliageBiome> Biome { get; set; }
 }

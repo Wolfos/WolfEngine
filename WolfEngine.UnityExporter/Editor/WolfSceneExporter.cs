@@ -17,8 +17,10 @@ namespace WolfEngine.UnityExporter
 	/// <remarks>
 	/// Folder contents: <c>scene.json</c>, and per terrain <c>terrain_N_heights.r16</c> (heightmap resolution squared
 	/// little-endian 16-bit heights, row-major with rows along Unity Z) and <c>terrain_N_alphamaps.u8</c> (one plane per
-	/// terrain layer of alphamap resolution squared bytes, same row order). Detail prototypes are not exported: WolfEngine
-	/// generates detail from terrain layers instead.
+	/// terrain layer of alphamap resolution squared bytes, same row order) and <c>terrain_N_details.u16</c> (one plane per
+	/// detail prototype of detail resolution squared little-endian 16-bit values, as <c>GetDetailLayer</c> returns them,
+	/// same row order). WolfEngine grows detail from terrain layers, so the importer reads the detail maps only to fit
+	/// each layer's density.
 	/// </remarks>
 	public static class WolfSceneExporter
 	{
@@ -127,6 +129,10 @@ namespace WolfEngine.UnityExporter
 				.SelectMany(terrain => terrain.terrainData.treePrototypes)
 				.Where(prototype => prototype.prefab != null)
 				.Select(prototype => AssetDatabase.GetAssetPath(prototype.prefab))
+				.Concat(collector.Terrains
+					.SelectMany(terrain => terrain.terrainData.detailPrototypes)
+					.Where(prototype => prototype.usePrototypeMesh && prototype.prototype != null)
+					.Select(prototype => AssetDatabase.GetAssetPath(prototype.prototype)))
 				.Concat(collector.PrefabInstances.Select(instance => instance.PrefabPath))
 				.Where(path => string.IsNullOrEmpty(path) == false);
 			prefabs.WritePrefabs(json, prefabPaths);
@@ -154,8 +160,10 @@ namespace WolfEngine.UnityExporter
 			var data = terrain.terrainData;
 			var heightsFile = $"terrain_{index}_heights.r16";
 			var alphamapFile = $"terrain_{index}_alphamaps.u8";
+			var detailsFile = $"terrain_{index}_details.u16";
 			WriteHeights(data, Path.Combine(outputFolder, heightsFile));
 			WriteAlphamaps(data, Path.Combine(outputFolder, alphamapFile));
+			WriteDetails(data, Path.Combine(outputFolder, detailsFile));
 
 			json.BeginObject();
 			json.Write("name", terrain.name);
@@ -173,6 +181,21 @@ namespace WolfEngine.UnityExporter
 			foreach (var layer in data.terrainLayers)
 			{
 				WriteTerrainLayer(json, layer);
+			}
+
+			json.EndArray();
+
+			json.Write("detailResolution", data.detailResolution);
+			json.Write("detailResolutionPerPatch", data.detailResolutionPerPatch);
+			json.Write("detailScatterMode", data.detailScatterMode.ToString());
+			json.Write("detailsFile", detailsFile);
+			json.Write("detailObjectDistance", terrain.detailObjectDistance);
+			json.Write("detailObjectDensity", terrain.detailObjectDensity);
+
+			json.BeginArray("detailPrototypes");
+			foreach (var prototype in data.detailPrototypes)
+			{
+				WriteDetailPrototype(json, prototype);
 			}
 
 			json.EndArray();
@@ -203,6 +226,53 @@ namespace WolfEngine.UnityExporter
 
 			json.EndArray();
 			json.EndObject();
+		}
+
+		private static void WriteDetailPrototype(ExportJsonWriter json, DetailPrototype prototype)
+		{
+			json.BeginObject();
+			json.Write("usePrototypeMesh", prototype.usePrototypeMesh);
+			WriteAssetReference(json, "prefab", prototype.prototype);
+			WriteAssetReference(json, "texture", prototype.prototypeTexture);
+			json.Write("renderMode", prototype.renderMode.ToString());
+			json.Write("minWidth", prototype.minWidth);
+			json.Write("maxWidth", prototype.maxWidth);
+			json.Write("minHeight", prototype.minHeight);
+			json.Write("maxHeight", prototype.maxHeight);
+			json.Write("noiseSeed", prototype.noiseSeed);
+			json.Write("noiseSpread", prototype.noiseSpread);
+			json.Write("density", prototype.density);
+			json.Write("alignToGround", prototype.alignToGround);
+			json.Write("positionJitter", prototype.positionJitter);
+			json.Write("useDensityScaling", prototype.useDensityScaling);
+			json.Write("holeEdgePadding", prototype.holeEdgePadding);
+			json.Write("healthyColor", prototype.healthyColor);
+			json.Write("dryColor", prototype.dryColor);
+			json.EndObject();
+		}
+
+		private static void WriteDetails(TerrainData data, string path)
+		{
+			var resolution = data.detailResolution;
+			var prototypeCount = data.detailPrototypes.Length;
+			var planeSize = resolution * resolution;
+			var bytes = new byte[planeSize * prototypeCount * 2];
+			for (var prototype = 0; prototype < prototypeCount; prototype++)
+			{
+				var layer = data.GetDetailLayer(0, 0, resolution, resolution, prototype);
+				for (var z = 0; z < resolution; z++)
+				{
+					for (var x = 0; x < resolution; x++)
+					{
+						var value = (ushort)Mathf.Clamp(layer[z, x], 0, ushort.MaxValue);
+						var offset = ((prototype * planeSize) + (z * resolution) + x) * 2;
+						bytes[offset] = (byte)(value & 0xff);
+						bytes[offset + 1] = (byte)(value >> 8);
+					}
+				}
+			}
+
+			File.WriteAllBytes(path, bytes);
 		}
 
 		private static void WriteHeights(TerrainData data, string path)

@@ -50,8 +50,9 @@ Beside it, per terrain:
 
 - `terrain_N_heights.r16`: 16-bit heights, row-major, rows along +Z.
 - `terrain_N_alphamaps.u8`: one byte plane per layer, in the same row order.
+- `terrain_N_details.u16`: one 16-bit plane per detail prototype at the detail resolution, in the same row order, as `GetDetailLayer` returns it.
 
-Detail prototypes are not exported. WolfEngine generates detail from terrain layers (see `foliage.md`).
+`scene.json` also records the detail prototypes (prefab or texture, width and height ranges, align to ground, density), the detail scatter mode and resolution, and the terrain's detail distance and density.
 
 ## Conversion
 
@@ -79,6 +80,13 @@ Detail prototypes are not exported. WolfEngine generates detail from terrain lay
   - The HDRP mask map (metallic, occlusion, detail mask, smoothness) is remapped and repacked as ORM.
   - The alpha-test and double-sided keywords carry over.
   - **Reported approximations:** other layers (bark, top cover, layered-lit layers), the per-instance dry colour, and texture tiling, which WolfEngine materials do not have.
+- **Detail** (`UnityDetailConversion`): WolfEngine grows detail from layers rather than storing a map per plant type (see `foliage.md`), so the detail maps are fitted to the layers.
+  - Each mesh detail prototype becomes a foliage type named `<prefab> Detail`: drawn out to Unity's detail distance, shadowed to 25 m, never ray traced, fading over the last quarter of its distance.
+  - Its painted density is fitted as a weighted sum of the layer weights, by non-negative least squares over 2 m blocks. Each layer that grows anything gets a biome, `<terrain> <layer>`, with one entry per prototype it grows.
+  - The height range carries over, the width as a ratio of the height, and align to ground as normal alignment.
+  - In instance count mode a map value is plants per cell. Coverage mode is approximated as the prototype's density in plants per square metre at full coverage; the Forest demo uses instance count mode.
+  - Grass billboard prototypes (textures, not meshes) are skipped and listed.
+  - The report gives each prototype's fitted density per layer, the plants painted and fitted, and the relative error per block. On the Forest demo the totals match within a few percent, but the error is 0.8 to 1.0: the demo's detail was painted independently of its layers, so the import keeps how much of each plant grows on each layer, not where Unity put it.
 - **Trees:** each prototype uses its converted prefab, through the project foliage type that already draws it or a new one with default distances. Width and height scale carry over separately.
 - **Prefab instances:**
   - Each one is placed as a linked prefab instance with its world transform, under a `Props` entity.
@@ -97,5 +105,7 @@ Detail prototypes are not exported. WolfEngine generates detail from terrain lay
 - Instance overrides other than transforms.
 - Re-importing into an existing scene. Each import writes a new scene and new assets.
 - Terrain holes.
+- Detail placement that does not follow the layers. That needs override paint (see `foliage.md`), which has no importer yet.
+- Grass billboard detail prototypes.
 - Non-directional lights.
 - More than one terrain is imported, but its tiles are not joined.

@@ -19,6 +19,7 @@ public sealed class GpuDrawDatabase
 	private readonly Dictionary<Material, ResourceId> _materialHandles = new(new ReferenceComparer<Material>());
 	private readonly List<GpuDrawUpdate> _updates = new();
 	private readonly List<GpuFoliageSet> _foliageSets = new();
+	private readonly List<GpuDetailFoliageSet> _detailFoliageSets = new();
 	private readonly HashSet<DrawRecordKey> _persistentMeshKeys = new();
 	private readonly HashSet<DrawRecordKey> _transientKeys = new();
 	private readonly List<DrawRecordKey> _removeScratch = new();
@@ -50,6 +51,7 @@ public sealed class GpuDrawDatabase
 	public void BeginSync(bool reconcilePersistentMeshes = false)
 	{
 		_foliageSets.Clear();
+		_detailFoliageSets.Clear();
 		_syncStamp++;
 		_currentWorldId = 0;
 		_reconcilePersistentMeshes = reconcilePersistentMeshes;
@@ -169,6 +171,35 @@ public sealed class GpuDrawDatabase
 
 	/// <summary>The placed foliage touched in the last sync.</summary>
 	internal IReadOnlyList<GpuFoliageSet> FoliageSets => _foliageSets;
+
+	/// <summary>
+	/// Adds a terrain's detail foliage to this sync. The GPU generates and culls its plants; nothing is recorded per plant.
+	/// </summary>
+	internal void TouchDetailFoliage(
+		Entity entity,
+		TerrainDetailRuntime detail,
+		in Matrix4x4 localToWorld,
+		Material terrainMaterial,
+		Vector2 terrainSize,
+		float heightScale,
+		Vector3 localCamera)
+	{
+		ArgumentNullException.ThrowIfNull(detail);
+		ArgumentNullException.ThrowIfNull(terrainMaterial);
+
+		_detailFoliageSets.Add(new GpuDetailFoliageSet(
+			_currentWorldId,
+			entity,
+			detail,
+			localToWorld,
+			terrainMaterial,
+			terrainSize,
+			heightScale,
+			localCamera));
+	}
+
+	/// <summary>The detail foliage touched in the last sync.</summary>
+	internal IReadOnlyList<GpuDetailFoliageSet> DetailFoliageSets => _detailFoliageSets;
 
 	public void RemovePersistentMesh(Entity entity)
 	{

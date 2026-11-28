@@ -27,6 +27,7 @@ public sealed partial class GpuDrawPass
 	private readonly ComputeKernel _prepareBatchArgs;
 	private readonly ComputeKernel _compact;
 	private readonly ComputeKernel _foliageCull;
+	private readonly ComputeKernel _detailGenerate;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
@@ -115,6 +116,7 @@ public sealed partial class GpuDrawPass
 		_prepareBatchArgs = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawCull, "CSPrepareBatchArgs", diagnosticsDefine);
 		_compact = new ComputeKernel(shaderSource, EngineShaderPrograms.GpuDrawCompact, "CSCompact");
 		_foliageCull = new ComputeKernel(shaderSource, EngineShaderPrograms.FoliageCull, "CSCullFoliage");
+		_detailGenerate = new ComputeKernel(shaderSource, EngineShaderPrograms.FoliageDetailGenerate, "CSGenerateDetail");
 		_gbufferLanes = new ShaderVariantSet<GpuDrawExecutionKey, GBufferLane>(shaderSource, BuildGBufferLane);
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
@@ -633,30 +635,32 @@ public sealed partial class GpuDrawPass
 		UploadBatchTable(activeSlot);
 		UploadLodThresholdSets(activeSlot);
 
-		if (_instanceUpdateData.Count == 0 &&
-		    _meshUpdateData.Count == 0 &&
-		    _materialUpdateData.Count == 0 &&
-		    _terrainMaterialUpdateData.Count == 0 &&
-		    _terrainLayerUpdateData.Count == 0)
+		var hasUpdates = _instanceUpdateData.Count > 0 ||
+		                 _meshUpdateData.Count > 0 ||
+		                 _materialUpdateData.Count > 0 ||
+		                 _terrainMaterialUpdateData.Count > 0 ||
+		                 _terrainLayerUpdateData.Count > 0;
+		if (hasUpdates)
 		{
-			return;
+			_gpuDrawResources.EnsureUpdateBufferCapacity(
+				device,
+				_instanceUpdateData.Count,
+				_meshUpdateData.Count,
+				_materialUpdateData.Count,
+				_terrainMaterialUpdateData.Count,
+				_terrainLayerUpdateData.Count);
+
+			DispatchInstanceUpdates(context, device);
+			DispatchMeshUpdates(context, device);
+			DispatchMaterialUpdates(context, device);
+			DispatchTerrainMaterialUpdates(context, device);
+			DispatchTerrainLayerUpdates(context, device);
 		}
 
-		_gpuDrawResources.EnsureUpdateBufferCapacity(
-			device,
-			_instanceUpdateData.Count,
-			_meshUpdateData.Count,
-			_materialUpdateData.Count,
-			_terrainMaterialUpdateData.Count,
-			_terrainLayerUpdateData.Count);
+		// Detail is generated every frame, whether or not the tables changed, since it follows the camera.
+		RecordDetailGeneration(context, device);
 
-		DispatchInstanceUpdates(context, device);
-		DispatchMeshUpdates(context, device);
-		DispatchMaterialUpdates(context, device);
-		DispatchTerrainMaterialUpdates(context, device);
-		DispatchTerrainLayerUpdates(context, device);
-
-		if (GpuDrawDiagnosticsEnabled)
+		if (hasUpdates && GpuDrawDiagnosticsEnabled)
 		{
 			PublishSubmittedBucketDiagnostics(drawDatabase);
 		}

@@ -49,7 +49,7 @@ internal readonly struct GpuFoliageChunk
 /// are chunked, so each chunk covers a small area and culls tightly. Immutable once built; <see cref="FoliageRuntimeCache"/>
 /// builds a new one when the asset or any of its types changes. See docs/foliage.md.
 /// </summary>
-internal sealed class TerrainFoliageRuntime
+internal sealed class TerrainFoliageRuntime : IFoliageCullSource
 {
 	/// <summary>Instances per chunk: one per thread of a cull thread group.</summary>
 	public const int ChunkSize = 64;
@@ -227,6 +227,14 @@ internal sealed class TerrainFoliageRuntime
 	public int RendererInstanceCount { get; }
 
 	public float MaxRayTracingDistance { get; }
+
+	IReadOnlyList<FoliageTypeRuntime?> IFoliageCullSource.Types => Types;
+
+	int IFoliageCullSource.SlotCount => InstanceCount;
+
+	int IFoliageCullSource.ChunkCount => Chunks.Length;
+
+	int IFoliageCullSource.GetTypeSlotCount(int typeIndex) => TypeInstanceCounts[typeIndex];
 
 	/// <summary>The instance's transform in the terrain's local space.</summary>
 	public static Matrix4x4 GetInstanceTransform(in FoliageInstance instance)
